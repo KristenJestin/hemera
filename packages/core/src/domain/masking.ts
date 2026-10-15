@@ -1434,14 +1434,10 @@ const openLevel = (
 const closedLevel = (level: Level): Schema.Json =>
   level.names === null ? level.masked.map(([, item]) => item) : Object.fromEntries(level.masked)
 
-/**
- * A value masked; whether any of it lay beyond `NESTING_LIMIT` and was masked whole; and whether
- * masking changed the name of any field.
- */
+/** A value masked, and whether any of it lay beyond `NESTING_LIMIT` and was masked whole. */
 interface Walked {
   readonly masked: Schema.JsonObject
   readonly cut: boolean
-  readonly renamed: boolean
 }
 
 /** The tag of a value the engine builds names its shape, never a secret: it is kept as it is. */
@@ -1459,23 +1455,20 @@ type NamedBy = 'agent' | 'engine'
  */
 const walk = (record: Schema.JsonObject, string: MaskString, namedBy: NamedBy): Walked => {
   let cut = false
-  let renamed = false
   const open: Level[] = []
   const rename = (name: string) => (namedBy === 'agent' ? string(name, '') : name)
   const enter = (container: Schema.JsonObject | Schema.JsonArray, into: string, kept: string) => {
-    const level = openLevel(container, into, kept, rename)
-    renamed ||= level.keptNames?.some((one, at) => one !== level.names?.[at]) ?? false
-    open.push(level)
+    open.push(openLevel(container, into, kept, rename))
   }
   enter(record, '', '')
   for (;;) {
     const level = open.at(-1)
-    if (level === undefined) return { masked: {}, cut: true, renamed }
+    if (level === undefined) return { masked: {}, cut: true }
     const at = level.masked.length
     if (at === level.items.length) {
       open.pop()
       const parent = open.at(-1)
-      if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut, renamed }
+      if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut }
       parent.masked.push([level.kept, closedLevel(level)])
       continue
     }
@@ -1556,11 +1549,13 @@ export function maskArguments(
 }
 
 /**
- * What is sent to Jev: as `maskArguments`, but nothing at all when masking took a known value out of
+ * What is sent to Jev: as `maskRecord`, but nothing at all when masking took a known value out of
  * a field that says where the action goes (`path`, `target`, `cwd`, `command`, `program`, `line`,
  * `url`, `host`). A credential recognised by its shape leaves a destination readable (the URL of
  * a `curl` stays), so it does not stop the action; a known value inside a destination may be the
- * destination itself, and a partial action is never sent.
+ * destination itself, and a partial action is never sent. The engine builds the action and fixes
+ * every name in it (`jevAction`): its names and its tags are kept, so a variable that holds
+ * `platform` does not change what the action says (#404).
  */
 export function maskAction(
   action: Schema.JsonObject,
@@ -1569,7 +1564,7 @@ export function maskAction(
   try {
     const known = longestFirst(values)
     let lostDestination = false
-    const { masked, cut, renamed } = walk(
+    const { masked, cut } = walk(
       action,
       (text, field) => {
         const destination = DESTINATION_FIELD.test(field)
@@ -1582,11 +1577,10 @@ export function maskAction(
           return MASK
         }
       },
-      'agent',
+      'engine',
     )
-    // An action cut where it nests too deep, whose names changed, or that could not be read, is
-    // not sent: what it means is no longer what it says.
-    return lostDestination || cut || renamed ? null : maskedRecord(masked)
+    // An action cut where it nests too deep, or that could not be read, is not sent in part.
+    return lostDestination || cut ? null : maskedRecord(masked)
   } catch {
     return null
   }

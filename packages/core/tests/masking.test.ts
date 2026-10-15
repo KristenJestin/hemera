@@ -2162,7 +2162,6 @@ describe("The record of an agent's arguments masks their tag and field names as 
     // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- as above
     const expected = { _tag: said, nested: { list: [{ _tag: said }] } }
     expect(maskArguments(tagged, known)).toEqual(expected)
-    expect(maskAction(tagged, known)).toEqual(expected)
     keepsNothing(maskArguments(tagged, known))
   })
 
@@ -2239,7 +2238,6 @@ describe("The record of an agent's arguments masks their tag and field names as 
     expect(JSON.stringify(masked)).toBe(
       `${`{"${MASK}":`.repeat(NESTING_LIMIT)}"bottom"${'}'.repeat(NESTING_LIMIT)}`,
     )
-    expect(maskAction({ 'sesame-4417': value }, known)).toBeNull()
   })
 
   test('a record that cannot be read keeps none of its names in clear', () => {
@@ -2254,36 +2252,39 @@ describe("The record of an agent's arguments masks their tag and field names as 
   })
 })
 
-describe('An action whose field name had to be masked is refused (#404)', () => {
-  const known = ['sesame-4417']
-  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+describe('An action keeps the names the engine fixed, whatever value is known (#404)', () => {
+  // The shapes of what is sent to Jev and to the judge (`jevAction`): every name fixed by the engine.
+  const write = { tool: 'fs_write', path: '/work/notes.md', platform: 'linux', inside: true }
+  const run = {
+    tool: 'commands_run',
+    line: 'make test',
+    program: '/usr/bin/make',
+    args: ['test'],
+    shell: false,
+    platform: 'linux',
+    cwd: '/work',
+    inside: true,
+  }
 
-  test('a name holding a known value, a token or a password, at the top level, is refused', () => {
-    for (const name of ['sesame-4417', token, 'password=hunter2']) {
-      expect(
-        maskAction({ tool: 'fs_write', path: '/work/notes.md', [name]: 'x' }, known),
-      ).toBeNull()
-    }
+  test('a variable holding a name of the action, or a part of one, leaves the action as it is', () => {
+    const known = ['platform', 'inside', 'tool', 'program', 'shell']
+    expect(maskAction(write, known)).toEqual(write)
+    expect(Object.keys(maskAction(run, known) ?? {})).toEqual(Object.keys(run))
+    expect(maskAction(run, known)).toEqual(run)
   })
 
-  test('the same name nested in the arguments is refused too', () => {
-    for (const name of ['sesame-4417', token, 'password=hunter2']) {
-      expect(
-        maskAction({ tool: 'fs_write', arguments: { list: [{ [name]: 'x' }] } }, known),
-      ).toBeNull()
-    }
+  test('a string tag is kept as it is too', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { ...write, detail: { _tag: 'Write' } }
+    expect(maskAction(tagged, ['Write'])).toEqual(tagged)
   })
 
-  test('a name a judge reads, holding a known value, is refused', () => {
-    expect(
-      maskAction({ tool: 'fs_write', path: '/work/notes.md', platform: 'linux' }, ['platform']),
-    ).toBeNull()
-  })
-
-  test('names left as they were let the action go, its values masked', () => {
-    expect(
-      maskAction({ tool: 'fs_write', path: '/work/notes.md', note: 'a sesame-4417' }, known),
-    ).toEqual({ tool: 'fs_write', path: '/work/notes.md', note: `a ${MASK}` })
+  test('its values are masked as ever, and one in a destination still refuses it', () => {
+    expect(maskAction({ ...write, note: 'a sesame-4417' }, ['sesame-4417'])).toEqual({
+      ...write,
+      note: `a ${MASK}`,
+    })
+    expect(maskAction({ ...write, path: '/work/sesame-4417/notes.md' }, ['sesame-4417'])).toBeNull()
   })
 })
 

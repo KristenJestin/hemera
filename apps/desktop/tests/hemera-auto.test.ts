@@ -341,18 +341,26 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     ])
   })
 
-  test('an action whose field name Jev reads is a registered secret is not sent, and asks (#404)', async () => {
-    const { questions } = await withJev(({ builder }) =>
+  test('an action whose field names a variable holds is sent to Jev with its names unchanged, and does not ask (#404)', async () => {
+    jev.answer = () => scored(0.4, 0.1, 0)
+    const { answer, questions } = await withJev(({ builder }) =>
       Effect.gen(function* () {
-        // `platform` is a name of every action Jev is sent: masked, the action means something else.
-        yield* Secrets.useSync((secrets) => secrets.register('suite', ['platform']))
+        // The engine fixed every name of the action Jev is sent: none is a secret.
+        yield* Secrets.useSync((secrets) =>
+          secrets.register('suite', ['platform', 'inside', 'tool']),
+        )
         return yield* write(builder)
       }),
     )
-    expect(jev.received).toHaveLength(0)
-    expect(questions).toEqual([
-      'No rule of this Project allows this write for the Builder, and the call could not be sent to Jev whole.',
-    ])
+    expect(answer.ok).toBe(true)
+    expect(questions).toEqual([])
+    expect(jev.received).toHaveLength(1)
+    expect(Object.keys(sent().state.action)).toEqual(['tool', 'path', 'platform', 'inside'])
+    expect(sent().state.action).toMatchObject({
+      tool: 'fs_write',
+      path: '~/acme/notes.md',
+      inside: true,
+    })
   })
 })
 

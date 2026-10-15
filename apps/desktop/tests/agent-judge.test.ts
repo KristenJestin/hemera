@@ -512,18 +512,27 @@ describe('A judge that can do nothing, told nothing secret', () => {
     ])
   })
 
-  test('an action whose field name the judge reads is a registered secret is not sent, and asks (#404)', async () => {
-    const { judges, questions } = await withJudge(({ builder }) =>
+  test('an action whose field names a variable holds is sent to the judge with its names unchanged, and does not ask (#404)', async () => {
+    const { judges, questions } = await withJudge(({ missionId }) =>
       Effect.gen(function* () {
-        // `platform` is a name of every action the judge is sent.
-        yield* Secrets.useSync((secrets) => secrets.register('suite', ['platform']))
-        yield* run(builder, 'echo hello')
+        // The engine fixed every name of the action the judge is sent: none is a secret.
+        yield* Secrets.useSync((secrets) =>
+          secrets.register('suite', ['platform', 'inside', 'tool']),
+        )
+        const folder = join(work, 'probe-1')
+        mkdirSync(folder, { recursive: true })
+        const probe = yield* sessionOf('probe', folder, { kind: 'mission', id: missionId })
+        yield* run(probe.grantId, 'which claude opencode codex')
       }),
     )
-    expect(judges.started.flatMap((judge) => judge.answers.prompts)).toHaveLength(0)
-    expect(questions).toEqual([
-      'No rule of this Project allows this command for the Builder, and the call could not be sent to Claude Code’s judge whole.',
-    ])
+    expect(questions).toEqual([])
+    const prompts = judges.started.flatMap((judge) => judge.answers.prompts).map(textOf)
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain(
+      '{"action":{"tool":"commands_run","line":"which claude opencode codex"',
+    )
+    expect(prompts[0]).toContain('"platform":')
+    expect(prompts[0]).toContain('"inside":true')
   })
 
   test('a JSON line the user wrote, holding a quoted credential and a known value, reaches the judge with nothing of either, and still JSON (#397)', async () => {
