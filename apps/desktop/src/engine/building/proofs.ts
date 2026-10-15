@@ -480,7 +480,7 @@ export const buildingProofs = (parts: ProofParts) => {
   const runOf = (building: BuildingRow, scenario: string, phase: ProofPhase, proof: Proof) =>
     Effect.gen(function* () {
       const repositories = yield* repositoriesOf(building, scenario, proof)
-      return yield* ProofRunner.use((runner) =>
+      const run = yield* ProofRunner.use((runner) =>
         runner.run({
           missionId: building.missionId,
           buildingId: building.id,
@@ -490,6 +490,46 @@ export const buildingProofs = (parts: ProofParts) => {
           repositories,
         }),
       )
+      return Object.assign({}, run, { landed: yield* landedDuring(building, run) })
+    })
+
+  /**
+   * Per Building, the files that changed while one of its proofs ran: a run's own, such as coverage
+   * or a cache, which every later run writes again (#415).
+   */
+  const ranWrote = new Map<string, Set<string>>()
+
+  /**
+   * The trees a run ran on, of each repository where a file changed while it ran that no proof
+   * run of the Building changed before: a change that landed during the run, such as the user's
+   * fix saved in their editor, never what the run writes itself. Its write locks keep every task's
+   * writes out meanwhile. What changed is a run's own from then on.
+   */
+  const landedDuring = (building: BuildingRow, run: ProofRun) =>
+    Effect.gen(function* () {
+      const current = yield* currentTreesIn(yield* Database, building.missionId)
+      const known = ranWrote.get(building.id) ?? new Set<string>()
+      ranWrote.set(building.id, known)
+      const landed: Array<{ readonly repository: string; readonly tree: string }> = []
+      for (const ran of run.trees) {
+        const base = basesOf(building).find((one) => one.repository === ran.repository)
+        const after = current.get(ran.repository)
+        if (base === undefined || after === undefined || after === ran.tree) continue
+        const files = yield* Snapshots.use((snapshots) =>
+          snapshots.changed(
+            building.missionId,
+            { name: base.repository, folder: base.folder },
+            ran.tree,
+            after,
+          ),
+        ).pipe(Effect.orElseSucceed(() => []))
+        const paths = files
+          .flatMap((file) => (file.oldPath === null ? [file.path] : [file.path, file.oldPath]))
+          .map((path) => `${ran.repository}/${path}`)
+        if (paths.some((path) => !known.has(path))) landed.push(ran)
+        for (const path of paths) known.add(path)
+      }
+      return landed
     })
 
   // ---- The start.
@@ -1182,7 +1222,8 @@ export const buildingProofs = (parts: ProofParts) => {
 
   /**
    * A green that failed: an attempt on its proof, open until it is green, on the trees of every
-   * repository now, so that a fix anywhere runs it again.
+   * repository now, so that a fix anywhere runs it again. In a repository where a change landed
+   * during the run, on the tree the run ran on: that change is not judged yet (#415).
    */
   const failedGreen = (
     building: BuildingRow,
@@ -1191,10 +1232,14 @@ export const buildingProofs = (parts: ProofParts) => {
       readonly classification: ProofClass
       readonly outputTail: string
       readonly runId: string | null
+      readonly landed: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
     },
   ) =>
     Effect.gen(function* () {
-      const current = yield* currentTreesIn(yield* Database, building.missionId)
+      const current = new Map([
+        ...(yield* currentTreesIn(yield* Database, building.missionId)),
+        ...run.landed.map((one) => [one.repository, one.tree] as const),
+      ])
       yield* loop.proofRed(
         building,
         scenario,
@@ -1323,6 +1368,7 @@ export const buildingProofs = (parts: ProofParts) => {
                 classification,
                 outputTail: last.outputTail,
                 runId: last.runId,
+                landed: [],
               })
             }
             continue
