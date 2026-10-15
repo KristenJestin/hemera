@@ -1679,6 +1679,12 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
       4_000,
     ],
     [
+      'string lines with no escape after a sentence (#401)',
+      (size) => `Said:\n${'"ab"\n'.repeat(size / 5)}`,
+      printed,
+      16_000,
+    ],
+    [
       'pretty JSON in prose, a quoted label in each string (#401)',
       (size) =>
         `Said: ${JSON.stringify(
