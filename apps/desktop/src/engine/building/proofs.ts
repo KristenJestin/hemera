@@ -92,6 +92,7 @@ import { mutate } from '../transaction.ts'
 import { attributedIn } from './attempts.ts'
 import { type Loop, lineageIn, runningOf, taskOfFile } from './loop.ts'
 import { fileOf } from './place.ts'
+import { OutsideChanges } from './outside.ts'
 import { type ProofRun, ProofRunner } from './proof-runner.ts'
 import {
   type ScenarioProofRow,
@@ -180,6 +181,7 @@ export type ProofNeeds =
   | DomainEvents
   | Secrets
   | Snapshots
+  | OutsideChanges
   | Git
   | ProofRunner
   | ProfileHome
@@ -1919,6 +1921,11 @@ export const buildingProofs = (parts: ProofParts) => {
         sentBackLeft(building).pipe(
           Effect.andThen(redPhase(building)),
           Effect.andThen(parts.hold('greens-due')),
+          // What changed during the stop is seen now, not at the detector's next timer: the
+          // greens run on it at once (#310).
+          Effect.andThen(
+            OutsideChanges.use((outside) => outside.compare(building.missionId, null)),
+          ),
           Effect.andThen(greensDue(building)),
           Effect.catchCause((cause) => said(`the proofs did not resume: ${String(cause)}`)),
           Effect.ensuring(done(building.missionId)),
