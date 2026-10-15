@@ -2915,6 +2915,307 @@ describe('A restart while a proof waits on its fix', () => {
   })
 })
 
+describe('A failed green and a change made outside Hemera', () => {
+  /** The decisions Hemera asked about the scenarios the end waits on. */
+  const unprovenAsked = Effect.gen(function* () {
+    const database = yield* Database
+    return yield* database
+      .select()
+      .from(buildingDecisions)
+      .where(eq(buildingDecisions.kind, 'proofs_unproven'))
+  })
+
+  /** The detector's timer never comes during a test: only the compares a test makes run. */
+  const NO_TIMER = { outside: { compareEveryMillis: 3_600_000 } }
+
+  /**
+   * The points the Builder reached, in order; `more` may hold one. `taken(from)` waits until a
+   * change outside Hemera was taken in after `from`, a settle of the writes began after it, and
+   * every settle begun is done.
+   */
+  const reaching = (more: BuilderHold = () => Effect.void) => {
+    const reached: string[] = []
+    const count = (at: string, from = 0) => reached.slice(from).filter((one) => one === at).length
+    const hold: BuilderHold = (at) =>
+      Effect.andThen(
+        Effect.sync(() => {
+          reached.push(at)
+        }),
+        more(at),
+      )
+    return {
+      hold,
+      mark: Effect.sync(() => reached.length),
+      count: (at: string, from = 0) => Effect.sync(() => count(at, from)),
+      taken: (from: number) =>
+        until(
+          Effect.sync(() => {
+            const outside = reached.indexOf('outside', from)
+            return (
+              outside >= 0 &&
+              reached.indexOf('settling', outside) >= 0 &&
+              count('settling') === count('settled')
+            )
+          }),
+          20_000,
+        ),
+      /** Every change the mission's detector recorded was taken in, and its settle is done. */
+      takenAll: (missionId: string) =>
+        until(
+          Effect.map(eventsOf(missionId, 'mission.changed_outside'), (said) => {
+            const outside = reached.lastIndexOf('outside')
+            return (
+              said.length === count('outside') &&
+              outside >= 0 &&
+              reached.indexOf('settling', outside) >= 0 &&
+              count('settling') === count('settled')
+            )
+          }),
+          20_000,
+        ),
+    }
+  }
+
+  /** A Builder whose turns stay open from `hold` until `release`, so it is never judged quiet. */
+  const heldBuilder = () => {
+    let held = false
+    const { promise: released, resolve: release } = Promise.withResolvers<void>()
+    return {
+      agents: (index: number): FakeScript =>
+        index === 0 ? READING : { ...QUIET, between: () => (held ? released : Promise.resolve()) },
+      hold: Effect.sync(() => {
+        held = true
+      }),
+      release: Effect.sync(() => {
+        held = false
+        release()
+      }),
+    }
+  }
+
+  /** The detector's compare of the mission's Workspace, as its timer makes it. */
+  const compared = (missionId: string) =>
+    OutsideChanges.use((outside) => outside.compare(missionId, null))
+
+  /** The proof's runs, by phase and class. */
+  const runsOf = (missionId: string) =>
+    Effect.map(proofOf(missionId, 'R1.S2'), (proof) =>
+      proof.runs.map((one) => [one.phase, one.classification]),
+    )
+
+  test('a fix written to disk outside Hemera while the Builder is quiet: the detector’s compare runs the failed green again once, and the “not proven” question does not come', async () => {
+    const builder = heldBuilder()
+    const seen = await proofsEngine(data, undefined, undefined, builder.agents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builder.hold
+            yield* builds(grantId, 'T1')
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* builds(grantId, 'T4')
+            yield* builds(grantId, 'T3')
+            yield* deliveredTo(mission.id, 'The end waits')
+            // The user fixes the file in their editor; the Builder writes nothing.
+            writeFileSync(join(yield* apiOf(mission.id), 'export.ts'), RIGHT_EXPORT)
+            yield* compared(mission.id)
+            yield* proofIn(mission.id, 'R1.S2', 'green')
+            // The Builder's turn ends without a write: the end goes on, nobody is asked.
+            yield* builder.release
+            yield* until(
+              Effect.zipWith(
+                endCalled(mission.id),
+                unprovenAsked,
+                (called, asked) => called || asked.length > 0,
+              ),
+              20_000,
+            )
+            return { asked: yield* unprovenAsked, runs: yield* runsOf(mission.id) }
+          }),
+        ),
+    )
+    expect(seen.asked).toEqual([])
+    expect(seen.runs).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  test('a compare that finds nothing changed runs no green and is not taken in as a write', async () => {
+    const points = reaching()
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+            const from = yield* points.mark
+            // The first compare takes in the Builder's own writes; the second finds the same tree.
+            yield* compared(mission.id)
+            yield* compared(mission.id)
+            const quiet = yield* runsOf(mission.id)
+            // Then a real change, compared: the only one taken in. The events are followed in
+            // order, so a change taken in for the compares before would be counted first.
+            writeFileSync(join(yield* apiOf(mission.id), 'export.ts'), RIGHT_EXPORT)
+            yield* compared(mission.id)
+            yield* points.taken(from)
+            return {
+              quiet,
+              outside: yield* points.count('outside', from),
+              runs: yield* runsOf(mission.id),
+            }
+          }),
+        ),
+    )
+    expect(seen.quiet).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+    ])
+    expect(seen.outside).toBe(1)
+    expect(seen.runs).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  test('a change outside Hemera and a Builder write settling at the same moment: the failed green runs again once', async () => {
+    const go = Deferred.makeUnsafe<void>()
+    const points = reaching((at) => (at === 'settling' ? Deferred.await(go) : Effect.void))
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+            const from = yield* points.mark
+            // The Builder's fix: its settle begins, and is held there.
+            yield* writes(grantId, 'export.ts', RIGHT_EXPORT)
+            yield* until(Effect.map(points.count('settling', from), (count) => count === 1))
+            // The user's change, compared while it is held: a second settle begins beside it.
+            writeFileSync(join(yield* apiOf(mission.id), 'notes.md'), 'Checked by hand.\n')
+            yield* compared(mission.id)
+            yield* until(Effect.map(points.count('settling', from), (count) => count === 2))
+            // Both read the trees and look for the greens due at once.
+            yield* Deferred.succeed(go, undefined)
+            yield* points.taken(from)
+            return yield* runsOf(mission.id)
+          }),
+        ),
+    )
+    expect(seen).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  test('a fix written outside Hemera in two steps, each compared: the green runs again on each, and is green on the last', async () => {
+    const points = reaching()
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(markdownProof)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+            const api = yield* apiOf(mission.id)
+            // Half the fix: the compare sees it, and the green fails on it.
+            const half = yield* points.mark
+            writeFileSync(join(api, 'export.ts'), 'export const toJson = () => ""\n')
+            yield* compared(mission.id)
+            yield* points.taken(half)
+            const first = yield* runsOf(mission.id)
+            // The rest of it: seen in turn, never taken for the tree the last run failed on.
+            const rest = yield* points.mark
+            writeFileSync(join(api, 'export.ts'), RIGHT_EXPORT)
+            yield* compared(mission.id)
+            yield* points.taken(rest)
+            return { first, runs: yield* runsOf(mission.id) }
+          }),
+        ),
+    )
+    expect(seen.first).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+    ])
+    expect(seen.runs).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
+  })
+
+  test('a failed green whose own run writes into the Workspace: the change the detector sees from it does not run it again', async () => {
+    const points = reaching()
+    // R1.S2's test notes each run in `api/ran.log`, a file of the Workspace, and fails.
+    const noting = () => ({
+      'R1.S2': automated(
+        EXPORT_PATH,
+        testFile(
+          [
+            "  appendFileSync(new URL('../ran.log', import.meta.url), `${Date.now()}\\n`)",
+            "  assert.fail('not built yet')",
+          ].join('\n'),
+        ),
+      ),
+    })
+    const seen = await proofsEngine(data, points.hold, undefined, builderAgents, NO_TIMER).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(noting)
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
+            yield* deliveredTo(mission.id, "R1.S2's proof is not green")
+            const from = yield* points.mark
+            // The compare after the failed run finds what it wrote, outside Hemera: taken in.
+            yield* until(
+              Effect.map(
+                OutsideChanges.use((outside) => outside.list(mission.id)),
+                (found) =>
+                  found.some((one) =>
+                    one.changes.some(
+                      (change) => change.path === 'ran.log' && change.status === 'M',
+                    ),
+                  ),
+              ),
+            )
+            yield* points.takenAll(mission.id)
+            return {
+              greening: yield* points.count('greening', from),
+              runs: yield* runsOf(mission.id),
+            }
+          }),
+        ),
+    )
+    expect(seen.greening).toBe(0)
+    expect(seen.runs).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+    ])
+  })
+})
+
 describe('What the reviewers see of the red phase', () => {
   test('the Builder’s writes outside the proof files before a scenario’s red are recorded for the reviewers', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>

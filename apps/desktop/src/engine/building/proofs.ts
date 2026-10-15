@@ -18,11 +18,11 @@
  * - **The green runs.** Once every task covering a scenario is done (with none, every task of its
  *   requirement), its proof runs again: passed, the scenario is green on the trees of every
  *   repository its tasks wrote; anything else opens an attempt on its proof, open until it is
- *   green, and the proof runs again once the Builder's next write settles, at its next task's end,
- *   on `refresh` or `proof_run`. The end of the Building waits while an automated proof is not
- *   green. A requirement is proven once its automated scenarios are all green and up to date. A
- *   test whose sha256 changed between red and green is shown with both versions. A `proof_run`
- *   before the tasks are done is for information, and judges nothing.
+ *   green, and the proof runs again once the Builder's next write or a change found outside Hemera
+ *   settles, at its next task's end, on `refresh` or `proof_run`. The end of the Building waits
+ *   while an automated proof is not green. A requirement is proven once its automated scenarios
+ *   are all green and up to date. A test whose sha256 changed between red and green is shown with
+ *   both versions. A `proof_run` before the tasks are done is for information, and judges nothing.
  * - **Written before the red.** The Builder's writes out of the proofs' files while a scenario
  *   still waits for its red are kept for the reviewers.
  * - **Freshness (CT-38).** A green proof whose repository moved since is `to_rerun`
@@ -197,7 +197,14 @@ export interface ProofParts {
   readonly needs: NeedService
   /** Where a suite holds the proofs (`BuilderHold`). */
   readonly hold: (
-    at: 'greening' | 'handing' | 'greens-due' | 'retrying' | 'proof-called',
+    at:
+      | 'greening'
+      | 'handing'
+      | 'greens-due'
+      | 'retrying'
+      | 'proof-called'
+      | 'settling'
+      | 'settled',
   ) => Effect.Effect<void>
   /** After a scenario's proof moved: the end judged again, which may wait on it. */
   readonly moved: (building: BuildingRow) => Effect.Effect<void>
@@ -1445,8 +1452,8 @@ export const buildingProofs = (parts: ProofParts) => {
   const settling = new Set<string>()
 
   /**
-   * A file tool write of the Builder settled: a failed green runs again on the trees it left. The
-   * writes of a moment are taken together, and nothing waits for it.
+   * A write of the Builder, or a change found outside Hemera, settled: a failed green runs again on
+   * the trees it left. The writes of a moment are taken together, and nothing waits for it.
    */
   const afterWrite = (missionId: string) =>
     Effect.suspend(() => {
@@ -1456,6 +1463,7 @@ export const buildingProofs = (parts: ProofParts) => {
         Effect.gen(function* () {
           yield* Effect.sleep('300 millis')
           settling.delete(missionId)
+          yield* parts.hold('settling')
           const database = yield* Database
           const building = yield* activeBuildingIn(database, missionId)
           if (building === null || (yield* failedGreens(building)).length === 0) return
@@ -1467,6 +1475,7 @@ export const buildingProofs = (parts: ProofParts) => {
         }).pipe(
           Effect.ensuring(Effect.sync(() => settling.delete(missionId))),
           Effect.catchCause((cause) => said(`a failed green did not run again: ${String(cause)}`)),
+          Effect.ensuring(parts.hold('settled')),
         ),
       )
     })
