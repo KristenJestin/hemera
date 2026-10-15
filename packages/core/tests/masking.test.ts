@@ -905,6 +905,97 @@ const hidesAtLeastTheOracle = async (text: string, known: ReadonlyArray<string>)
   }
 }
 
+/** The known values of the outputs built from fragments: plain, with a quote, a backslash, digits, a letter beyond ASCII. */
+const FRAGMENT_KNOWN = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD']
+/** A piece of an output: a name, a separator, a shape's start, a marker, a known value. */
+const fragment = fc.oneof(
+  {
+    weight: 8,
+    arbitrary: fc.constantFrom(
+      'password',
+      'token',
+      'api_key',
+      'secret',
+      '=',
+      ': ',
+      ':',
+      '"',
+      "'",
+      ' ',
+      '\n',
+      ',',
+      '-',
+      '_',
+      '.',
+      '/',
+      '@',
+      '\\',
+      'Bearer ',
+      'Authorization: ',
+      'Cookie: ',
+      'set-cookie=',
+      'Basic ',
+      '://',
+      'https://u:',
+      '@h.test',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      '-----END RSA PRIVATE KEY-----',
+      'ghp_',
+      'ghp_ABCDEFGHIJKLMNOPQR',
+      'sk-abcdefgh',
+      'AKIAABCDEFGHIJKLMNOP',
+      'eyJ',
+      '.eyJ',
+      '-eyJ',
+      '123',
+      '{',
+      '}',
+      '[',
+      ']',
+      'x',
+    ),
+  },
+  { weight: 3, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
+  { weight: 1, arbitrary: fc.constantFrom(...FRAGMENT_KNOWN) },
+)
+/** Prose made of pieces. */
+const fragmentText = fc
+  .array(fragment, { minLength: 1, maxLength: 14 })
+  .map((parts) => parts.join(''))
+/** JSON whose strings and keys are made of pieces. */
+const fragmentJson = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
+  value: fc.oneof(
+    { depthSize: 'small', withCrossShrink: true },
+    fragmentText,
+    fc.constantFrom(123, 9876543, true, null),
+    fc.array(tie('value'), { minLength: 1, maxLength: 3 }),
+    fc.dictionary(fc.oneof(fragmentText, fc.constantFrom('a', 'token', 'cookie')), tie('value'), {
+      minKeys: 1,
+      maxKeys: 3,
+    }),
+  ),
+})).value
+/** What a CLI may print: prose, JSON, or lines of either. */
+const fragmentOutputs = fc.oneof(
+  fragmentText,
+  fragmentJson.map((value) => JSON.stringify(value)),
+  fc
+    .tuple(
+      fc.array(
+        fc.oneof(
+          fragmentText,
+          fragmentJson.map((value) => JSON.stringify(value)),
+        ),
+        {
+          minLength: 1,
+          maxLength: 4,
+        },
+      ),
+      fc.constantFrom('\n', '\r\n'),
+    )
+    .map(([lines, end]) => lines.join(end)),
+)
+
 describe('Masking hides at least all that masking the shapes in turn hid', () => {
   const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
   // A stretch an earlier shape hid holds a space, a quote or a line end; masked first, it let a
@@ -944,91 +1035,8 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
   })
 
   test('outputs built from fragments, 5,000 samples', async () => {
-    const known = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD']
-    const fragment = fc.oneof(
-      {
-        weight: 8,
-        arbitrary: fc.constantFrom(
-          'password',
-          'token',
-          'api_key',
-          'secret',
-          '=',
-          ': ',
-          ':',
-          '"',
-          "'",
-          ' ',
-          '\n',
-          ',',
-          '-',
-          '_',
-          '.',
-          '/',
-          '@',
-          '\\',
-          'Bearer ',
-          'Authorization: ',
-          'Cookie: ',
-          'set-cookie=',
-          'Basic ',
-          '://',
-          'https://u:',
-          '@h.test',
-          '-----BEGIN RSA PRIVATE KEY-----',
-          '-----END RSA PRIVATE KEY-----',
-          'ghp_',
-          'ghp_ABCDEFGHIJKLMNOPQR',
-          'sk-abcdefgh',
-          'AKIAABCDEFGHIJKLMNOP',
-          'eyJ',
-          '.eyJ',
-          '-eyJ',
-          '123',
-          '{',
-          '}',
-          '[',
-          ']',
-          'x',
-        ),
-      },
-      { weight: 3, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
-      { weight: 1, arbitrary: fc.constantFrom(...known) },
-    )
-    const text = fc.array(fragment, { minLength: 1, maxLength: 14 }).map((parts) => parts.join(''))
-    const json = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
-      value: fc.oneof(
-        { depthSize: 'small', withCrossShrink: true },
-        text,
-        fc.constantFrom(123, 9876543, true, null),
-        fc.array(tie('value'), { minLength: 1, maxLength: 3 }),
-        fc.dictionary(fc.oneof(text, fc.constantFrom('a', 'token', 'cookie')), tie('value'), {
-          minKeys: 1,
-          maxKeys: 3,
-        }),
-      ),
-    })).value
-    const printed = fc.oneof(
-      text,
-      json.map((value) => JSON.stringify(value)),
-      fc
-        .tuple(
-          fc.array(
-            fc.oneof(
-              text,
-              json.map((value) => JSON.stringify(value)),
-            ),
-            {
-              minLength: 1,
-              maxLength: 4,
-            },
-          ),
-          fc.constantFrom('\n', '\r\n'),
-        )
-        .map(([lines, end]) => lines.join(end)),
-    )
     await fc.assert(
-      fc.asyncProperty(printed, (output) => hidesAtLeastTheOracle(output, known)),
+      fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
       { numRuns: 5_000 },
     )
   })
