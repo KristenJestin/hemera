@@ -1067,6 +1067,85 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
     })
   }
 
+  test('a Bearer value whose search resumed at its last word takes the name of a URL (#417)', async () => {
+    const text = 'Bearer a.bearer https://u:cookie=/x"Mk1Zq@'
+    expect(inTurn.maskText(text, [])).toBe('Bearer ••• https://u:•••@')
+    await hidesAtLeastTheOracle(text, [])
+    await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+  })
+
+  // A search that resumes at the last word of its match (`Bearer a.bearer …`) finds a match the
+  // oracle never found, which takes the name of a URL written after it; read in turn, the URL's
+  // password ran on through what an earlier shape hid, as the oracle reads it.
+  const resumedPrefixes = ['Bearer a.bearer ', 'Bearer a.Bearer ']
+  const stoppers = ['cookie=/x', 'Cookie:/x', 'set-cookie=/password', 'BBDC-abcdefghijklmnop/q']
+  for (const prefix of resumedPrefixes) {
+    for (const stopper of stoppers) {
+      for (const quote of ['"', "'"]) {
+        test(`a URL after a resumed Bearer value, through ${stopper} and ${quote} (#417): ${prefix}`, async () => {
+          const text = `${prefix}https://u:${stopper}${quote}Sx1Zq@h.test`
+          expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+          await hidesAtLeastTheOracle(text, [])
+          await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+        })
+      }
+    }
+  }
+
+  test('texts of a shape, a later shape, a stretch that stops it, and a marker, 5,000 samples (#417)', async () => {
+    const before = fc.constantFrom(
+      '',
+      'Bearer a.bearer ',
+      'Bearer a.Bearer ',
+      String.raw`Authorization: \"`,
+      String.raw`Cookie: \'`,
+      String.raw`Authorization: \\\"`,
+      'password=a.password=',
+      'token=x.token=',
+      'cookie=a.cookie=',
+      'Basic abcdefgh.Basic ',
+      'sk-abcdefgh.',
+      'x ',
+      'Authorization: x\\',
+      String.raw`Cookie: "`,
+      String.raw`set-cookie=\"`,
+      'api_key=a.token=',
+    )
+    const later = fc.constantFrom(
+      'https://u:',
+      'ftp://v:',
+      'password=',
+      'token: ',
+      'cookie=',
+      'Bearer ',
+      'Authorization: ',
+      'api_key=',
+    )
+    const stretch = fc.constantFrom(
+      'cookie=/x',
+      'Cookie:/x',
+      'set-cookie=/password',
+      'BBDC-abcdefghijklmnop/q',
+      'password=/x',
+      'Bearer x/',
+      'token=/x',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'Authorization:/x',
+      '',
+    )
+    const stop = fc.constantFrom('"', "'", ' ', '', String.raw`\"`, '/', '"a b"')
+    const after = fc.constantFrom('@', '@h.test', '', ' ', '"')
+    await fc.assert(
+      fc.asyncProperty(before, later, stretch, stop, after, async (...parts) => {
+        const [head, name, inValue, stopped, tail] = parts
+        const text = `${head}${name}${inValue}${stopped}Mk1Zq${tail}`
+        await hidesAtLeastTheOracle(text, [])
+        await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+      }),
+      { numRuns: 5_000 },
+    )
+  })
+
   test('every shape nested in another, at every position', async () => {
     const indexes = writings('', '').map((_, index) => index)
     const known = ['kn0wnSx1Zq', 'kn0wnSx2Zqx']
