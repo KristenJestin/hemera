@@ -260,6 +260,11 @@ const JS_ERROR = /^\s*(?:[A-Za-z_$][\w$.]*(?: [A-Z][\w$]*)*(?: \[\w+\])?:\s+\S|t
  */
 const THROWN =
   /^[ \t]*(?:E[ \t]+)?(?:(?:[A-Za-z_]\w*\.)*(?<error>(?:[A-Z]\w*)?(?:Error|Exception))(?: \[\w+\])?:(?= \S|$)|thrown: |panic: )/m
+/**
+ * vitest's line for a thrown value that is no error (a string, a number): another error, whatever
+ * the value reads like (`Unknown Error: AssertionError: …`).
+ */
+const UNKNOWN_ERROR = /^\s*Unknown Error: /
 /** A line of the code frame jest and vitest print under an error (`> 4 |   expect(x)…`). */
 const CODE_FRAME = /^[ \t]*(?:>[ \t]*)?\d+[ \t]*\|.*$/gm
 const CODE_LINE = /^[ \t]*(?:>[ \t]*)?\d+[ \t]*\|/
@@ -309,6 +314,7 @@ const jsVerdict = (below: ReadonlyArray<string>): Verdict => {
   for (const line of below) {
     if (VITEST_RULE.test(line)) return 'silent'
     if (CODE_LINE.test(line)) continue
+    if (UNKNOWN_ERROR.test(line)) return 'error'
     const said = verdictOf(line)
     if (said !== 'silent') return said
     if (JS_ERROR.test(line)) return 'error'

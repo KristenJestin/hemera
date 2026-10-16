@@ -4522,6 +4522,75 @@ const rows = [1, 2)`
   })
 })
 
+describe('What a test threw, as its runner and its report say it (#342, round 10)', () => {
+  /** A file of one test, `saves`, whose body is `body`. */
+  const vitestFile = (body: string) =>
+    `import { test } from 'vite-plus/test'\n\ntest('saves', () => {\n${body}\n})\n`
+
+  test('a vitest test that throws a string reading like an assertion is no red, whatever the key line', () => {
+    const code = vitestFile("  throw 'AssertionError: expected 1 to be 2'")
+    const classified = reported(
+      fixture('vitest-string.txt'),
+      'saves.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-string.json') },
+      code,
+    )
+    expect(validRed(classified, 'saves.test.ts', addedAt(code, 3, 5))).toBe(false)
+    expect(validRed(classified, 'saves.test.ts', addedAt(code, 3, 5), true)).toBe(false)
+  })
+
+  test('an error renamed AssertionError is an assertion, as its name says: the test’s honesty is not the classifier’s to judge', () => {
+    const code = vitestFile(
+      "  const failure = new TypeError('expected 1 to be 2')\n  failure.name = 'AssertionError'\n  throw failure",
+    )
+    const classified = reported(
+      fixture('vitest-renamed.txt'),
+      'saves.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-renamed.json') },
+      code,
+    )
+    expect(validRed(classified, 'saves.test.ts', addedAt(code, 3, 7))).toBe(true)
+  })
+
+  test('a node test that throws a string, or an object named AssertionError, is no red, whatever the key line', () => {
+    for (const [path, code] of [
+      [
+        'tests/string.test.mjs',
+        "import { test } from 'node:test'\n\ntest('saves', () => {\n  throw 'AssertionError [ERR_ASSERTION]: Expected values to be strictly equal'\n})\n",
+      ],
+      [
+        'tests/object.test.mjs',
+        "import { test } from 'node:test'\n\ntest('saves', () => {\n  throw { name: 'AssertionError', message: 'x', toString() { return 'AssertionError: x' } }\n})\n",
+      ],
+    ] as const) {
+      const classified = reported(
+        fixture('node-thrown.txt'),
+        path,
+        NODE_REPORT,
+        { kind: 'read', text: fixture('node-thrown.junit.xml') },
+        code,
+      )
+      expect([path, validRed(classified, path, addedAt(code, 3, 5), true)]).toEqual([path, false])
+    }
+  })
+
+  test('a pytest test that raises a string is no red; an exception class of its own named AssertionError is an assertion', () => {
+    const code =
+      'def test_saves():\n    raise "AssertionError: assert 1 == 2"\n\n\ndef test_keeps():\n    class AssertionError(Exception):\n        pass\n\n    raise AssertionError("assert 1 == 2")\n'
+    const classified = reported(
+      fixture('pytest-raised.txt'),
+      'tests/test_raised.py',
+      PYTEST_REPORT,
+      { kind: 'read', text: fixture('pytest-raised.junit.xml') },
+      code,
+    )
+    expect(validRed(classified, 'tests/test_raised.py', addedAt(code, 1, 2), true)).toBe(false)
+    expect(validRed(classified, 'tests/test_raised.py', addedAt(code, 5, 9))).toBe(true)
+  })
+})
+
 describe('The reporting Hemera adds to a proof’s command (#342, round 9)', () => {
   const PATH = '/tmp/hemera-report/report.json'
   const XML = '/tmp/hemera-report/report.xml'
