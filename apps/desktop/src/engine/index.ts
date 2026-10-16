@@ -28,7 +28,7 @@ import { RpcClient, RpcServer } from 'effect/rpc'
 import { openDiagnosticLog, type Log } from '../main/diagnostic.ts'
 import { agentsLauncher } from './agents.ts'
 import { agentStarterLayer } from './agents/starter.ts'
-import { suiteFor } from './agents/suite-agent.ts'
+import { fakeAgentsFor, suiteFor } from './agents/suite-agent.ts'
 import { portHandovers } from './handovers.ts'
 import { probeHandlers, ProbeRpcs } from './probe.ts'
 import { startProfile } from './profile.ts'
@@ -89,6 +89,9 @@ const engine = (
     // Under the headless suite, every agent is the suite's fake, scripted through the probe: only
     // when main handed over the probe's port, which it never does for an installed Hemera.
     const suite = yield* suiteFor(probePort)
+    // On a fixture's profile (#420), which only a development build opens, every agent is that
+    // same fake: a fixture never starts a real agent.
+    const fakes = suite ?? (yield* fakeAgentsFor(probePort, start))
 
     // The Profile: its database is opened, migrated and reconciled before anything is served.
     const profile = yield* startProfile(
@@ -106,7 +109,7 @@ const engine = (
             ),
         },
         sessions: {
-          ...(suite?.sessions ?? { starter: agentStarterLayer(launch) }),
+          ...(fakes?.sessions ?? { starter: agentStarterLayer(launch) }),
           // A new mission starts its Planner on its own (#85); under the suite (its probe handed
           // over) missions are fixtures of other tickets, and never start an agent.
           plannerStarts: suite === null,
@@ -119,8 +122,8 @@ const engine = (
     )
 
     yield* RpcServer.make(EngineServedRpcs, { disableFatalDefects: true }).pipe(
-      // Under the suite, the window lists the suite's agents, as its sessions find them.
-      Effect.provide(engineHandlers(start, profile, log, suite?.agents)),
+      // Under the suite or on a fixture, the window lists the fake, as its sessions find it.
+      Effect.provide(engineHandlers(start, profile, log, fakes?.agents)),
       Effect.provideServiceEffect(RpcServer.Protocol, serveOn(enginePort)),
       Effect.forkScoped,
     )
