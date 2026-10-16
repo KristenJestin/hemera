@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 
@@ -9,7 +10,6 @@ import { Select } from '../../components/select/select.tsx'
 import { IconBraces, IconPlus, IconSearch, IconWorld, IconX } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
-  ADDABLE,
   type ForgeKind,
   FORGE_WORDS,
   MERGE_WORDS,
@@ -25,6 +25,7 @@ import {
   type WhoCommits,
   writesToNetwork,
 } from './delivery-model.ts'
+import { COMMITS, START_ITEMS, newStep } from './delivery-form-options.ts'
 
 /**
  * The dialogs of the delivery rules: where the push and the pull requests stand, a template, the
@@ -61,11 +62,6 @@ function Labelled<Value extends string>({
     </div>
   )
 }
-
-export const START_ITEMS: { value: StepStart; label: string }[] = [
-  { value: 'auto', label: 'On its own' },
-  { value: 'click', label: 'Waits for your click' },
-]
 
 export interface PushDraft {
   placement: PushPlacement
@@ -270,26 +266,6 @@ const RADIO =
 
 const DOT = 'size-1.5 rounded-full bg-primary'
 
-/** Each value of “who commits”: its words and what it does. */
-export const COMMITS: readonly { value: WhoCommits; label: string; effect: string }[] = [
-  {
-    value: 'task',
-    label: 'Hemera, after each verified task',
-    effect: 'A commit per task, named by the commit template. What is left goes in at the push.',
-  },
-  {
-    value: 'agent',
-    label: 'The agent, as it works',
-    effect:
-      'The agent commits when it sees fit, with the commit template. What is left goes in at the push.',
-  },
-  {
-    value: 'push',
-    label: 'Hemera, once, at the push',
-    effect: 'Nothing is committed during Building: the push makes one commit per repository.',
-  },
-]
-
 /**
  * Who commits during Building, as three choices, each with what it does, and under them what the
  * history of a repository reads after an example mission: the visible effect of the choice.
@@ -449,31 +425,6 @@ export function RepositoryForm({
   )
 }
 
-/** A step not written yet, of each kind. */
-export function newStep(kind: StepKind): StepConfig {
-  switch (kind) {
-    case 'bump':
-      return { kind, how: 'command', command: null }
-    case 'merge':
-      return { kind, method: 'squash' }
-    case 'remote-action':
-      return { kind, action: '' }
-    case 'published':
-      return { kind, by: 'tag', pattern: '' }
-    case 'command':
-      return { kind, command: '' }
-    case 'agent':
-      return { kind, task: '' }
-    case 'confirm':
-      return { kind, what: '' }
-    case 'push':
-    case 'pull-request':
-    case 'ci':
-    case 'local-merge':
-      return { kind }
-  }
-}
-
 export interface StepDraft {
   start: StepStart
   config: StepConfig
@@ -492,6 +443,165 @@ export interface StepFormProps {
   commands: readonly string[]
   /** What the engine refuses of the step, at the field it concerns. */
   refused?: string | undefined
+}
+
+/** The fields of a bump: how the version is moved, and the catalogue command when it is one. */
+function BumpFields({
+  config,
+  set,
+  commandItems,
+}: {
+  config: Extract<StepConfig, { kind: 'bump' }>
+  set: (next: StepConfig) => void
+  commandItems: { value: string; label: string }[]
+}): ReactNode {
+  return (
+    <div className="flex items-start gap-3">
+      <Labelled<'command' | 'agent'>
+        label="Moved by"
+        value={config.how}
+        onChange={(how) => set({ ...config, how })}
+        items={[
+          { value: 'command', label: 'A catalogue command' },
+          { value: 'agent', label: 'The agent' },
+        ]}
+      />
+      {config.how === 'command' && (
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className={LABEL} aria-hidden="true">
+            Command
+          </span>
+          <Select<string>
+            label="Command"
+            className="w-full"
+            value={config.command}
+            placeholder="Choose a command"
+            onValueChange={(command) => set({ ...config, command })}
+            items={commandItems}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The fields of a published step: how the version is found, and the tag or package it looks for. */
+function PublishedFields({
+  config,
+  set,
+  refused,
+}: {
+  config: Extract<StepConfig, { kind: 'published' }>
+  set: (next: StepConfig) => void
+  refused: string | undefined
+}): ReactNode {
+  return (
+    <div className="flex items-start gap-3">
+      <Labelled<PublishedBy>
+        label="Found by"
+        value={config.by}
+        onChange={(by) => set({ ...config, by })}
+        items={[
+          { value: 'tag', label: 'A tag' },
+          { value: 'registry', label: 'The version on a registry' },
+          { value: 'confirm', label: 'Your confirmation' },
+        ]}
+      />
+      {config.by !== 'confirm' && (
+        <Input
+          label={config.by === 'tag' ? 'Tag pattern' : 'Package'}
+          className="min-w-0 flex-1"
+          placeholder={config.by === 'tag' ? 'v*' : '@acme/shared'}
+          value={config.pattern}
+          error={refused}
+          onValueChange={(pattern) => set({ ...config, pattern })}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The fields of a step's own kind, whichever it is. */
+function KindFields({
+  config,
+  set,
+  commandItems,
+  refused,
+}: {
+  config: StepConfig
+  set: (next: StepConfig) => void
+  commandItems: { value: string; label: string }[]
+  refused: string | undefined
+}): ReactNode {
+  switch (config.kind) {
+    case 'bump':
+      return <BumpFields config={config} set={set} commandItems={commandItems} />
+    case 'merge':
+      return (
+        <Labelled<MergeMethod>
+          label="Method"
+          value={config.method}
+          onChange={(method) => set({ ...config, method })}
+          items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
+            value: method,
+            label: MERGE_WORDS[method],
+          }))}
+        />
+      )
+    case 'remote-action':
+      return (
+        <Input
+          label="Workflow or pipeline"
+          placeholder="release.yml"
+          value={config.action}
+          error={refused}
+          onValueChange={(action) => set({ ...config, action })}
+        />
+      )
+    case 'published':
+      return <PublishedFields config={config} set={set} refused={refused} />
+    case 'command':
+      return (
+        <div className="flex flex-col gap-1">
+          <span className={LABEL} aria-hidden="true">
+            Command
+          </span>
+          <Select<string>
+            label="Command"
+            className="w-full"
+            value={config.command === '' ? null : config.command}
+            placeholder="Choose a command"
+            onValueChange={(command) => set({ ...config, command })}
+            items={commandItems}
+          />
+        </div>
+      )
+    case 'agent':
+      return (
+        <Textarea
+          label="Task"
+          rows={3}
+          value={config.task}
+          error={refused}
+          onValueChange={(task) => set({ ...config, task })}
+        />
+      )
+    case 'confirm':
+      return (
+        <Input
+          label="What you confirm"
+          placeholder="The release is announced"
+          value={config.what}
+          error={refused}
+          onValueChange={(what) => set({ ...config, what })}
+        />
+      )
+    case 'push':
+    case 'pull-request':
+    case 'ci':
+    case 'local-merge':
+      return null
+  }
 }
 
 /** A step: its kind when it is new, where it goes, how it starts, and the fields of its kind. */
@@ -519,111 +629,7 @@ export function StepForm({ draft, onChange, adding, commands, refused }: StepFor
           )}
         </div>
       )}
-      {config.kind === 'bump' && (
-        <div className="flex items-start gap-3">
-          <Labelled<'command' | 'agent'>
-            label="Moved by"
-            value={config.how}
-            onChange={(how) => set({ ...config, how })}
-            items={[
-              { value: 'command', label: 'A catalogue command' },
-              { value: 'agent', label: 'The agent' },
-            ]}
-          />
-          {config.how === 'command' && (
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className={LABEL} aria-hidden="true">
-                Command
-              </span>
-              <Select<string>
-                label="Command"
-                className="w-full"
-                value={config.command}
-                placeholder="Choose a command"
-                onValueChange={(command) => set({ ...config, command })}
-                items={commandItems}
-              />
-            </div>
-          )}
-        </div>
-      )}
-      {config.kind === 'merge' && (
-        <Labelled<MergeMethod>
-          label="Method"
-          value={config.method}
-          onChange={(method) => set({ ...config, method })}
-          items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
-            value: method,
-            label: MERGE_WORDS[method],
-          }))}
-        />
-      )}
-      {config.kind === 'remote-action' && (
-        <Input
-          label="Workflow or pipeline"
-          placeholder="release.yml"
-          value={config.action}
-          error={refused}
-          onValueChange={(action) => set({ ...config, action })}
-        />
-      )}
-      {config.kind === 'published' && (
-        <div className="flex items-start gap-3">
-          <Labelled<PublishedBy>
-            label="Found by"
-            value={config.by}
-            onChange={(by) => set({ ...config, by })}
-            items={[
-              { value: 'tag', label: 'A tag' },
-              { value: 'registry', label: 'The version on a registry' },
-              { value: 'confirm', label: 'Your confirmation' },
-            ]}
-          />
-          {config.by !== 'confirm' && (
-            <Input
-              label={config.by === 'tag' ? 'Tag pattern' : 'Package'}
-              className="min-w-0 flex-1"
-              placeholder={config.by === 'tag' ? 'v*' : '@acme/shared'}
-              value={config.pattern}
-              error={refused}
-              onValueChange={(pattern) => set({ ...config, pattern })}
-            />
-          )}
-        </div>
-      )}
-      {config.kind === 'command' && (
-        <div className="flex flex-col gap-1">
-          <span className={LABEL} aria-hidden="true">
-            Command
-          </span>
-          <Select<string>
-            label="Command"
-            className="w-full"
-            value={config.command === '' ? null : config.command}
-            placeholder="Choose a command"
-            onValueChange={(command) => set({ ...config, command })}
-            items={commandItems}
-          />
-        </div>
-      )}
-      {config.kind === 'agent' && (
-        <Textarea
-          label="Task"
-          rows={3}
-          value={config.task}
-          error={refused}
-          onValueChange={(task) => set({ ...config, task })}
-        />
-      )}
-      {config.kind === 'confirm' && (
-        <Input
-          label="What you confirm"
-          placeholder="The release is announced"
-          value={config.what}
-          error={refused}
-          onValueChange={(what) => set({ ...config, what })}
-        />
-      )}
+      <KindFields config={config} set={set} commandItems={commandItems} refused={refused} />
       {writesToNetwork(config) && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <IconWorld size="sm" aria-hidden="true" />
@@ -639,8 +645,3 @@ export function StepForm({ draft, onChange, adding, commands, refused }: StepFor
     </>
   )
 }
-
-/** The kinds a step added to a recipe may be; a cleanup step is a command, an agent or a confirm. */
-export const RECIPE_KINDS = ADDABLE
-
-export const CLEANUP_KINDS: readonly StepKind[] = ['command', 'agent', 'confirm']
