@@ -43,26 +43,6 @@ const QUOTED_OR_BARE = String.raw`"(?:[^"\\]|\\.)*"|'[^']*'`
  * the credential (a header's name, a scheme, a label) stays readable.
  */
 
-/**
- * A header whose whole value is a credential, its scheme with its token: as a header line writes
- * it (to the end of the line or of the quotes around it), or as JSON writes it. An escaped quote
- * (`\"`) closes no quotes around it, so the value runs on through it: a backslash takes the
- * character after it.
- */
-const CREDENTIAL_HEADER = new RegExp(
-  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|(?=[^"'\r\n])[^"'\\\r\n]*(?:\\[^\r\n]?[^"'\\\r\n]*)*)`,
-  'gi',
-)
-
-/**
- * The header as masking read it before #401, its value stopped at any quote, escaped or not: the
- * shapes read in turn as the oracle reads them read it this way (`asTheOracleReads`).
- */
-const CREDENTIAL_HEADER_TO_A_QUOTE = new RegExp(
-  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
-  'gi',
-)
-
 /** A bare `Bearer` credential, and a `Basic` one written as the header writes it. */
 const BEARER = /\b(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi
 const BASIC = /\b(?<keep>Basic\s+)[A-Za-z0-9+/]{8,}={0,2}/g
@@ -208,19 +188,136 @@ function* applied(text: string, edits: ReadonlyArray<Edit>): Steps<string> {
   return out + text.slice(from)
 }
 
+/** A match of a shape: where it starts, where what it hides starts, and where it ends. */
+interface Match {
+  readonly start: number
+  readonly hiddenFrom: number
+  readonly end: number
+}
+
+/** A shape of credential: its first match in a text from a position, if there is one. */
+type Shape = (text: string, from: number) => Match | null
+
+/** The shape a pattern matches: it hides all it matches but its group `keep`, which begins it. */
+const matched =
+  (pattern: RegExp): Shape =>
+  (text, from) => {
+    const match = matchFrom(pattern, text, from)
+    if (match === null) return null
+    const start = match.index
+    return {
+      start,
+      hiddenFrom: start + (match.groups?.['keep']?.length ?? 0),
+      end: start + match[0].length,
+    }
+  }
+
+/** A run of what a value between double quotes holds as it is: no quote, no backslash. */
+const IN_DOUBLE_QUOTES = /[^"\\]*/y
+
+/** What `.` does not take, and so no backslash takes in a value between double quotes. */
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
+
+/**
+ * Where the value between double quotes whose quote is at `at` ends, after its closing quote, or
+ * -1 when it does not close: a backslash takes the character after it, but a line end.
+ */
+const doubleQuotedEnd = (text: string, at: number): number => {
+  let next = at + 1
+  for (;;) {
+    next += matchFrom(IN_DOUBLE_QUOTES, text, next)?.[0].length ?? 0
+    if (text.charAt(next) === '"') return next + 1
+    if (next + 1 >= text.length || LINE_TERMINATOR.test(text.charAt(next + 1))) return -1
+    next += 2
+  }
+}
+
+/** A run of what a bare value holds, through escapes (to the next backslash) or not. */
+const BARE_TO_AN_ESCAPE = /[^"'\\\r\n]*/y
+const BARE_TO_A_QUOTE = /[^"'\r\n]*/y
+
+/**
+ * Where the bare value at `at` ends: at a quote or a line end. Read through escapes, a backslash
+ * takes the character after it but a line end, so an escaped quote (`\"`) does not end it.
+ */
+const bareEnd = (text: string, at: number, throughEscapes: boolean): number => {
+  if (!throughEscapes) return at + (matchFrom(BARE_TO_A_QUOTE, text, at)?.[0].length ?? 0)
+  let next = at
+  for (;;) {
+    next += matchFrom(BARE_TO_AN_ESCAPE, text, next)?.[0].length ?? 0
+    if (text.charAt(next) !== '\\') return next
+    next += 1
+    if (next < text.length && !'\r\n'.includes(text.charAt(next))) next += 1
+  }
+}
+
+/**
+ * Where the value at `at` ends, or -1 when none begins there: between double quotes, between
+ * single quotes, or bare, which a quote or a line end cannot begin.
+ */
+const valueEnd = (text: string, at: number, throughEscapes: boolean): number => {
+  const first = text.charAt(at)
+  if (first === '"') return doubleQuotedEnd(text, at)
+  if (first === "'") {
+    const closing = text.indexOf("'", at + 1)
+    return closing === -1 ? -1 : closing + 1
+  }
+  if (first === '' || first === '\r' || first === '\n') return -1
+  return bareEnd(text, at, throughEscapes)
+}
+
+/** The name of a header whose whole value is a credential, and what stands before its value. */
+const HEADER_NAME =
+  /\b(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=](?<spaces>\s*)/gi
+
+/**
+ * A header whose whole value is a credential, its scheme with its token: as a header line writes
+ * it (to the end of the line or of the quotes around it), or as JSON writes it. Its value is read
+ * by a scan, never by a pattern: a pattern that crosses a value of megabytes runs out of stack.
+ * The scan reads it as the pattern of #401 did: where no value begins after the spaces (a quote
+ * that never closes), the spaces are given back one at a time, and the last that is no line end
+ * begins a bare value. With `throughEscapes`, a bare value runs on through a backslash escape, as
+ * an escaped quote (`\"`) closes no quotes around it; without, it stops at any quote, as masking
+ * read it before #401: the shapes read in turn as the oracle reads them read it this way
+ * (`asTheOracleReads`).
+ */
+const header =
+  (throughEscapes: boolean): Shape =>
+  (text, from) => {
+    for (let at = from; ;) {
+      const name = matchFrom(HEADER_NAME, text, at)
+      if (name === null) return null
+      const start = name.index
+      const spaced = start + name[0].length
+      const spaces = spaced - (name.groups?.['spaces']?.length ?? 0)
+      let hiddenFrom = spaced
+      let end = valueEnd(text, hiddenFrom, throughEscapes)
+      while (end === -1 && hiddenFrom > spaces) {
+        hiddenFrom -= 1
+        if (!'\r\n'.includes(text.charAt(hiddenFrom)))
+          end = bareEnd(text, hiddenFrom, throughEscapes)
+      }
+      if (end !== -1) return { start, hiddenFrom, end }
+      at = start + 1
+    }
+  }
+
+const CREDENTIAL_HEADER = header(true)
+const CREDENTIAL_HEADER_TO_A_QUOTE = header(false)
+
 /**
  * The shapes, each matched on the text as it was given: none ever sees what another masked, so a
  * shape that takes the first word of another cannot hide the rest of it, whatever their order.
  */
-const SHAPES: ReadonlyArray<RegExp> = [
-  PRIVATE_KEY,
+const SHAPES: ReadonlyArray<Shape> = [
+  matched(PRIVATE_KEY),
   CREDENTIAL_HEADER,
-  BEARER,
-  BASIC,
-  WEB_TOKEN,
-  PREFIXED_TOKEN,
-  URL_PASSWORD,
-  LABELLED_CREDENTIAL,
+  matched(BEARER),
+  matched(BASIC),
+  matched(WEB_TOKEN),
+  matched(PREFIXED_TOKEN),
+  matched(URL_PASSWORD),
+  matched(LABELLED_CREDENTIAL),
 ]
 
 /**
@@ -270,20 +367,19 @@ interface Found {
  * The stretches one shape hides in a text, in order. Each search goes on from the last name of
  * the match before (`resumeAt`), or, read as the oracle reads, from its end.
  */
-function* shapeFound(text: string, pattern: RegExp, resume: boolean): Steps<Found> {
+function* shapeFound(text: string, shape: Shape, resume: boolean): Steps<Found> {
   const spans: Span[] = []
   let resumed = false
   let from = 0
   let reached = 0
   for (;;) {
-    const match = matchFrom(pattern, text, from)
+    const match = shape(text, from)
     if (match === null) break
-    const end = match.index + match[0].length
-    const hiddenFrom = match.index + (match.groups?.['keep']?.length ?? 0)
+    const { start, hiddenFrom, end } = match
     spans.push([hiddenFrom, end])
-    if (match.index < reached) resumed = true
+    if (start < reached) resumed = true
     reached = Math.max(reached, end)
-    from = resume ? resumeAt(text, match.index, hiddenFrom, end) : end
+    from = resume ? resumeAt(text, start, hiddenFrom, end) : end
     if (due()) yield
   }
   // A step at the end: the pattern may have crossed the whole text without a match.
@@ -292,8 +388,8 @@ function* shapeFound(text: string, pattern: RegExp, resume: boolean): Steps<Foun
 }
 
 /** The stretches one shape hides in a text, in order. */
-function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> {
-  return (yield* shapeFound(text, pattern, true)).spans
+function* shapeSpans(text: string, shape: Shape): Steps<ReadonlyArray<Span>> {
+  return (yield* shapeFound(text, shape, true)).spans
 }
 
 /** An escaped quote: the only place where the two ways of reading a header's value part. */
@@ -311,8 +407,8 @@ function* asTheOracleReads(
 ): Steps<ReadonlyArray<Span>> {
   let view = knownHidden.length > 0 ? yield* writtenOver(text, knownHidden) : text
   let hidden = knownHidden
-  for (const pattern of SHAPES) {
-    const read = pattern === CREDENTIAL_HEADER ? CREDENTIAL_HEADER_TO_A_QUOTE : pattern
+  for (const shape of SHAPES) {
+    const read = shape === CREDENTIAL_HEADER ? CREDENTIAL_HEADER_TO_A_QUOTE : shape
     const { spans } = yield* shapeFound(view, read, false)
     if (spans.length > 0) {
       hidden = yield* union(hidden, spans)
@@ -367,11 +463,11 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
     written = true
   }
   let resumed = false
-  for (const pattern of SHAPES) {
-    const found = yield* shapeFound(text, pattern, true)
+  for (const shape of SHAPES) {
+    const found = yield* shapeFound(text, shape, true)
     spans = yield* union(spans, found.spans)
     closed = yield* union(closed, yield* closedSpans(text, found.spans))
-    const foundInTurn = written ? yield* shapeFound(view, pattern, true) : found
+    const foundInTurn = written ? yield* shapeFound(view, shape, true) : found
     if (foundInTurn.resumed) resumed = true
     if (foundInTurn.spans.length > 0) {
       inTurn = yield* union(inTurn, foundInTurn.spans)
@@ -389,7 +485,7 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
   // Nothing closed: the third reading would read the text as the first did.
   if (closed.length === 0) return spans
   const opened = yield* writtenOver(text, closed)
-  for (const pattern of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, pattern))
+  for (const shape of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, shape))
   return spans
 }
 
@@ -553,8 +649,8 @@ function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> 
 function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> {
   const has = (value: string) => text.includes(value)
   if (known.some(has) || escapedForms(known).some(has)) return false
-  for (const pattern of SHAPES) {
-    if (matchFrom(pattern, text, 0) !== null) return false
+  for (const shape of SHAPES) {
+    if (shape(text, 0) !== null) return false
     // A step after each pattern on a long text: each crosses all of it.
     if (text.length > CHARACTERS_A_STEP) yield
   }

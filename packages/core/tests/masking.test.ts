@@ -2021,6 +2021,108 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
   )
 })
 
+describe("A header's value is read by a scan, whatever its length (#412)", () => {
+  // The value was matched by a pattern that crosses a backslash escape at each step: from about
+  // 16 MB of one value, the pattern ran out of its stack, and the whole output became `•••`.
+  const MB = 1024 * 1024
+  const scanned = async (text: string): Promise<string> => {
+    const [masked = ''] = await printedForms([text], [])
+    return masked
+  }
+
+  test(
+    '32 MB of Cookie: \\" is masked, not replaced whole by •••',
+    { timeout: 600_000 },
+    async () => {
+      const text = 'Cookie: \\"'.repeat(Math.ceil((32 * MB) / 10))
+      expect(await scanned(text)).toBe(`Cookie: ${MASK}`)
+      await hidesAtLeastTheOracle(text, [])
+    },
+  )
+
+  test(
+    'a one-line escaped JSON of 20 MB after cookie= is masked, not replaced whole by •••',
+    { timeout: 600_000 },
+    async () => {
+      const json = JSON.stringify(
+        JSON.stringify(Array.from({ length: Math.ceil((20 * MB) / 24) }, () => ({ a: 'b c' }))),
+      )
+      expect(await scanned(`cookie=${json.slice(1, -1)}\nnext`)).toBe(`cookie=${MASK}\nnext`)
+    },
+  )
+
+  test(
+    'a quoted header value of 20 MB is masked, not replaced whole by •••',
+    { timeout: 600_000 },
+    async () => {
+      const text = `Authorization: "${'a \\"b\\" '.repeat(Math.ceil((20 * MB) / 10))}" tail`
+      expect(await scanned(text)).toBe(`Authorization: ${MASK}`)
+    },
+  )
+
+  // What the pattern hid, pinned on feature/1.0 before #412: the scan hides the same.
+  const asThePatternRead: ReadonlyArray<readonly [what: string, text: string, masked: string]> = [
+    ['quoted, an escaped quote in it', 'Cookie: "a\\"b" tail', `Cookie: ${MASK}`],
+    [
+      'quoted, cut by an escaped line end: the space before it is the value',
+      'Cookie: "a\\\nb" x',
+      `Cookie:${MASK}"a\\\nb" x`,
+    ],
+    ['quoted, cut by an escaped line separator', 'Cookie: "a\\ b" c', `Cookie:${MASK}"a\\ b" c`],
+    ['quoted and never closed, after two spaces', 'Cookie:  "unclosed', `Cookie: ${MASK}"unclosed`],
+    ['quoted and never closed, after no space', 'Cookie:"unclosed', 'Cookie:"unclosed'],
+    ['quoted, then quoted again', 'Cookie: "a" "b"', `Cookie: ${MASK}"b"`],
+    ['single-quoted', "Cookie: 'a b' tail", `Cookie: ${MASK}`],
+    ['single-quoted, a backslash before its end', "Cookie: 'a\\' b", `Cookie: ${MASK}`],
+    ['single-quoted and never closed', "Cookie: 'unclosed", `Cookie:${MASK}'unclosed`],
+    ['bare, on the next line', 'Cookie: \nnext line', `Cookie: \n${MASK}`],
+    ['bare, nothing before a line end and a quote', 'Cookie: \r\n"x', `Cookie:${MASK}\r\n"x`],
+    [
+      'bare, through escaped quotes',
+      'Authorization: Bearer a\\"b c\\" tail',
+      `Authorization: ${MASK}`,
+    ],
+    ['bare, a backslash at the end', 'Authorization: a\\', `Authorization: ${MASK}`],
+    [
+      'bare, a backslash before a line end',
+      'Authorization: a\\\r\nnext',
+      `Authorization: ${MASK}\r\nnext`,
+    ],
+    ['bare, to a quote', 'cookie=x"y', `cookie=${MASK}"y`],
+    ['bare, to a single quote after an escaped quote', 'Cookie: a\\"b\'c', `Cookie: ${MASK}'c`],
+    ['bare, nothing after the spaces', 'Cookie: ', `Cookie:${MASK}`],
+    ['no value at all', 'Cookie:', 'Cookie:'],
+    ['bare, the next sign its first character', 'Cookie : = x', `Cookie : ${MASK}`],
+    ['quoted, after an equals sign', 'cookie="x" y', `cookie=${MASK}`],
+    ['as JSON writes it', 'Authorization": "Bearer x", "b": 1', `Authorization": ${MASK}"b": 1`],
+    ['after a tab and a no-break space', 'Authorization:\t "q" r', `Authorization:\t ${MASK}`],
+    ['inside a word', 'xAuthorization: y', 'xAuthorization: y'],
+    ['after a dash', 'x-Authorization: y', `x-Authorization: ${MASK}`],
+    [
+      'each header of two, in capitals',
+      'Proxy-Authorization: x y\nSet-Cookie: z',
+      `Proxy-Authorization: ${MASK}\nSet-Cookie: ${MASK}`,
+    ],
+    ['in capitals', 'COOKIE: x', `COOKIE: ${MASK}`],
+    [
+      'a header after a quote never closed',
+      'Cookie: "unclosed Cookie: b',
+      `Cookie:${MASK}"unclosed Cookie: ${MASK}`,
+    ],
+    [
+      'a header after a quote cut by an escaped line end',
+      'Cookie:"x\\\nCookie: b',
+      `Cookie:"x\\\nCookie: ${MASK}`,
+    ],
+  ]
+  for (const [what, text, masked] of asThePatternRead) {
+    test(`a header's value read as the pattern read it: ${what}`, async () => {
+      expect(maskText(text, [])).toBe(masked)
+      expect(await Effect.runPromise(maskTextPaced(text, [], 0))).toBe(masked)
+    })
+  }
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => void, times: number): number => {
   const start = performance.now()
