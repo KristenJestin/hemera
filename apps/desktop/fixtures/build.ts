@@ -9,7 +9,7 @@
  * built again, to the same state.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -58,6 +58,9 @@ export const fixtureList = (): string =>
     (group) =>
       `${group.name}\n  ${group.look}\n${group.notYet === undefined ? '' : `  (not built yet: ${group.notYet})\n`}`,
   ).join('\n')
+
+/** The file, in a fixture's folder, the engine's lines go to while it builds the group. */
+export const BUILD_LOG = 'build.log'
 
 export interface BuiltFixture {
   /** The fixture's folder, which carries the marker. */
@@ -178,6 +181,16 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   mkdirSync(work)
   const env = forgeIn(folder)
   asked.log(`building ${group.name} in ${folder}`)
-  await Effect.runPromise(buildState(group, profile, work, env, asked.log))
+  // What the engine says while it builds goes to the fixture's own log, not to the terminal.
+  const engineLog = join(folder, BUILD_LOG)
+  const started = Date.now()
+  await Effect.runPromise(
+    buildState(group, profile, work, env, (line) => appendFileSync(engineLog, `${line}\n`)),
+  ).catch((failure: Error) => {
+    throw new Error(`${group.name} could not be built (the engine's lines: ${engineLog})`, {
+      cause: failure,
+    })
+  })
+  asked.log(`built ${group.name} in ${String(Math.round((Date.now() - started) / 1000))} s`)
   return fixture(env)
 }

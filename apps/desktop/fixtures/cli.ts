@@ -42,7 +42,8 @@ const built = await buildFixture({
   rebuild: flags.includes('--rebuild'),
   log: (line) => process.stdout.write(`${line}\n`),
 }).catch((failure: Error) => {
-  process.stderr.write(`${failure.message}\n`)
+  const cause = failure.cause instanceof Error ? `\n${failure.cause.message}` : ''
+  process.stderr.write(`${failure.message}${cause}\n`)
   process.exit(1)
 })
 
