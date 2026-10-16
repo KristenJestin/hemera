@@ -43,8 +43,13 @@ export const TestReporting = Schema.Struct({
 })
 export type TestReporting = typeof TestReporting.Type
 
-/** The largest report read: a larger one is not read at all, and names nothing. */
-export const REPORT_CAP = 32 * 1024 * 1024
+/**
+ * The largest report read: a larger one is not read at all, and names nothing, so the key line
+ * decides. A report is read and parsed on the engine's thread: 8 MiB keeps the worst JUnit report
+ * under about half a second, and holds about 20,000 passed tests in vitest's JSON (Hemera's own
+ * core suite, 1,799 tests, writes 0.7 MB) or a few thousand failures with their tracebacks.
+ */
+export const REPORT_CAP = 8 * 1024 * 1024
 
 /** A report as the engine found it once the run ended: its text, or why it was not read. */
 export type ReportFound =
@@ -140,21 +145,16 @@ const jsonVerdict = (status: string, messages: ReadonlyArray<string>): ReportedT
   return assertion ? 'assertion' : 'error'
 }
 
-/** A `<testsuite>` a test case is in: its name, and the suite it is in itself. */
+/**
+ * A `<testsuite>` a test case is in, as the path of its names from the outermost, joined by ` > `:
+ * built once as the suite opens, so a case never walks its suites.
+ */
 interface JunitSuite {
-  readonly name: string
-  readonly parent: JunitSuite | null
+  readonly path: string
 }
 
 /** The deepest a report's suites are read: a report nested deeper is not read at all. */
 const SUITE_DEPTH = 64
-
-/** The names of the suites a test case is in, outermost first. */
-const suiteNames = (suite: JunitSuite | null): ReadonlyArray<string> => {
-  const names: string[] = []
-  for (let at = suite; at !== null; at = at.parent) names.push(at.name)
-  return names.reverse()
-}
 
 /**
  * One `<testcase>` of a JUnit report: the innermost `<testsuite>` it is in, its attributes, and
@@ -243,7 +243,9 @@ const junitCases = (text: string): ReadonlyArray<JunitCase> | null => {
       const opening = tag[1] ?? ''
       if (opening.endsWith('/')) continue
       if (open.length >= SUITE_DEPTH) return null
-      open.push({ name: attributesOf(opening).get('name') ?? '', parent: open.at(-1) ?? null })
+      const name = attributesOf(opening).get('name') ?? ''
+      const parent = open.at(-1)
+      open.push({ path: parent === undefined ? name : `${parent.path} > ${name}` })
     } else {
       const read = junitCase(whole, tag.index, open.at(-1) ?? null)
       if (read === null) return null
@@ -322,7 +324,7 @@ const junitTests = (
     if (runner === 'node') {
       const file = one.attributes.get('file') ?? ''
       return sameFile(file, testPath)
-        ? [{ key: [...suiteNames(one.suite), name].join(' > '), verdict }]
+        ? [{ key: one.suite === null ? name : `${one.suite.path} > ${name}`, verdict }]
         : []
     }
     const scope = pytestScope(classname, testPath)
