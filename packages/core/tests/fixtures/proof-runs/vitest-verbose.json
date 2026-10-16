@@ -1,0 +1,77 @@
+{
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 2,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 3,
+  "numPassedTests": 1,
+  "numFailedTests": 2,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1792145407598,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["export"],
+          "fullName": "export saves",
+          "status": "failed",
+          "title": "saves",
+          "duration": 4.763669000000007,
+          "failureMessages": [
+            "AssertionError: expected 1 to be 2 // Object.is equality\n    at /work/acme/api/export.test.ts:5:15\n    at file:///work/acme/api    at file:///work/acme/api    at file:///work/acme/api    at new Promise (<anonymous>)\n    at runWithCancel (file:///work/acme/api    at file:///work/acme/api    at new Promise (<anonymous>)\n    at runWithTimeout (file:///work/acme/api    at file:///work/acme/api"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["export"],
+          "fullName": "export keeps",
+          "status": "passed",
+          "title": "keeps",
+          "duration": 0.23686100000000465,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["export"],
+          "fullName": "export throws",
+          "status": "failed",
+          "title": "throws",
+          "duration": 0.43012099999999975,
+          "failureMessages": [
+            "TypeError: missing.run is not a function\n    at /work/acme/api/export.test.ts:13:50\n    at file:///work/acme/api    at file:///work/acme/api    at file:///work/acme/api    at new Promise (<anonymous>)\n    at runWithCancel (file:///work/acme/api    at file:///work/acme/api    at new Promise (<anonymous>)\n    at runWithTimeout (file:///work/acme/api    at file:///work/acme/api"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1792145407702,
+      "endTime": 1792145407707.4302,
+      "status": "failed",
+      "message": "",
+      "name": "/work/acme/api/export.test.ts"
+    }
+  ]
+}

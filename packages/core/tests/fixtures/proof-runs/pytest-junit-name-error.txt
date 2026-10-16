@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 2 items
+
+tests/test_report.py FF                                                  [100%]<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.036" timestamp="2026-10-14T10:59:59.461265+02:00" hostname="ci"><testcase classname="tests.test_report" name="test_one_is_one" time="0.001"><failure message="assert 1 == 2">def test_one_is_one():
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_report.py:5: AssertionError</failure></testcase><testcase classname="tests.test_report" name="test_saves_the_invoice" time="0.001"><failure message="NameError: name 'to_markdown' is not defined">def test_saves_the_invoice():
+&gt;       expect(to_markdown([])).to_equal("| total |")
+               ^^^^^^^^^^^
+E       NameError: name 'to_markdown' is not defined
+
+tests/test_report.py:8: NameError</failure></testcase></testsuite></testsuites>
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_report.py:5: AssertionError
+____________________________ test_saves_the_invoice ____________________________
+
+    def test_saves_the_invoice():
+>       expect(to_markdown([])).to_equal("| total |")
+               ^^^^^^^^^^^
+E       NameError: name 'to_markdown' is not defined
+
+tests/test_report.py:8: NameError
+----------------------- generated xml file: /dev/stdout ------------------------
+=========================== short test summary info ============================
+FAILED tests/test_report.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_report.py::test_saves_the_invoice - NameError: name 'to_mar...
+============================== 2 failed in 0.03s ===============================
