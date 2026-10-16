@@ -803,14 +803,18 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           // When it began: a snapshot that ends after a later one never makes its tree current.
           const takenAt = new Date().toISOString()
           const store = yield* storeOf(owner.missionId)
-          const objects = yield* objectsOf(repository.folder)
-          const index = text(
+          // The common folder and the index in one call: each Git process is tens of milliseconds
+          // on Windows, and a Building takes dozens of snapshots.
+          const [commonDir = '', index = ''] = text(
             yield* run(
               repository.folder,
-              ['rev-parse', '--path-format=absolute', '--git-path', 'index'],
+              ['rev-parse', '--path-format=absolute', '--git-common-dir', '--git-path', 'index'],
               'read',
             ),
-          ).trim()
+          )
+            .trim()
+            .split('\n')
+          const objects = join(commonDir, 'objects')
           const alternate = { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateOf(objects) }
           const tree = yield* Effect.acquireUseRelease(
             Effect.try({
