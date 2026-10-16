@@ -22,7 +22,7 @@
  */
 
 import { isUtf8 } from 'node:buffer'
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, posix } from 'node:path'
 
@@ -73,6 +73,7 @@ import {
   workspaceRepositories,
   workspaces,
 } from '../storage/schema.ts'
+import { readOwnSync } from '../tools/judged.ts'
 
 /** A file with more changed lines than this is large (open point of #249, to confirm). */
 export const LARGE_LINES = 3_000
@@ -223,10 +224,16 @@ const sideOf = (side: FileSide | null): DiffSide | null => {
   return DiffText.make({ text: bytes.toString('utf8'), encoding: 'utf-8', size: side.size })
 }
 
-/** A regular file's bytes on disk, or null: a link, a folder or a file gone is not read. */
+/** The most of a file on disk a diff reads; a larger one is shown from the snapshot. */
+const DISK_CAP = 64 * 1024 * 1024
+
+/**
+ * A regular file's bytes on disk, or null: a link, a folder, a file gone, a pipe or a file over
+ * the cap is not read, and never waited on (#434).
+ */
 function diskBytes(path: string): Buffer | null {
   try {
-    return lstatSync(path).isFile() ? readFileSync(path) : null
+    return readOwnSync(path, DISK_CAP).bytes
   } catch {
     return null
   }

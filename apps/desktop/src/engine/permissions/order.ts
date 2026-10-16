@@ -23,7 +23,7 @@
  * settled and how long it took) and one line of the diagnostic log.
  */
 
-import { readFileSync, realpathSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -59,6 +59,7 @@ import { Secrets } from '../secrets.ts'
 import { getProject } from '../projects.ts'
 import { mutate } from '../transaction.ts'
 import { changedBy } from '../resources/declarations.ts'
+import { readOwnSync } from '../tools/judged.ts'
 import { containedIn, resolvePath, shownPath } from '../tools/paths.ts'
 import {
   type JudgedCall,
@@ -76,12 +77,18 @@ const PackageScripts = Schema.fromJsonString(
 )
 const readPackageScripts = Schema.decodeUnknownOption(PackageScripts)
 
+/** The most of a `package.json` Hemera reads. */
+const MANIFEST_CAP = 4 * 1024 * 1024
+
 /**
  * The scripts of the `package.json` of a folder, by name; none when it has none, or when it does
- * not read (a folder of that name, a file it may not open, text that is not JSON).
+ * not read (a folder of that name, a file it may not open, text that is not JSON; a pipe, a link
+ * or a file over the cap, refused without waiting, #434).
  */
 const scriptsIn = (folder: string) =>
-  Effect.try(() => readFileSync(join(folder, 'package.json'), 'utf8')).pipe(
+  Effect.try(() =>
+    readOwnSync(join(folder, 'package.json'), MANIFEST_CAP).bytes.toString('utf8'),
+  ).pipe(
     Effect.map((text) =>
       Option.match(readPackageScripts(text), {
         onNone: () => new Map<string, string>(),

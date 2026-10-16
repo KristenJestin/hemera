@@ -122,12 +122,9 @@ describe('A file tool reads a file for an agent through the judged open only (#3
     expect(readRefusalsOf(TOOL, source)).toEqual([])
   })
 
-  test('the judged open reads, and the fingerprint of a file is read without handing its content', () => {
+  test('the judged open reads', () => {
     const read = "import { open, readFile } from 'node:fs/promises'\n"
     expect(readRefusalsOf('apps/desktop/src/engine/tools/judged.ts', read)).toEqual([])
-    const fingerprint = "import { type FileHandle, open } from 'node:fs/promises'\n"
-    expect(readRefusalsOf('apps/desktop/src/engine/tools/read.ts', fingerprint)).toEqual([])
-    expect(readRefusalsOf('apps/desktop/src/engine/tools/read.ts', read)).toHaveLength(1)
   })
 
   test('outside the file tools, a read is not this rule’s', () => {
@@ -179,5 +176,56 @@ describe('A file tool reads a file for an agent through the judged open only (#3
     expect(plantedIn('const withholding = Withholding.asked(judged)\n')).toMatchObject([
       { file: 'apps/desktop/src/engine/tools/planted.ts', found: 'Withholding.asked' },
     ])
+  })
+})
+
+describe('The engine reads a file of a place on its own behalf through the judged open only (#434, #439)', () => {
+  /** The refusals of a repository whose file `file` (under the engine) holds `source`. */
+  const plantedAt = (file: string, source: string) => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-boundaries-'))
+    try {
+      const path = join(root, 'apps', 'desktop', 'src', 'engine', file)
+      mkdirSync(join(path, '..'), { recursive: true })
+      writeFileSync(path, source)
+      return analyze(root)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  test.each([
+    [
+      'building/proof-runner.ts',
+      "import { existsSync, readFileSync } from 'node:fs'\n",
+      'readFileSync',
+    ],
+    ['building/snapshots.ts', "import { copyFileSync, statSync } from 'node:fs'\n", 'copyFileSync'],
+    ['building/snapshots.ts', "import { readFileSync } from 'node:fs'\n", 'readFileSync'],
+    ['building/documenter.ts', "import { readFileSync } from 'node:fs'\n", 'readFileSync'],
+    ['review/diffs.ts', "import { readFileSync } from 'node:fs'\n", 'readFileSync'],
+    ['permissions/order.ts', "import { readFileSync } from 'node:fs'\n", 'readFileSync'],
+    ['sessions/instructions.ts', "import { readFileSync } from 'node:fs'\n", 'readFileSync'],
+    ['delivery-rules.ts', "import { readFileSync } from 'node:fs'\n", 'readFileSync'],
+  ])('a raw read planted in %s fails the check', (file, source, found) => {
+    expect(plantedAt(file, source)).toMatchObject([
+      { file: `apps/desktop/src/engine/${file}`, found },
+    ])
+  })
+
+  test('a copy is a read: planted in a file tool, it fails the check', () => {
+    expect(
+      plantedAt('tools/planted.ts', "import { copyFile } from 'node:fs/promises'\n"),
+    ).toMatchObject([{ file: 'apps/desktop/src/engine/tools/planted.ts', found: 'copyFile' }])
+  })
+
+  test('what reads no content is not refused there: a stat, a write, a removal', () => {
+    const source =
+      "import { lstatSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'\n"
+    expect(plantedAt('building/snapshots.ts', source)).toEqual([])
+  })
+
+  test('the fingerprint of a file is read through the judged open too: no file tool reads by itself', () => {
+    const fingerprint = "import { type FileHandle, open } from 'node:fs/promises'\n"
+    expect(readRefusalsOf('apps/desktop/src/engine/tools/read.ts', fingerprint)).toHaveLength(1)
   })
 })

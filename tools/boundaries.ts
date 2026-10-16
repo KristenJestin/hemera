@@ -15,9 +15,14 @@
  *
  * A file tool hands an agent a file's content through the judged open (`judged.ts`), which asks
  * the sensitive places first (#392). So under `apps/desktop/src/engine/tools/`, no other file
- * imports what of `node:fs` reads a file, but for the few listed with their reason; and the one
- * exception to the sensitive places, the file of a call a verdict judged (`Withholding.asked`), is
- * made by the gate alone. What the agents' other tools read is not seen here.
+ * imports what of `node:fs` reads a file; and the one exception to the sensitive places, the file
+ * of a call a verdict judged (`Withholding.asked`), is made by the gate alone. What the agents'
+ * other tools read is not seen here.
+ *
+ * The engine reads files of an agent's place on its own behalf too (#434, #439): a proof's test
+ * file, a snapshot's index, a digest, a manifest. A pipe planted there would block the engine
+ * on a read, so the files that do read through the judged open's own reads, which never wait on
+ * one, and import nothing of `node:fs` that reads.
  *
  *   node tools/boundaries.ts
  */
@@ -102,7 +107,7 @@ const JUDGED_OPEN = `${FILE_TOOLS}judged.ts`
 /** The gate, the one place that makes the exception for the file a verdict judged. */
 const GATE = `${FILE_TOOLS}gate.ts`
 
-/** What of `node:fs` opens or reads a file, `promises` holding them all. */
+/** What of `node:fs` opens, reads or copies a file, `promises` holding them all. */
 const READS = new Set([
   'promises',
   'open',
@@ -115,16 +120,22 @@ const READS = new Set([
   'readFile',
   'readFileSync',
   'createReadStream',
+  'copyFile',
+  'copyFileSync',
+  'cp',
+  'cpSync',
 ])
 
-/** The reads a file tool other than the judged open makes, each with what makes it harmless. */
-export const READS_ALLOWED: ReadonlyArray<{ file: string; name: string; why: string }> = [
-  {
-    file: `${FILE_TOOLS}read.ts`,
-    name: 'open',
-    why: 'the fingerprint of a file a write compares, never its content',
-  },
-]
+/** The files of the engine that read a file of an agent's place on Hemera's own behalf. */
+export const OWN_READERS: ReadonlyArray<string> = [
+  'building/proof-runner.ts',
+  'building/snapshots.ts',
+  'building/documenter.ts',
+  'review/diffs.ts',
+  'permissions/order.ts',
+  'sessions/instructions.ts',
+  'delivery-rules.ts',
+].map((file) => `${ENGINE}${file}`)
 
 const FS = String.raw`[\`'"](?:node:)?fs(?:/promises)?[\`'"]`
 
@@ -160,16 +171,21 @@ function fsTaken(source: string): string[] {
   return taken
 }
 
-/** What a file tool other than the judged open takes of `node:fs` to read a file. */
+/**
+ * What a file tool other than the judged open, or a file of the engine that reads a place's files
+ * on its own behalf, takes of `node:fs` to read a file.
+ */
 export function readRefusalsOf(file: string, source: string): Refusal[] {
-  if (!file.startsWith(FILE_TOOLS) || file === JUDGED_OPEN) return []
+  const tool = file.startsWith(FILE_TOOLS) && file !== JUDGED_OPEN
+  if (!tool && !OWN_READERS.includes(file)) return []
   return fsTaken(source)
     .filter((name) => name === 'node:fs' || READS.has(name))
-    .filter((name) => !READS_ALLOWED.some((one) => one.file === file && one.name === name))
     .map((name) => ({
       file,
       found: name,
-      problem: `a file tool reads a file without the judged open (${JUDGED_OPEN})`,
+      problem: tool
+        ? `a file tool reads a file without the judged open (${JUDGED_OPEN})`
+        : `the engine reads a file of a place without the judged open's own reads (${JUDGED_OPEN}), which never wait on a pipe`,
     }))
 }
 
@@ -239,6 +255,6 @@ if (import.meta.main) {
   for (const { file, found, problem } of refusals) console.error(`${file}: ${found} — ${problem}`)
   if (refusals.length > 0) process.exit(1)
   console.log(
-    'the shared packages import no Electron, and no React outside the design system; the storage layer stays in the engine; the file tools read through the judged open',
+    'the shared packages import no Electron, and no React outside the design system; the storage layer stays in the engine; the file tools and the engine’s own reads of a place read through the judged open',
   )
 }

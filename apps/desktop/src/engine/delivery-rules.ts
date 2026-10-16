@@ -14,7 +14,6 @@
  * never rewritten: asking for it again answers the same copy, whatever the Project changed since.
  */
 
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -55,6 +54,7 @@ import { getMission } from './missions.ts'
 import { getProject } from './projects.ts'
 import { Database, type EngineTransaction, refusedWhile } from './storage/database.ts'
 import { deliveryRuleCopies, deliveryRules } from './storage/schema.ts'
+import { readOwnSync } from './tools/judged.ts'
 import { StaleVersion, mutate } from './transaction.ts'
 
 const writeRules = Schema.encodeSync(DeliveryRulesJson)
@@ -122,12 +122,19 @@ const rulesIn = (reader: EngineTransaction, projectId: string) =>
     return read.success
   })
 
+/** The most of a `package.json` Hemera reads. */
+const MANIFEST_CAP = 4 * 1024 * 1024
+
 /** Each repository's `package.json` in the main checkout, or null where it has none. */
 const manifestsOf = (project: Project) =>
   project.repositories.map((repository) => {
     let manifest: string | null = null
     try {
-      manifest = readFileSync(join(project.mainCheckout, repository.path, 'package.json'), 'utf8')
+      // Never waited on: a pipe put there by a session of the main checkout is refused (#434).
+      manifest = readOwnSync(
+        join(project.mainCheckout, repository.path, 'package.json'),
+        MANIFEST_CAP,
+      ).bytes.toString('utf8')
     } catch {
       manifest = null
     }
