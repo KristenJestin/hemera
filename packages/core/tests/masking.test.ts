@@ -1848,6 +1848,10 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
       heldIn({ a: JSON.stringify({ password: 'Sx1Zq' }) }, 1),
     ],
     [
+      'a quoted value in a string written in the prose of a JSON string',
+      '{"a":"say \\"password=\\\\\\"a Sx1Zq\\\\\\"\\" ok"}',
+    ],
+    [
       'a doubly encoded body after a sentence',
       '{"body":"see {\\"a\\":\\"password=\\\\\\"a Sx1Zq\\\\\\"\\"} here"}',
     ],
@@ -1903,9 +1907,10 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
   })
 
   test('deeper than the limit, a string that would hold another is masked whole (#409)', async () => {
-    // At the limit, JSON is still read: its fields named as credentials are masked whole.
+    // At the limit, JSON is still read: its fields named as credentials are masked whole, and a
+    // string that holds an escape but no quote is read as text.
     const atLimit = heldIn(
-      { r: heldIn({ password: 'Sx1Zq', note: 'ok' }, STRING_NESTING_LIMIT - 1) },
+      { r: heldIn({ password: 'Sx1Zq', note: 'ok\nthen' }, STRING_NESTING_LIMIT - 1) },
       0,
     )
     for (const masked of await printedForms([atLimit], [])) {
