@@ -23,8 +23,14 @@ import {
   PLAIN_RULES,
   PR_WITHOUT_PUSH,
   RULES,
+  pushedIn,
 } from './delivery-fixtures.ts'
-import type { DeliveryRefusals, DeliveryRules } from './delivery-model.ts'
+import {
+  CATALOGUE,
+  type DeliveryRefusals,
+  type DeliveryRules,
+  STEP_WORDS,
+} from './delivery-model.ts'
 import { DeliveryPage as Page } from './delivery-page.tsx'
 import { STALE } from './project-settings-fixtures.ts'
 
@@ -51,7 +57,6 @@ const meta = {
     rules: { table: { disable: true } },
     refusals: { table: { disable: true } },
     form: { table: { disable: true } },
-    histories: { table: { disable: true } },
   },
 } satisfies Meta<typeof Page>
 
@@ -72,9 +77,11 @@ export const Filled: Story = {
       within(canvas.getByRole('list', { name: 'Wave 2' })).getAllByRole('listitem'),
     ).toHaveLength(2)
     // Folded by default: a repository is one line until it is opened.
-    const api = canvas.getByRole('button', { name: /^api, Application, 3 changes, after shared/ })
+    const api = canvas.getByRole('button', { name: /^api, Application, 4 changes, after shared/ })
     expect(api).toHaveAttribute('aria-expanded', 'false')
     expect(canvas.queryByRole('list', { name: 'Steps of api' })).toBeNull()
+    // Who commits is no setting of its own: committing is a step of the recipes.
+    expect(canvas.queryByRole('button', { name: /^Who commits/ })).toBeNull()
   },
 }
 
@@ -97,9 +104,24 @@ export const RepositoryRecipe: Story = {
         name: /^Action on the remote, deploy-staging.yml, added here, waits for your click/,
       }),
     ).toBeVisible()
-    // Push and the pull request open when Review starts: they stand apart from the waves' steps.
+    // Each moment holds its own steps: an agent commits after each task; when Review starts,
+    // Hemera commits, then pushes and opens the pull request.
+    const tasks = canvas.getByRole('list', { name: 'Steps of api after each task' })
+    expect(
+      within(tasks).getByRole('button', {
+        name: /^An agent commits, under the permission rules, added here, may write to the network/,
+      }),
+    ).toBeVisible()
     const review = canvas.getByRole('list', { name: 'Steps of api in Review' })
-    expect(within(review).getAllByRole('listitem')).toHaveLength(2)
+    expect(
+      within(review)
+        .getAllByRole('button')
+        .map((one) => one.textContent),
+    ).toEqual([
+      expect.stringMatching(/^Hemera commits/),
+      expect.stringMatching(/^Push/),
+      expect.stringMatching(/^Pull request/),
+    ])
     expect(canvas.getByRole('combobox', { name: 'Preset of api' })).toHaveTextContent('Application')
     await userEvent.click(canvas.getByRole('button', { name: /^api, Application/ }))
     await waitFor(() => {
@@ -150,13 +172,21 @@ export const Presets: Story = {
   },
 }
 
-/** Every kind of step in one recipe, the network and click marks in their columns. */
+/** Every kind of step in one recipe, across its moments, the network and click marks in their columns. */
 export const EveryStepType: Story = {
   args: { rules: EVERY_STEP_RULES, open: ['api'] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('list', { name: 'Steps of api after each task' })
+    const review = canvas.getByRole('list', { name: 'Steps of api in Review' })
     const steps = canvas.getByRole('list', { name: 'Steps of api' })
-    for (const name of [
+    const named = (list: HTMLElement, names: readonly string[]) => {
+      for (const name of names)
+        expect(within(list).getByRole('button', { name: new RegExp(`^${name},`) })).toBeVisible()
+    }
+    named(tasks, ['Hemera commits', 'An agent commits'])
+    named(review, ['I commit myself', 'Hemera commits', 'Push', 'Pull request'])
+    named(steps, [
       'Bump',
       'Merge',
       'CI',
@@ -165,11 +195,27 @@ export const EveryStepType: Story = {
       'Command',
       'Agent',
       'Confirm',
+      'Stop the mission’s services',
     ])
-      expect(within(steps).getByRole('button', { name: new RegExp(`^${name},`) })).toBeVisible()
-    expect(within(steps).getAllByRole('button', { name: /may write to the network/ })).toHaveLength(
-      2,
-    )
+    expect(canvas.getAllByRole('button', { name: /may write to the network/ })).toHaveLength(3)
+  },
+}
+
+/** A moment with nothing in it: said in its place, and open to any step of the catalogue. */
+export const EmptyMoment: Story = {
+  args: { rules: PLAIN_RULES, open: ['shared'] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = canvas.getByRole('list', { name: 'Steps of shared after each task' })
+    expect(within(tasks).getByText(/^Nothing after each task/)).toBeVisible()
+    expect(within(tasks).queryByRole('button')).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a step to shared' }))
+    const dialog = await findOpen(body(), 'dialog', { name: 'New step · shared' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'When' }))
+    await userEvent.click(await body().findByRole('option', { name: 'After each task' }))
+    await waitFor(() => {
+      expect(within(dialog).getByRole('combobox', { name: 'After' })).toHaveTextContent('First')
+    })
   },
 }
 
@@ -241,6 +287,27 @@ export const StepAgent = stepStory('changelog', async (dialog) => {
   expect(within(dialog).getByText(/^May write to the network/)).toBeVisible()
 })
 
+/** Hemera commits: with the commit template, nothing else to write. */
+export const StepCommitByHemera = stepStory('commit', async (dialog) => {
+  expect(dialog).toHaveAccessibleName('Hemera commits · api · When Review starts')
+  expect(within(dialog).getAllByRole('combobox')).toHaveLength(1)
+  expect(within(dialog).queryByText(/^May write to the network/)).toBeNull()
+})
+
+/** I commit myself: Hemera waits for your click, then checks that a new commit is on the branch. */
+export const StepCommitByMe = stepStory('own-commit', async (dialog) => {
+  expect(dialog).toHaveAccessibleName('I commit myself · api · When Review starts')
+  expect(within(dialog).getByRole('combobox', { name: 'Starts' })).toHaveTextContent(
+    'Waits for your click',
+  )
+})
+
+/** An agent commits: an agent's step, so marked as one that may write to the network. */
+export const StepCommitByAgent = stepStory('agent-commit', async (dialog) => {
+  expect(dialog).toHaveAccessibleName('An agent commits · api · After each task')
+  expect(within(dialog).getByText(/^May write to the network/)).toBeVisible()
+})
+
 /** Confirm: what you say you did, for what Hemera can neither see nor start. */
 export const StepConfirm = stepStory('announce', async (dialog) => {
   expect(within(dialog).getByRole('textbox', { name: 'What you confirm' })).toHaveValue(
@@ -249,7 +316,10 @@ export const StepConfirm = stepStory('announce', async (dialog) => {
   expect(within(dialog).queryByText(/^May write to the network/)).toBeNull()
 })
 
-/** A step added to one repository: its kind, the step it follows, how it starts. */
+/**
+ * A step added to one repository: any kind of the catalogue, committing included, in any moment,
+ * after the step it follows there, and how it starts.
+ */
 export const AddAStep: Story = {
   args: { open: ['shared'] },
   play: async ({ canvasElement }) => {
@@ -257,10 +327,47 @@ export const AddAStep: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Add a step to shared' }))
     const dialog = await findOpen(body(), 'dialog', { name: 'New step · shared' })
     expect(within(dialog).getByRole('combobox', { name: 'Kind' })).toHaveTextContent('Command')
+    expect(within(dialog).getByRole('combobox', { name: 'When' })).toHaveTextContent('After Ship')
     expect(within(dialog).getByRole('combobox', { name: 'After' })).toHaveTextContent(
       'Published version',
     )
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'When' }))
+    const moments = await body().findAllByRole('option')
+    expect(moments.map((one) => one.textContent)).toEqual([
+      'After each task',
+      'When Review starts',
+      'After Ship',
+    ])
+    await userEvent.click(await body().findByRole('option', { name: 'When Review starts' }))
+    await waitFor(() => {
+      expect(within(dialog).getByRole('combobox', { name: 'After' })).toHaveTextContent(
+        'Pull request',
+      )
+    })
+    // The When list leaves on an exit motion: read the Kind options once it has gone.
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
+    const kinds = await body().findAllByRole('option')
+    expect(kinds.map((one) => one.textContent)).toEqual([
+      'Hemera commits',
+      'I commit myself',
+      'An agent commits',
+      'Push',
+      'Pull request',
+      'Bump',
+      'Merge',
+      'Merge locally',
+      'CI',
+      'Action on the remote',
+      'Published version',
+      'Command',
+      'Agent',
+      'Confirm',
+      'Pull the main checkout',
+      'Stop the mission’s services',
+      'Remove the worktrees',
+      'Remove the Workspace',
+    ])
     await userEvent.click(await body().findByRole('option', { name: 'Confirm' }))
     expect(await within(dialog).findByRole('textbox', { name: 'What you confirm' })).toBeVisible()
   },
@@ -291,6 +398,7 @@ export const PushInWavesOnAClick: Story = {
         start: 'click',
         requireApproval: false,
       },
+      repositories: pushedIn(RULES.repositories, 'waves'),
     },
     open: ['api'],
   },
@@ -301,9 +409,12 @@ export const PushInWavesOnAClick: Story = {
         name: /^Push and open, After Ship, in each wave · waits for your click/,
       }),
     ).toBeVisible()
-    expect(canvas.queryByRole('list', { name: 'Steps of api in Review' })).toBeNull()
+    const review = canvas.getByRole('list', { name: 'Steps of api in Review' })
+    expect(within(review).getByText(/^Nothing when Review starts/)).toBeVisible()
     const steps = canvas.getByRole('list', { name: 'Steps of api' })
-    expect(within(steps).getAllByRole('button')[0]).toHaveAccessibleName(/^Push, origin/)
+    const [commit, push] = within(steps).getAllByRole('button')
+    expect(commit).toHaveAccessibleName(/^Hemera commits, with the commit template/)
+    expect(push).toHaveAccessibleName(/^Push, origin/)
   },
 }
 
@@ -412,28 +523,6 @@ export const Approvals: Story = {
     expect(drafts).not.toBeChecked()
     await userEvent.click(drafts)
     expect(drafts).toBeChecked()
-  },
-}
-
-/**
- * Who commits, and when (open question 26): three choices, each with what it does, and the
- * history of api after ACME-12 under the one chosen — its visible effect.
- */
-export const WhoCommitsChoices: Story = {
-  args: { form: { kind: 'commits' } },
-  play: async () => {
-    const dialog = await findOpen(body(), 'dialog', { name: 'Who commits' })
-    const group = within(dialog).getByRole('radiogroup', { name: 'Who commits' })
-    const task = within(group).getByRole('radio', { name: /^Hemera, after each verified task/ })
-    expect(task).toHaveAttribute('aria-checked', 'true')
-    const history = within(dialog).getByRole('list', { name: 'History of api after ACME-12' })
-    expect(within(history).getAllByRole('listitem')).toHaveLength(4)
-    task.focus()
-    await userEvent.keyboard('{ArrowDown}{ArrowDown}')
-    const push = within(group).getByRole('radio', { name: /^Hemera, once, at the push/ })
-    expect(push).toHaveAttribute('aria-checked', 'true')
-    expect(push).toHaveFocus()
-    expect(within(history).getAllByRole('listitem')).toHaveLength(1)
   },
 }
 
@@ -560,7 +649,7 @@ export const EndCleanupRemoved: Story = {
   },
 }
 
-/** A cleanup step of the Project's own, added after the built-in ones. */
+/** A cleanup step of the Project's own, any of the catalogue, added after the built-in ones. */
 export const EndCleanupAdded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -568,7 +657,7 @@ export const EndCleanupAdded: Story = {
     const dialog = await findOpen(body(), 'dialog', { name: 'New cleanup step' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
     const kinds = await body().findAllByRole('option')
-    expect(kinds.map((one) => one.textContent)).toEqual(['Command', 'Agent', 'Confirm'])
+    expect(kinds.map((one) => one.textContent)).toEqual(CATALOGUE.map((kind) => STEP_WORDS[kind]))
     await userEvent.click(body().getByRole('option', { name: 'Command' }))
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Command' }))
     await userEvent.click(await body().findByRole('option', { name: 'notify-release' }))
@@ -754,7 +843,7 @@ export const KeyboardPath: Story = {
     )
     merge.focus()
     await userEvent.keyboard('{Enter}')
-    const dialog = await findOpen(body(), 'dialog', { name: 'Merge · shared' })
+    const dialog = await findOpen(body(), 'dialog', { name: 'Merge · shared · After Ship' })
     await waitFor(() => {
       expect(dialog.contains(document.activeElement)).toBe(true)
     })

@@ -8,8 +8,8 @@
  * The dependencies between repositories are proposed from their `package.json` files at each read
  * and saved only once the user accepts them.
  *
- * A mission copies each section when it starts acting (CT-47): R6 the preparation at its first
- * push or pull request, S1 the waves and the End at Ship. A copy is resolved for the Project as it
+ * A mission copies each section when it starts acting (CT-47): After each task at its first task
+ * done, R6 the preparation at its first push or pull request, S1 the waves and the End at Ship. A copy is resolved for the Project as it
  * is, written once with the version it was copied at and a `delivery.rules_copied` event, and
  * never rewritten: asking for it again answers the same copy, whatever the Project changed since.
  */
@@ -26,8 +26,9 @@ import {
   type DeliveryRulesDraft,
   type DeliverySection,
   ROOT_REPOSITORY,
-  SectionCopy,
+  SectionCopyJson,
   decodeDeliveryRules,
+  decodeSectionCopy,
   dependencyProblems,
   defaultDeliveryRules,
   effectiveRepositories,
@@ -57,9 +58,7 @@ import { deliveryRuleCopies, deliveryRules } from './storage/schema.ts'
 import { StaleVersion, mutate } from './transaction.ts'
 
 const writeRules = Schema.encodeSync(DeliveryRulesJson)
-const SectionCopyJson = Schema.fromJsonString(SectionCopy)
 const writeCopy = Schema.encodeSync(SectionCopyJson)
-const readCopy = Schema.decodeUnknownEffect(SectionCopyJson)
 
 /** The repositories' names in the sentences: their path, the Project's name for its root. */
 const nameOf = (project: Project, path: string) => (path === ROOT_REPOSITORY ? project.name : path)
@@ -269,9 +268,10 @@ const copiesIn = (reader: EngineTransaction, projectId: string, missionId: strin
         Effect.forEach(
           DELIVERY_SECTIONS.flatMap((section) => rows.filter((row) => row.section === section)),
           (row) =>
-            readCopy(row.document).pipe(
-              Effect.mapError(
-                () =>
+            Result.match(decodeSectionCopy(row.document), {
+              onSuccess: (copy) => Effect.succeed(copy),
+              onFailure: () =>
+                Effect.fail(
                   new DeliveryRulesUnreadable({
                     projectId,
                     document: 'copy',
@@ -279,8 +279,8 @@ const copiesIn = (reader: EngineTransaction, projectId: string, missionId: strin
                     section: DELIVERY_SECTIONS.find((one) => one === row.section) ?? null,
                     version: row.version,
                   }),
-              ),
-            ),
+                ),
+            }),
         ),
       ),
     )

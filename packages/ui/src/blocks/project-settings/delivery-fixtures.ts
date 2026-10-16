@@ -6,12 +6,12 @@ import {
   type DeliveryStep,
   type Dependency,
   type ForgeView,
+  type Moment,
   type Preset,
   type RecipeStep,
   type Reviewer,
   type StepConfig,
   TEMPLATE_VARIABLES,
-  type WhoCommits,
 } from './delivery-model.ts'
 
 /**
@@ -31,22 +31,35 @@ function step(id: string, config: StepConfig, start: DeliveryStep['start'] = 'au
   return { id, start, config }
 }
 
+const COMMIT = step('commit', { kind: 'commit-by-hemera' })
 const PUSH = step('push', { kind: 'push' })
 const PULL_REQUEST = step('pull-request', { kind: 'pull-request' })
 const BUMP = step('bump', { kind: 'bump', how: 'command', command: 'bump-deps' })
 const MERGE = step('merge', { kind: 'merge', method: 'squash' })
 const CI = step('ci', { kind: 'ci' })
 
-/** The steps each preset amounts to. */
-export function presetSteps(preset: Preset, published = '@acme/shared'): DeliveryStep[] {
-  if (preset === 'local') return [step('local-merge', { kind: 'local-merge' })]
-  const head = [PUSH, PULL_REQUEST, BUMP, MERGE, CI]
-  if (preset === 'application') return head
-  return [...head, step('published', { kind: 'published', by: 'registry', pattern: published })]
+/** A step of a recipe, in its moment: after Ship unless said. */
+function at(
+  one: DeliveryStep,
+  origin: RecipeStep['origin'] = 'preset',
+  moment: Moment = 'waves',
+): RecipeStep {
+  return { step: one, origin, moment }
 }
 
-function fromPreset(steps: readonly DeliveryStep[]): RecipeStep[] {
-  return steps.map((one) => ({ step: one, origin: 'preset' }))
+/** Hemera's commit, the push and the pull request, when Review starts: the presets' preparation. */
+const PREPARATION: readonly RecipeStep[] = [
+  at(COMMIT, 'preset', 'review'),
+  at(PUSH, 'preset', 'review'),
+  at(PULL_REQUEST, 'preset', 'review'),
+]
+
+/** The recipe each preset starts a repository with, in every moment. */
+export function presetSteps(preset: Preset, published = '@acme/shared'): RecipeStep[] {
+  if (preset === 'local') return [at(COMMIT), at(step('local-merge', { kind: 'local-merge' }))]
+  const head = [...PREPARATION, at(BUMP), at(MERGE), at(CI)]
+  if (preset === 'application') return head
+  return [...head, at(step('published', { kind: 'published', by: 'registry', pattern: published }))]
 }
 
 const GITHUB: ForgeView = { kind: 'github', host: 'github.com', forced: false, cli: 'ready' }
@@ -59,7 +72,7 @@ function repository(
     remotes: ['origin'],
     base: 'main',
     forge: GITHUB,
-    steps: fromPreset(presetSteps(part.preset, `@acme/${part.path}`)),
+    steps: presetSteps(part.preset, `@acme/${part.path}`),
     ...part,
   }
 }
@@ -67,46 +80,44 @@ function repository(
 /** shared: the Library preset as it is. */
 export const SHARED = repository({ path: 'shared', preset: 'library' })
 
-/** api: its merge changed to rebase, and a migration check and a staging deploy of its own. */
+/**
+ * api: an agent commits after each task, its merge changed to rebase, and a migration check and a
+ * staging deploy of its own.
+ */
 export const API = repository({
   path: 'api',
   preset: 'application',
   remotes: ['origin', 'upstream'],
   steps: [
-    { step: PUSH, origin: 'preset' },
-    { step: PULL_REQUEST, origin: 'preset' },
-    { step: BUMP, origin: 'preset' },
-    {
-      step: step('db-check', { kind: 'command', command: 'db-migrate-check' }),
-      origin: 'added',
-    },
-    { step: step('merge', { kind: 'merge', method: 'rebase' }), origin: 'changed' },
-    { step: CI, origin: 'preset' },
-    {
-      step: step('deploy', { kind: 'remote-action', action: 'deploy-staging.yml' }, 'click'),
-      origin: 'added',
-    },
+    at(step('agent-commit', { kind: 'commit-by-agent' }), 'added', 'tasks'),
+    ...PREPARATION,
+    at(BUMP),
+    at(step('db-check', { kind: 'command', command: 'db-migrate-check' }), 'added'),
+    at(step('merge', { kind: 'merge', method: 'rebase' }), 'changed'),
+    at(CI),
+    at(step('deploy', { kind: 'remote-action', action: 'deploy-staging.yml' }, 'click'), 'added'),
   ],
 })
 
-/** web: no CI of its own after the merge, and a check by hand on staging. */
+/**
+ * web: you commit yourself, in place of Hemera's commit; no CI of its own after the merge, and a
+ * check by hand on staging.
+ */
 export const WEB = repository({
   path: 'web',
   preset: 'application',
   steps: [
-    { step: PUSH, origin: 'preset' },
-    { step: PULL_REQUEST, origin: 'preset' },
-    { step: BUMP, origin: 'preset' },
-    { step: MERGE, origin: 'preset' },
-    { step: CI, origin: 'omitted' },
-    {
-      step: step(
-        'staging',
-        { kind: 'confirm', what: 'The release is checked on staging' },
-        'click',
-      ),
-      origin: 'added',
-    },
+    at(COMMIT, 'omitted', 'review'),
+    at(step('own-commit', { kind: 'commit-by-me' }, 'click'), 'added', 'review'),
+    at(PUSH, 'preset', 'review'),
+    at(PULL_REQUEST, 'preset', 'review'),
+    at(BUMP),
+    at(MERGE),
+    at(CI, 'omitted'),
+    at(
+      step('staging', { kind: 'confirm', what: 'The release is checked on staging' }, 'click'),
+      'added',
+    ),
   ],
 })
 
@@ -203,6 +214,34 @@ export const CLEANUP: readonly CleanupStep[] = [
   { id: 'worktrees', label: 'Remove the worktrees and the Workspace' },
 ]
 
+/**
+ * The push and the pull requests of every repository moved to a moment, with Hemera's commit
+ * before them: where the line Push and open puts them.
+ */
+export function pushedIn(
+  repositories: readonly DeliveryRepository[],
+  placement: 'review' | 'waves',
+): DeliveryRepository[] {
+  const early = (recipe: RecipeStep) =>
+    recipe.moment !== 'tasks' &&
+    (recipe.step.config.kind === 'commit-by-hemera' ||
+      recipe.step.config.kind === 'push' ||
+      recipe.step.config.kind === 'pull-request')
+  return repositories.map((one) => {
+    if (one.preset === 'local') return one
+    const moved = one.steps.filter(early).map((recipe): RecipeStep => ({
+      step: recipe.step,
+      origin: recipe.origin,
+      moment: placement,
+    }))
+    const rest = one.steps.filter((recipe) => !early(recipe))
+    // In the waves, they lead the recipe; in Review, they stand after what runs after each task.
+    const tasks = rest.filter((recipe) => recipe.moment === 'tasks')
+    const others = rest.filter((recipe) => recipe.moment !== 'tasks')
+    return Object.assign({}, one, { steps: [...tasks, ...moved, ...others] })
+  })
+}
+
 const DEPENDENCIES: readonly Dependency[] = [
   { repository: 'api', on: 'shared', proposed: false },
   { repository: 'web', on: 'shared', proposed: false },
@@ -224,7 +263,6 @@ function rules(
       reviewers: REVIEWERS,
       requireApproval: true,
       reviewDrafts: false,
-      commits: 'task',
     },
     repositories,
     dependencies,
@@ -320,31 +358,28 @@ export const EVERY_STEP_RULES: DeliveryRules = rules(
       path: 'api',
       preset: 'library',
       steps: [
-        { step: PUSH, origin: 'preset' },
-        { step: PULL_REQUEST, origin: 'preset' },
-        { step: BUMP, origin: 'preset' },
-        { step: MERGE, origin: 'preset' },
-        { step: CI, origin: 'preset' },
-        {
-          step: step('release', { kind: 'remote-action', action: 'release.yml' }, 'click'),
-          origin: 'added',
-        },
-        {
-          step: step('published', { kind: 'published', by: 'tag', pattern: 'v*' }),
-          origin: 'changed',
-        },
-        { step: step('notify', { kind: 'command', command: 'notify-release' }), origin: 'added' },
-        {
-          step: step('changelog', {
+        at(step('task-commit', { kind: 'commit-by-hemera' }), 'added', 'tasks'),
+        at(step('agent-commit', { kind: 'commit-by-agent' }), 'added', 'tasks'),
+        at(step('own-commit', { kind: 'commit-by-me' }, 'click'), 'added', 'review'),
+        ...PREPARATION,
+        at(BUMP),
+        at(MERGE),
+        at(CI),
+        at(step('release', { kind: 'remote-action', action: 'release.yml' }, 'click'), 'added'),
+        at(step('published', { kind: 'published', by: 'tag', pattern: 'v*' }), 'changed'),
+        at(step('notify', { kind: 'command', command: 'notify-release' }), 'added'),
+        at(
+          step('changelog', {
             kind: 'agent',
             task: 'Write the release note of the published version in docs/releases.md',
           }),
-          origin: 'added',
-        },
-        {
-          step: step('announce', { kind: 'confirm', what: 'The release is announced' }, 'click'),
-          origin: 'added',
-        },
+          'added',
+        ),
+        at(
+          step('announce', { kind: 'confirm', what: 'The release is announced' }, 'click'),
+          'added',
+        ),
+        at(step('stop', { kind: 'stop-services' }), 'added'),
       ],
     }),
   ],
@@ -428,6 +463,7 @@ export const CYCLE: DeliveryRefusals = {
 export const APPROVAL_AFTER_SHIP_RULES: DeliveryRules = {
   ...RULES,
   pullRequests: { ...RULES.pullRequests, placement: 'waves', requireApproval: true },
+  repositories: pushedIn(RULES.repositories, 'waves'),
 }
 
 export const APPROVAL_AFTER_SHIP: DeliveryRefusals = {
@@ -445,8 +481,10 @@ export const FORGE_CANNOT: DeliveryRules = {
       steps: [
         ...UI_KIT.steps,
         {
-          step: step('release', { kind: 'remote-action', action: 'release pipeline' }, 'click'),
-          origin: 'added',
+          ...at(
+            step('release', { kind: 'remote-action', action: 'release pipeline' }, 'click'),
+            'added',
+          ),
           refused:
             'Bitbucket Data Center cannot start a pipeline from its command line. Use Confirm, and start it yourself.',
         },
@@ -541,23 +579,4 @@ export function filled(template: string): string {
   let text = template
   for (const [name, value] of Object.entries(EXAMPLE)) text = text.replaceAll(name, value)
   return text
-}
-
-// ——— Who commits ———
-
-/** What api's history reads after ACME-12, under each value of “who commits”. */
-export const HISTORIES: Record<WhoCommits, readonly string[]> = {
-  task: [
-    'ACME-12: Add the export endpoint',
-    'ACME-12: Stream the rows page by page',
-    'ACME-12: Name the currency of each row',
-    'ACME-12: Export invoices as CSV (at the push: the documentation)',
-  ],
-  agent: [
-    'ACME-12: wip export endpoint',
-    'ACME-12: Fix the page size',
-    'ACME-12: Stream rows, name currencies',
-    'ACME-12: Export invoices as CSV (at the push: what was left)',
-  ],
-  push: ['ACME-12: Export invoices as CSV'],
 }
