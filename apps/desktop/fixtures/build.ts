@@ -1,15 +1,24 @@
 /**
- * Builds a fixture group (#420) in its folder under the fixtures root, from nothing: the marker
- * first, then the fake forge, then the group's state through the engine, opened on the fixture's
- * own profile with every agent the scripted fake and every forge CLI the tests' fake.
+ * Builds a fixture group (#420) in its folder under the fixtures root, from nothing: where it
+ * would be is checked first, before anything is written, then the root is made the user's alone,
+ * then the marker, the fake forge, and the group's state through the engine, opened on the
+ * fixture's own profile with every agent the scripted fake and every forge CLI the tests' fake.
  *
  * A folder already there is checked as the application checks it before anything is done to it:
- * one without the marker, outside the root or holding a real profile is refused and left as it
- * was. Without `rebuild`, a fixture already built is kept as it is; with it, it is thrown away and
+ * one without the marker, outside the root, under a root that is a link or not the user's alone,
+ * or holding a real profile is refused and left as it was. Without `rebuild`, a fixture already built is kept as it is; with it, it is thrown away and
  * built again, to the same state.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -20,7 +29,14 @@ import { suiteAgent } from '../src/engine/agents/suite-agent.ts'
 import { startProfile } from '../src/engine/profile.ts'
 import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from '../src/engine/registries.ts'
 import { getSession } from '../src/engine/sessions/store.ts'
-import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
+import {
+  FIXTURE_FORGE,
+  FIXTURE_MARKER,
+  checkFixtureFolder,
+  checkFixturePlace,
+  checkFixturesRoot,
+  profilesIn,
+} from '../src/main/fixture-profile.ts'
 import { fakeForge, ghSignedOut } from '../tests/fake-forge.ts'
 import { scriptedAgents } from './agents.ts'
 import { fixtureGit } from './git.ts'
@@ -40,8 +56,8 @@ const VERSION = Schema.decodeUnknownSync(
 
 /**
  * The profiles Hemera opens on this machine when no flag says otherwise: a development run's,
- * named after the package, and an installed one's, named after the product. No fixture is ever
- * built in one of them, nor around one.
+ * named after the package, and each channel's, named after its product. No fixture is ever built
+ * in one of them, nor around one.
  */
 export function machineProfiles(): ReadonlyArray<string> {
   const appData = Match.value(process.platform).pipe(
@@ -49,7 +65,7 @@ export function machineProfiles(): ReadonlyArray<string> {
     Match.when('darwin', () => join(homedir(), 'Library', 'Application Support')),
     Match.orElse(() => process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config')),
   )
-  return [join(appData, '@hemera', 'desktop'), join(appData, 'Hemera')]
+  return profilesIn(appData)
 }
 
 /** The list `pnpm fixtures --list` prints: each group, and what to test once it is open. */
@@ -82,26 +98,38 @@ export interface FixtureAsk {
   readonly normalProfiles?: ReadonlyArray<string>
 }
 
-/** Refuses, with the sentence, a folder the application would refuse to open. */
-const checked = (folder: string, root: string, normalProfiles: ReadonlyArray<string>): void => {
-  for (const normalProfile of normalProfiles) {
-    const result = checkFixtureFolder(folder, { root, normalProfile })
-    if (Result.isFailure(result)) throw new Error(result.failure)
-  }
+/** Refuses, with the sentence, what a check refuses. */
+const sure = <A>(checked: Result.Result<A, string>): A => {
+  if (Result.isFailure(checked)) throw new Error(checked.failure)
+  return checked.success
 }
 
 /**
  * The fake forge's environment, in the fixture: `gh` signed out, `bkt` without an account. It
- * holds no state of the fixture's, so it is written again at each opening.
+ * holds no state of the fixture's, so it is written again at each opening, and its environment
+ * in the profile, where the application finds it whoever opens it.
  */
-const forgeIn = (folder: string) => {
+const forgeIn = (folder: string, profile: string) => {
   const place = join(folder, 'forge')
   rmSync(place, { recursive: true, force: true })
   const forge = fakeForge([...ghSignedOut()], ['gh', 'bkt'], place)
   // The fake's own configuration folder stays the fake's: the application keeps the user's
   // XDG_CONFIG_HOME, which is where Electron finds the profile it must not open.
   const { XDG_CONFIG_HOME: _config, ...env } = forge.env
+  writeFileSync(join(profile, FIXTURE_FORGE), `${JSON.stringify(env)}\n`)
   return env
+}
+
+/**
+ * The fixtures root, made for the user alone when it is not there yet, then checked as main checks
+ * it: a folder of the user's own that no other account can write to, and no link.
+ */
+const rootReady = (root: string): void => {
+  if (lstatSync(root, { throwIfNoEntry: false }) === undefined) {
+    mkdirSync(dirname(root), { recursive: true })
+    mkdirSync(root, { mode: 0o700 })
+  }
+  sure(checkFixturesRoot(root))
 }
 
 /** The group's state, on the fixture's profile, through the engine's services. */
@@ -164,11 +192,17 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   const work = join(folder, 'work')
   const fixture = (env: BuiltFixture['env']): BuiltFixture => ({ folder, profile, work, env })
 
+  const places = { root: asked.root, normalProfiles }
+  // Where the fixture would be is checked before anything is written, the root included.
+  sure(checkFixturePlace(profile, places))
+  rootReady(asked.root)
+
   if (existsSync(folder)) {
-    checked(folder, asked.root, normalProfiles)
+    sure(checkFixtureFolder(folder, places))
     if (!asked.rebuild) {
+      sure(checkFixtureFolder(profile, places))
       asked.log(`${group.name} is already built in ${folder}; --rebuild builds it again`)
-      return fixture(forgeIn(folder))
+      return fixture(forgeIn(folder, profile))
     }
     rmSync(folder, { recursive: true, force: true })
   }
@@ -177,9 +211,8 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   mkdirSync(profile, { recursive: true })
   writeFileSync(join(folder, FIXTURE_MARKER), marker)
   writeFileSync(join(profile, FIXTURE_MARKER), marker)
-  checked(profile, asked.root, normalProfiles)
   mkdirSync(work)
-  const env = forgeIn(folder)
+  const env = forgeIn(folder, profile)
   asked.log(`building ${group.name} in ${folder}`)
   // What the engine says while it builds goes to the fixture's own log, not to the terminal.
   const engineLog = join(folder, BUILD_LOG)

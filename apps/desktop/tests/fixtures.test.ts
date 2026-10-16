@@ -3,8 +3,16 @@
  * under a fixtures root, its state reached through the engine's services, the same twice.
  */
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { delimiter, join } from 'node:path'
 
 import { Effect, Predicate, Result } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
@@ -14,7 +22,14 @@ import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
 import { reached } from '../fixtures/missions.ts'
 import { FAKE_PAYMENTS_KEY } from '../fixtures/larkspur.ts'
 import { chatsOf, transcriptOf } from '../src/engine/chat/store.ts'
-import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
+import {
+  FIXTURE_FLAG,
+  FIXTURE_FORGE,
+  FIXTURE_MARKER,
+  checkFixtureFolder,
+  fixtureEnvironment,
+  fixtureOpenedBy,
+} from '../src/main/fixture-profile.ts'
 import { buildingOf } from '../src/engine/building/builder.ts'
 import { proofsRead } from '../src/engine/building/proofs.ts'
 import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
@@ -36,11 +51,19 @@ afterEach(removeFolders)
 /** A fixtures root of the test's own, and a normal profile beside it that no fixture touches. */
 const places = () => {
   const base = temporaryFolder('fixtures')
-  return { root: join(base, 'fixtures'), normalProfile: join(base, 'config', 'Hemera') }
+  const normalProfile = join(base, 'config', 'Hemera')
+  return { base, root: join(base, 'fixtures'), normalProfile, normalProfiles: [normalProfile] }
 }
 
-const built = (group: string, root: string, rebuild = false) =>
-  buildFixture({ root, group, rebuild, log: () => undefined })
+/** The normal profile of every build, for a test that does not name its own: a folder of the test's. */
+const NORMAL = [join(temporaryFolder('fixtures-normal'), 'Hemera')]
+
+const built = (
+  group: string,
+  root: string,
+  rebuild = false,
+  normalProfiles: ReadonlyArray<string> = NORMAL,
+) => buildFixture({ root, group, rebuild, log: () => undefined, normalProfiles })
 
 /** What a fixture's profile holds, as the services answer it, without the ids they draw. */
 const stateOf = (profile: string) =>
@@ -107,11 +130,83 @@ describe('The fixtures command', () => {
   })
 
   test('a fixture folder carries the marker, and its profile is one the flag opens', async () => {
-    const { root, normalProfile } = places()
-    const fixture = await built('empty', root)
+    const { root, normalProfiles } = places()
+    const fixture = await built('empty', root, false, normalProfiles)
     expect(existsSync(join(fixture.folder, FIXTURE_MARKER))).toBe(true)
-    expect(Result.isSuccess(checkFixtureFolder(fixture.profile, { root, normalProfile }))).toBe(
+    expect(Result.isSuccess(checkFixtureFolder(fixture.profile, { root, normalProfiles }))).toBe(
       true,
+    )
+  })
+
+  test('the command checks where it would build before it writes anything: a root inside a normal profile stays untouched', async () => {
+    const { base } = places()
+    const normalProfile = join(base, 'config', 'Hemera')
+    mkdirSync(normalProfile, { recursive: true })
+    writeFileSync(join(normalProfile, 'hemera.db'), "the user's own\n")
+    const root = join(normalProfile, 'fixtures')
+    await expect(built('empty', root, false, [normalProfile])).rejects.toThrow(
+      /is the profile Hemera uses normally/,
+    )
+    expect(readdirSync(normalProfile)).toEqual(['hemera.db'])
+  })
+
+  test('the command refuses a root that is a link, and writes nothing where it leads', async () => {
+    const { base } = places()
+    const outside = join(base, 'outside')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'precious.txt'), 'kept\n')
+    const root = join(base, 'fixtures')
+    // A junction needs no privilege on Windows; elsewhere the type is ignored.
+    symlinkSync(outside, root, 'junction')
+    await expect(built('empty', root)).rejects.toThrow(/is a link/)
+    await expect(built('empty', root, true)).rejects.toThrow(/is a link/)
+    expect(readdirSync(outside)).toEqual(['precious.txt'])
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'the command makes the root for the user alone',
+    async () => {
+      const { root } = places()
+      await built('empty', root)
+      expect(statSync(root).mode & 0o777).toBe(0o700)
+    },
+  )
+
+  test('the application opened by its flag alone, without the command, runs the fake gh and bkt, never the real ones', async () => {
+    const { root } = places()
+    const fixture = await built('empty', root)
+    const real = join(temporaryFolder('fixtures-real-path'), 'bin')
+    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH'
+    const opened = fixtureEnvironment(fixture.profile, { [pathKey]: real, HOME: '/home/someone' })
+    if (Result.isFailure(opened)) throw new Error(opened.failure)
+    const [fakes, ...rest] = (opened.success[pathKey] ?? '').split(delimiter)
+    expect(rest).toEqual([real])
+    // The fakes come first, from the fixture's own folder, and so do their account and log.
+    expect(fakes?.startsWith(fixture.folder)).toBe(true)
+    const shims = readdirSync(fakes ?? '')
+    for (const cli of ['gh', 'bkt'])
+      expect(shims).toContainEqual(expect.stringMatching(new RegExp(`^${cli}(\\.cmd)?$`)))
+    for (const name of ['GH_CONFIG_DIR', 'FAKE_FORGE_LOG', 'FAKE_FORGE_RULES']) {
+      expect(opened.success[name]?.startsWith(fixture.folder)).toBe(true)
+    }
+    // What main opens on the flag: the profile, and that environment with it.
+    const asked = {
+      argv: ['electron', '.', `${FIXTURE_FLAG}=${fixture.profile}`],
+      packaged: false,
+      root,
+      normalProfiles: NORMAL,
+      env: { [pathKey]: real },
+    }
+    const main = fixtureOpenedBy(asked)
+    expect(main !== null && Result.isSuccess(main) && main.success.env[pathKey]).toBe(
+      opened.success[pathKey],
+    )
+    // A fixture whose fake forge is missing is refused rather than opened on the real CLIs.
+    rmSync(join(fixture.profile, FIXTURE_FORGE))
+    expect(Result.isFailure(fixtureEnvironment(fixture.profile, { [pathKey]: real }))).toBe(true)
+    const refused = fixtureOpenedBy(asked)
+    expect(refused !== null && Result.isFailure(refused) && refused.failure).toMatch(
+      /has no fake forge/,
     )
   })
 
@@ -379,19 +474,60 @@ describe('The mission groups reach their state through the engine, with scripted
   })
 })
 
+/** What a fixture's missions hold, as the services answer it, without the ids they draw. */
+const missionsOf = (profile: string) =>
+  readIn(
+    profile,
+    Effect.gen(function* () {
+      const projects = yield* listProjects
+      const missions = yield* Effect.forEach(projects, (project) =>
+        Effect.flatMap(listMissions(project.id), (found) =>
+          Effect.forEach(found, (mission) =>
+            Effect.gen(function* () {
+              const building = yield* buildingOf(mission.id)
+              const proofs = yield* proofsRead(mission.id)
+              return {
+                title: mission.title,
+                stage: mission.stage,
+                tasks: (building?.tasks ?? []).map((task) => [task.id, task.state]),
+                proofs: (proofs?.scenarios ?? []).map((one) => [one.scenario, one.state]),
+              }
+            }),
+          ),
+        ),
+      )
+      const needs = (yield* listNeeds).flatMap((group) =>
+        group.needs.map(
+          (need) => `${need.requestedBy ?? 'Hemera'} ${need.state} ${String(need.choices.length)}`,
+        ),
+      )
+      return { missions: missions.flat(), needs: needs.toSorted() }
+    }),
+  )
+
+const BUILDABLE = FIXTURE_GROUPS.filter((group) => group.notYet === undefined).map(
+  (group) => group.name,
+)
+
 describe('--rebuild', () => {
-  test('--rebuild gives the same state twice', async () => {
-    const { root } = places()
-    const first = await built('project-ready', root)
-    const state = await stateOf(first.profile)
-    const refs = refsOf(first.work)
-    const again = await built('project-ready', root, true)
-    expect(again.folder).toBe(first.folder)
-    expect(await stateOf(again.profile)).toEqual(state)
-    // The same commits, to the hash: fixed authors, fixed dates, no randomness.
-    expect(refsOf(again.work)).toEqual(refs)
-    expect(Object.keys(refs).length).toBeGreaterThan(3)
-  })
+  test.each(BUILDABLE)(
+    '--rebuild gives the same state twice: %s',
+    async (group) => {
+      const { root } = places()
+      const first = await built(group, root)
+      const refs = refsOf(first.work)
+      const state = { projects: await stateOf(first.profile), ...(await missionsOf(first.profile)) }
+      const again = await built(group, root, true)
+      expect(again.folder).toBe(first.folder)
+      // The same commits, to the hash: fixed authors, fixed dates, no randomness.
+      expect(refsOf(again.work)).toEqual(refs)
+      expect({
+        projects: await stateOf(again.profile),
+        ...(await missionsOf(again.profile)),
+      }).toEqual(state)
+    },
+    360_000,
+  )
 
   test('without --rebuild, a fixture already built is opened as it is', async () => {
     const { root } = places()

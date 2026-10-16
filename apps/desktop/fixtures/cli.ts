@@ -6,15 +6,17 @@
  *   pnpm fixtures <group>              builds the group if it is not built, then opens Hemera on it
  *   pnpm fixtures <group> --rebuild    throws the group's folder away and builds it again first
  *
- * Every group lives in a folder of its own under the fixtures root, in the temporary directory.
+ * Every group lives in a folder of its own under the fixtures root, a folder of the user's own.
  * The application is the development run (`dev.ts`), pointed at the fixture's profile with
  * `--fixture-profile`, the fake `gh` and `bkt` first on its `PATH`.
  */
 
 import { spawn } from 'node:child_process'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 
-import { FIXTURE_FLAG, fixturesRoot } from '../src/main/fixture-profile.ts'
+import { Result } from 'effect'
+
+import { FIXTURE_FLAG, fixtureEnvironment, fixturesRoot } from '../src/main/fixture-profile.ts'
 import { buildFixture, fixtureList } from './build.ts'
 
 const application = join(import.meta.dirname, '..')
@@ -47,14 +49,13 @@ const built = await buildFixture({
   process.exit(1)
 })
 
-// Windows names the variable `Path`; the same key is kept, the fakes' folder first on it.
-const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
-const { PATH: fakes = '', ...forge } = built.env
-const env = {
-  ...process.env,
-  ...forge,
-  [pathKey]: [fakes, process.env[pathKey] ?? ''].join(delimiter),
+// The fakes' folder first on the PATH, as main puts it on a fixture whoever opens it.
+const forge = fixtureEnvironment(built.profile, process.env)
+if (Result.isFailure(forge)) {
+  process.stderr.write(`${forge.failure}\n`)
+  process.exit(1)
 }
+const env = { ...process.env, ...forge.success }
 
 process.stdout.write(`opening Hemera on ${built.profile}\n`)
 const opened = spawn(

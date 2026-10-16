@@ -19,7 +19,7 @@ import { BrowserWindow, Menu, app, dialog, nativeTheme, safeStorage, screen } fr
 import { DIAGNOSTIC_FILE, openDiagnosticLog, type Log } from './diagnostic.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
-import { fixtureProfileOf, fixturesRoot } from './fixture-profile.ts'
+import { fixtureOpenedBy, fixturesRoot, profilesIn } from './fixture-profile.ts'
 import { identityOf } from './identity.ts'
 import { type JevKeyEngine, jevKeyHandling } from './jev-key.ts'
 import { type JiraTokenEngine, jiraTokenHandling, tokenOpener } from './jira-token.ts'
@@ -111,7 +111,9 @@ const run = Effect.gen(function* () {
 
   const underSuite = suiteRuns(process.env, app.isPackaged)
   if (fixture !== null)
-    log(`opened on the fixture's profile ${dataFolder}: every agent is the fake`)
+    log(
+      `opened on the fixture's profile ${dataFolder}: every agent is the fake, gh and bkt the fixture's`,
+    )
   const engine = yield* startEngine(
     main,
     { dataFolder, migrations: MIGRATIONS, ...identity, fixture: fixture !== null },
@@ -273,17 +275,23 @@ if (passwordStore !== null) app.commandLine.appendSwitch('password-store', passw
  * made the data folder before anything reads it, the single-instance lock included, so a fixture
  * runs beside the Hemera of every day without touching its profile. Refused, nothing starts.
  */
-const fixture = fixtureProfileOf({
+const fixture = fixtureOpenedBy({
   argv: process.argv,
   packaged: app.isPackaged,
   root: fixturesRoot(),
-  normalProfile: app.getPath('userData'),
+  normalProfiles: [app.getPath('userData'), ...profilesIn(app.getPath('appData'))],
+  env: process.env,
 })
 if (fixture !== null && Result.isFailure(fixture)) {
   process.stderr.write(`${fixture.failure}\n`)
   process.exit(1)
 }
-if (fixture !== null && Result.isSuccess(fixture)) app.setPath('userData', fixture.success)
+if (fixture !== null && Result.isSuccess(fixture)) {
+  // The fake gh and bkt the fixture carries, never the real ones: the engine and every process
+  // it starts inherit this environment.
+  Object.assign(process.env, fixture.success.env)
+  app.setPath('userData', fixture.success.profile)
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
