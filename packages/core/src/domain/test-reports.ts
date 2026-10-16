@@ -45,9 +45,10 @@ export type TestReporting = typeof TestReporting.Type
 
 /**
  * The largest report read: a larger one is not read at all, and names nothing, so the key line
- * decides. A report is read and parsed on the engine's thread: 8 MiB keeps the worst JUnit report
- * under about half a second, and holds about 20,000 passed tests in vitest's JSON (Hemera's own
- * core suite, 1,799 tests, writes 0.7 MB) or a few thousand failures with their tracebacks.
+ * decides. A report is read and parsed on the engine's thread: at 8 MiB, the slowest report, some
+ * 220,000 empty JUnit test cases, takes about a second. 8 MiB holds about 20,000 passed tests in
+ * vitest's JSON (Hemera's own core suite, 1,799 tests, writes 0.7 MB) or a few thousand failures
+ * with their tracebacks.
  */
 export const REPORT_CAP = 8 * 1024 * 1024
 
@@ -206,14 +207,20 @@ const unescaped = (text: string): string =>
     return ENTITIES.get(String(name)) ?? ''
   })
 
+/** An attribute of an opening tag: its name, not the end of another word, and its quoted value. */
+const ATTRIBUTE = /(?<![\w:.-])([\w:.-]+)\s*=\s*"([^"]*)"/g
+
 /** The attributes of an element's opening tag, its text between `<name` and `>`. */
-const attributesOf = (tag: string): ReadonlyMap<string, string> =>
-  new Map(
-    Array.from(tag.matchAll(/(?<![\w:.-])([\w:.-]+)\s*=\s*"([^"]*)"/g), (found) => [
-      found[1] ?? '',
-      unescaped(found[2] ?? ''),
-    ]),
-  )
+const attributesOf = (tag: string): ReadonlyMap<string, string> => {
+  const attributes = new Map<string, string>()
+  if (!tag.includes('=')) return attributes
+  const each = new RegExp(ATTRIBUTE.source, 'g')
+  for (let found = each.exec(tag); found !== null; found = each.exec(tag)) {
+    const value = found[2] ?? ''
+    attributes.set(found[1] ?? '', value.includes('&') ? unescaped(value) : value)
+  }
+  return attributes
+}
 
 /** How a JUnit test case ended, from its body: a failure first, then an error, then a skip. */
 const endingOf = (body: string): JunitCase['ending'] => {
