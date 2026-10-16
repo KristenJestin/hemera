@@ -38,9 +38,9 @@ export interface Asked {
  * The programs a test may start wherever the `PATH` finds them: Node, the repository's own
  * toolchain (`pnpm`), `git`, what the supervisor asks about the machine's processes (`ps`,
  * `taskkill`, `powershell`), the shells the CI's steps run in, the read and build commands the
- * permission suites run for an agent (`ls`, `make`), pacman's `vercmp`, and `mkfifo`, which makes the
- * named pipe a proof's report is refused as. Never an agent's CLI or a forge's: a suite that wants
- * one hands its fake.
+ * permission suites run for an agent (`ls`, `make`), pacman's `vercmp`, and `mkfifo`, which makes
+ * the pipe a suite holds a read open with, and the named pipe a proof's report is refused as. Never
+ * an agent's CLI or a forge's: a suite that wants one hands its fake.
  */
 export const SYSTEM_PROGRAMS = [
   'node',
