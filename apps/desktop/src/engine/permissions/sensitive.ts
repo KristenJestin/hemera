@@ -12,7 +12,8 @@
  * A file read under the session's place with more than one name on the disk (a hard link) is
  * compared with the sensitive files of that place, found by their names: one that is one of them
  * is that sensitive place (#392). A hard link from the place to a sensitive file outside it is
- * not seen: the residual #380 accepted.
+ * not seen: the residual #380 accepted. A mission's evidence is named by its fingerprint: one
+ * Hemera kept from a file now a sensitive place (`H1/.env`, kept before #392) is that place.
  */
 
 import { type BigIntStats, realpathSync } from 'node:fs'
@@ -131,12 +132,20 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
               const found = sensitivePlace(path, context, { reading })
               return found === null ? null : said(found)
             }
-            const [first = '', second = ''] = relative(data, path).split(sep)
+            const [first = '', second = '', third = '', fourth = ''] = relative(data, path).split(
+              sep,
+            )
             if (first === 'missions' && second !== '' && asked.session.missionId !== null) {
               const folders = yield* places.foldersOf(asked.session.missionId)
               const reachable =
                 second === folders.own || (!asked.writes && folders.dependencies.includes(second))
-              if (reachable) return below(join(data, first, second), path, reading)
+              if (reachable) {
+                const named = below(join(data, first, second), path, reading)
+                if (named !== null || third !== 'evidence' || fourth === '') return named
+                const kept = yield* places.evidenceNamed(second, fourth)
+                const from = kept === null ? null : sensitivePlace(kept, context, { reading })
+                return from === null ? null : said(`evidence kept from ${kept ?? ''}`)
+              }
             }
             const shown = join(data, ...[first, second].filter((one) => one !== ''))
             return said(shownFromHome(shown, context))

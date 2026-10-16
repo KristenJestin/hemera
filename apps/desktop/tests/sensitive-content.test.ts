@@ -9,7 +9,14 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { linkSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { TOOL_NAMES, type ToolName } from '@hemera/core/domain'
@@ -17,6 +24,10 @@ import { Effect } from 'effect'
 import type { Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { AgentAuthor } from '@hemera/ipc'
+
+import { MISSIONS_FOLDER } from '../src/engine/memory/files.ts'
+import { putEvidence } from '../src/engine/memory/evidence.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { acmeWithMission, callTool, questionsKept, sessionOf } from './tools-world.ts'
@@ -194,6 +205,38 @@ describe('A second name of a sensitive file is that file (hard links)', () => {
     expect(read?.ok).toBe(true)
     expect(read?.text).toContain('export const acme = []')
     expect(asked).toEqual([])
+  })
+})
+
+describe('An evidence kept from a sensitive file before #392 is that file', () => {
+  test('fs_read of an evidence kept from a .env is refused as a sensitive place, and its answer holds no line', async () => {
+    const questions = questionsKept()
+    const answer = await commandsEngine(data, {
+      tools: { home: work, permissionRequests: questions.layer },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          // Kept by a Prototyper before its kept files were read through the sensitive places.
+          yield* putEvidence({
+            missionId: mission.id,
+            content: { text: `ACME_REGION=${REGION}\n` },
+            name: 'H1/.env',
+            about: null,
+            author: AgentAuthor.make({ role: 'prototyper', sessionId: crypto.randomUUID() }),
+          })
+          const folder = join(data, MISSIONS_FOLDER, mission.key, 'evidence')
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          return yield* callTool(builder.grantId, 'fs_read', {
+            path: join(folder, readdirSync(folder)[0] ?? ''),
+          })
+        }),
+      ),
+    )
+    expect(answer.text).not.toContain(REGION)
+    expect(answer).toMatchObject({ ok: false, refused: true })
+    expect(answer.text).toMatch(/^refused: sensitive place: evidence kept from H1\/\.env$/)
+    expect(questions.asked).toEqual([])
   })
 })
 
