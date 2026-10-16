@@ -65,6 +65,14 @@ const RESULT_TYPES =
     ? ['violations']
     : ['violations', 'incomplete', 'passes', 'inapplicable']
 
+/**
+ * The accessibility check fetches axe-core when the first story of a page ends, inside that
+ * story's thirty seconds. On the Windows runner that request has waited 28 s in the browser's
+ * queue, behind the other pages' of the same server, and the story timed out on it (#428). Asked
+ * for here, while the page is being set up, the same wait costs time and fails nothing.
+ */
+if ('__vitest_browser__' in globalThis) await import('axe-core')
+
 const preview: Preview = {
   decorators: [withTooltips, withMotion, withTheme],
   /**
