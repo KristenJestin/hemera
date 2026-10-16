@@ -4794,15 +4794,21 @@ describe('A report read in bounded memory, whatever its names (#342, round 11)',
   test('a report whose test paths add up to more than their cap is not read, one at the cap is', () => {
     // Each test's path is the suite's name, ` > ` and `t`: 4,096 characters, 2,048 of them the cap.
     const suite = 'a'.repeat(4_096 - ' > t'.length)
-    const tests = (count: number) =>
+    // `count` tests named `t`, then one named `last`.
+    const tests = (count: number, last = 't') =>
       reportedTests(
         NODE_REPORT,
-        `<testsuites><testsuite name="${suite}">${'<testcase name="t" file="a.test.mjs"/>'.repeat(count)}</testsuite></testsuites>`,
+        `<testsuites><testsuite name="${suite}">${'<testcase name="t" file="a.test.mjs"/>'.repeat(count)}<testcase name="${last}" file="a.test.mjs"/></testsuite></testsuites>`,
         'a.test.mjs',
       )
     const most = KEYS_CAP / 4_096
     expect(Number.isInteger(most)).toBe(true)
-    expect([tests(most)?.length, tests(most + 1)]).toEqual([most, null])
+    // At the cap, a whole path over it, and a single character over it.
+    expect([tests(most - 1)?.length, tests(most), tests(most - 1, 'tt')]).toEqual([
+      most,
+      null,
+      null,
+    ])
   })
 })
 
