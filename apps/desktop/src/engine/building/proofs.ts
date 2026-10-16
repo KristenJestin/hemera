@@ -44,6 +44,7 @@ import {
   type ProofClass,
   type ProofPhase,
   PROOF_PHASES,
+  ROLE_PLACES,
   type ScenarioProofState,
   type ToolArguments,
   addedTestNames,
@@ -85,10 +86,11 @@ import {
   writesBeforeRed,
 } from '../storage/schema.ts'
 import { type Grant, ToolAccess } from '../tools/access.ts'
-import type { WrittenFile } from '../tools/ports.ts'
+import type { SensitivePlaces, WrittenFile } from '../tools/ports.ts'
 import { actionDone, actionFailed, beginAction } from '../tools/actions.ts'
 import { answered, attempt as onDisk, refusal, replaceFile } from '../tools/files.ts'
 import { NotJudged, readJudged } from '../tools/judged.ts'
+import { Withholding } from '../tools/withholding.ts'
 import { containedIn, resolvePath } from '../tools/paths.ts'
 import { fingerprintOf } from '../tools/read.ts'
 import { mutate } from '../transaction.ts'
@@ -180,6 +182,7 @@ export const PROOF_KINDS = [
 /** The services the proofs' work runs on, which the Builder provides. */
 export type ProofNeeds =
   | Database
+  | SensitivePlaces
   | ToolAccess
   | DomainEvents
   | Secrets
@@ -440,20 +443,32 @@ export const buildingProofs = (parts: ProofParts) => {
   const folderOf = (building: BuildingRow, repository: string) =>
     basesOf(building).find((one) => one.repository === repository)?.folder ?? null
 
-  /** The folder of the Building's Workspace, its agents' place: a folder whose parent no agent reaches. */
-  const rootOf = (building: BuildingRow) =>
+  /**
+   * The Building's Workspace, its agents' place (a folder whose parent no agent reaches), and what
+   * its Builder reads there without a verdict (#392): a proof's file is read as the Builder would
+   * read it, since what it holds may be handed to the Builder, so a file in a sensitive place is
+   * withheld.
+   */
+  const placeOfBuilding = (building: BuildingRow) =>
     Effect.gen(function* () {
       const database = yield* Database
       const [workspace] =
         building.workspaceId === null
           ? []
           : yield* database
-              .select({ folder: workspaces.folder })
+              .select({ folder: workspaces.folder, projectId: workspaces.projectId })
               .from(workspaces)
               .where(eq(workspaces.id, building.workspaceId))
               .pipe(Effect.mapError(refusedWhile('reading the Workspace')))
       if (workspace === undefined) return yield* Effect.fail('its Workspace is gone')
-      return workspace.folder
+      const withholding = yield* Withholding.of({
+        sessionId: '',
+        role: 'builder',
+        projectId: workspace.projectId,
+        missionId: building.missionId,
+        place: { ...ROLE_PLACES.builder, root: workspace.folder },
+      })
+      return { root: workspace.folder, withholding }
     })
 
   /**
@@ -461,17 +476,18 @@ export const buildingProofs = (parts: ProofParts) => {
    * (#385): followed from the Building's place as it really is, and refused unless it stays inside
    * the repository's folder as it really is, so that a link planted at the repository's folder or
    * on the way never leads a proof out of it. A judged open then proves its handle against that
-   * path. Fails with why it is refused.
+   * path, read as the Builder reads it. Fails with why it is refused.
    */
   const realPathIn = (building: BuildingRow, folder: string, path: string) =>
     Effect.gen(function* () {
-      const root = yield* rootOf(building)
-      return yield* onDisk(async () => {
+      const { root, withholding } = yield* placeOfBuilding(building)
+      const real = yield* onDisk(async () => {
         const repository = join(await realpath(root), relative(root, folder))
         const found = await resolvePath(root, folder, path, '')
         if (!found.certain || !containedIn(repository, found.path)) throw new NotJudged(LEADS_OUT)
         return found.path
       })
+      return { path: real, withholding }
     })
 
   /**
@@ -487,7 +503,7 @@ export const buildingProofs = (parts: ProofParts) => {
       const folder = folderOf(building, test.repository)
       if (folder === null) return false
       const read = yield* realPathIn(building, folder, test.path).pipe(
-        Effect.flatMap((path) => onDisk(() => readJudged(path))),
+        Effect.flatMap(({ path, withholding }) => onDisk(() => readJudged(path, { withholding }))),
         Effect.option,
       )
       if (Option.isNone(read)) return false
@@ -662,7 +678,9 @@ export const buildingProofs = (parts: ProofParts) => {
         } satisfies Placed
       }
       const found = yield* realPathIn(building, base.folder, file.path).pipe(
-        Effect.flatMap((path) => Effect.map(currentOf(path), (bytes) => ({ path, bytes }))),
+        Effect.flatMap(({ path, withholding }) =>
+          Effect.map(currentOf(path, withholding), (bytes) => ({ path, bytes })),
+        ),
         Effect.result,
       )
       if (Result.isFailure(found)) {
@@ -760,9 +778,9 @@ export const buildingProofs = (parts: ProofParts) => {
    * planted there leads to, and never waiting on a pipe. Null when there is none; fails with why it
    * is refused.
    */
-  const currentOf = (path: string) =>
+  const currentOf = (path: string, withholding: Withholding) =>
     onDisk(() =>
-      readJudged(path, { oneNameFor: 'write' }).catch((cause: Error) => {
+      readJudged(path, { oneNameFor: 'write', withholding }).catch((cause: Error) => {
         if (Predicate.hasProperty(cause, 'code') && cause.code === 'ENOENT') return null
         throw cause
       }),

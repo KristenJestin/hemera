@@ -689,6 +689,22 @@ describe('A proof written only where Hemera judged it (#385)', () => {
     expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
   })
 
+  test('a proof’s file in a sensitive place of the Workspace is read as its Builder would read it: withheld, never handed over', async () => {
+    const secret = 'TOKEN=a value no agent reads\n'
+    const seen = await writtenAfter(
+      'proving',
+      () => ({ 'R1.S2': automated('tests/app.env', EXPORT_TEST) }),
+      (api) => {
+        mkdirSync(join(api, 'tests'), { recursive: true })
+        writeFileSync(join(api, 'tests', 'app.env'), secret)
+      },
+    )
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain('api/tests/app.env was left as it is: content withheld: ')
+    expect(seen.delivered).not.toContain('a value no agent reads')
+    expect(readFileSync(join(seen.api, 'tests', 'app.env'), 'utf8')).toBe(secret)
+  })
+
   test('a test file with a second name (a checkout made of hard links) is in place, and proof_run runs it', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
       within(
