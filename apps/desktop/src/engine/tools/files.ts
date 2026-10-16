@@ -34,17 +34,18 @@ import { mutate } from '../transaction.ts'
 import type { ActionOwner } from './actions.ts'
 import { EffectfulActions } from './actions.ts'
 import {
-  JUDGED_REFUSALS,
   type JudgedFolder,
   MOVED,
   NotJudged,
   madeFolder,
   openFolder,
   openJudged,
+  refusedAsJudged,
 } from './judged.ts'
 import { WriteAttribution } from './ports.ts'
 import { type Page, fingerprintOf, numbered, readPage } from './read.ts'
 import { type SearchResult, searchIn } from './search.ts'
+import type { Withholding } from './withholding.ts'
 
 /** What a tool answers: whether it did what was asked, and what the agent reads. */
 export interface ToolAnswer {
@@ -106,6 +107,8 @@ export interface FileCall {
   /** As the agent wrote it. */
   readonly named: string
   readonly versions: ReadVersions
+  /** What the session may not read of what the call reads (`./withholding.ts`). */
+  readonly withholding: Withholding
 }
 
 /** The fingerprint of the version a session last read or wrote of a file, if it has one. */
@@ -188,7 +191,7 @@ export const attempt = <A>(run: (signal: AbortSignal) => Promise<A>) =>
  * was judged (`./judged.ts`), a failure otherwise.
  */
 export const failedOn = (reason: string, text: string): ToolAnswer =>
-  JUDGED_REFUSALS.includes(reason) ? refusal(`refused: ${text}`) : failure(text)
+  refusedAsJudged(reason) ? refusal(`refused: ${text}`) : failure(text)
 
 /** A page of a file as an agent reads it: its numbered lines, where it stands in the file, and the range. */
 export const pageSaid = (value: Page): string => {
@@ -209,7 +212,9 @@ export const fsRead = (call: FileCall, args: ToolArguments<'fs_read'>) =>
   Effect.gen(function* () {
     const offset = args.range?.offset ?? 0
     const length = args.range?.length ?? READ_PAGE_BYTES
-    const page = yield* attempt(() => readPage(call.path, offset, length)).pipe(Effect.result)
+    const page = yield* attempt(() => readPage(call.path, offset, length, call.withholding)).pipe(
+      Effect.result,
+    )
     if (Result.isFailure(page)) {
       return failedOn(page.failure, `could not read ${call.named}: ${page.failure}`)
     }
@@ -315,7 +320,7 @@ const describeSearch = (result: SearchResult, pattern: string): string => {
       ? []
       : [
           `${String(result.skippedCount)} file(s) not searched: ${result.skipped
-            .map((one) => `${one.path} (${one.reason})`)
+            .map((one) => `${one.path} (${one.reason === 'withheld' ? one.withheld : one.reason})`)
             .join(', ')}${result.skippedCount > result.skipped.length ? ', …' : ''}`,
         ]
   const lines = result.hits.map((hit) => `${hit.path}:${String(hit.line)}: ${hit.text}`)
@@ -332,6 +337,7 @@ export const search = (call: FileCall, args: ToolArguments<'search'>) =>
         glob: args.glob ?? null,
         cursor: args.cursor ?? null,
         signal,
+        withholding: call.withholding,
       }),
     ).pipe(Effect.result)
     if (Result.isFailure(found)) return failure(`the search did not run: ${found.failure}`)
@@ -447,11 +453,15 @@ const versionRefusal = (
 
 /**
  * The file as it is now: its text and fingerprint, or nothing when there is none. Read from the
- * file judged only (`./judged.ts`): what a link planted since leads to is never read, nor shown.
+ * file judged only (`./judged.ts`): what a link planted since leads to is never read, nor shown;
+ * what the session may not read, neither.
  */
-const currentOf = (path: string) =>
+const currentOf = (call: FileCall) =>
   attempt(async () => {
-    const handle = await openJudged(path, { oneNameFor: 'write' }).catch((cause: Error) => {
+    const handle = await openJudged(call.path, {
+      oneNameFor: 'write',
+      withholding: call.withholding,
+    }).catch((cause: Error) => {
       if (codeOf(cause) === 'ENOENT') return null
       throw cause
     })
@@ -508,7 +518,7 @@ const writeVersion = (call: FileCall, before: string | null, content: string) =>
 
 export const fsWrite = (call: FileCall, args: ToolArguments<'fs_write'>) =>
   Effect.gen(function* () {
-    const current = yield* currentOf(call.path).pipe(Effect.result)
+    const current = yield* currentOf(call).pipe(Effect.result)
     if (Result.isFailure(current)) {
       return failedOn(
         current.failure,
@@ -533,7 +543,7 @@ const occurrences = (text: string, anchor: string): number => {
 
 export const fsEdit = (call: FileCall, args: ToolArguments<'fs_edit'>) =>
   Effect.gen(function* () {
-    const current = yield* currentOf(call.path).pipe(Effect.result)
+    const current = yield* currentOf(call).pipe(Effect.result)
     if (Result.isFailure(current)) {
       return failedOn(
         current.failure,
