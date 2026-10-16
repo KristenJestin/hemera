@@ -44,6 +44,7 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
+  cancelBuildingIn,
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
 import { proofRunnerLayer } from './building/proof-runner.ts'
@@ -54,10 +55,10 @@ import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
-import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
+import { type HelpersSettings, cancelHelpersIn, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
 import { END_NEEDS, type EndHold, buildingEndLayer } from './building/end.ts'
-import { autoReviewLayer } from './building/review.ts'
+import { autoReviewLayer, cancelReviewIn } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -213,6 +214,7 @@ import {
 } from './sessions/roles.ts'
 import {
   type SessionHold,
+  type SessionsSettings,
   type SessionTimings,
   Sessions,
   sessionsLayer,
@@ -341,6 +343,8 @@ export interface SessionsParts {
   readonly rebuildHold?: Effect.Effect<void>
   /** Where a suite holds a session as it starts or fails, or fails its start. */
   readonly sessionHold?: SessionHold
+  /** Where a suite holds a session's opening, before it is written. */
+  readonly openHold?: SessionsSettings['openHold']
   /** Where a suite holds the health sweep, as each look begins (CT-12). */
   readonly sweepHold?: Effect.Effect<void>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
@@ -632,6 +636,8 @@ export const startProfile = (
             ]),
         ...(parts.missions?.stoppers ?? []),
       ],
+      // Ended with the stage, in the cancel's transaction: nothing of the Building starts again.
+      cancels: [cancelBuildingIn, cancelHelpersIn, cancelReviewIn],
       activity:
         parts.missions?.activity ??
         ((missionId) =>
@@ -750,6 +756,7 @@ export const startProfile = (
           timings: parts.sessions?.timings,
           rebuildHold: parts.sessions?.rebuildHold,
           sessionHold: parts.sessions?.sessionHold,
+          openHold: parts.sessions?.openHold,
           sweepHold: parts.sessions?.sweepHold,
         }),
       ),

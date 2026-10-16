@@ -1,0 +1,563 @@
+import {
+  type CleanupStep,
+  type DeliveryRefusals,
+  type DeliveryRepository,
+  type DeliveryRules,
+  type DeliveryStep,
+  type Dependency,
+  type ForgeView,
+  type Preset,
+  type RecipeStep,
+  type Reviewer,
+  type StepConfig,
+  TEMPLATE_VARIABLES,
+  type WhoCommits,
+} from './delivery-model.ts'
+
+/**
+ * Acme's delivery rules, as the settings show them, and the engine's refusals in its words.
+ * Neutral data only: this repository is public.
+ */
+
+/** The catalogue commands a Bump or a Command step may run. */
+export const DELIVERY_COMMANDS = [
+  'bump-deps',
+  'changeset-version',
+  'db-migrate-check',
+  'notify-release',
+] as const
+
+function step(id: string, config: StepConfig, start: DeliveryStep['start'] = 'auto'): DeliveryStep {
+  return { id, start, config }
+}
+
+const PUSH = step('push', { kind: 'push' })
+const PULL_REQUEST = step('pull-request', { kind: 'pull-request' })
+const BUMP = step('bump', { kind: 'bump', how: 'command', command: 'bump-deps' })
+const MERGE = step('merge', { kind: 'merge', method: 'squash' })
+const CI = step('ci', { kind: 'ci' })
+
+/** The steps each preset amounts to. */
+export function presetSteps(preset: Preset, published = '@acme/shared'): DeliveryStep[] {
+  if (preset === 'local') return [step('local-merge', { kind: 'local-merge' })]
+  const head = [PUSH, PULL_REQUEST, BUMP, MERGE, CI]
+  if (preset === 'application') return head
+  return [...head, step('published', { kind: 'published', by: 'registry', pattern: published })]
+}
+
+function fromPreset(steps: readonly DeliveryStep[]): RecipeStep[] {
+  return steps.map((one) => ({ step: one, origin: 'preset' }))
+}
+
+const GITHUB: ForgeView = { kind: 'github', host: 'github.com', forced: false, cli: 'ready' }
+
+function repository(
+  part: Partial<DeliveryRepository> & Pick<DeliveryRepository, 'path' | 'preset'>,
+): DeliveryRepository {
+  return {
+    remote: 'origin',
+    remotes: ['origin'],
+    base: 'main',
+    forge: GITHUB,
+    steps: fromPreset(presetSteps(part.preset, `@acme/${part.path}`)),
+    ...part,
+  }
+}
+
+/** shared: the Library preset as it is. */
+export const SHARED = repository({ path: 'shared', preset: 'library' })
+
+/** api: its merge changed to rebase, and a migration check and a staging deploy of its own. */
+export const API = repository({
+  path: 'api',
+  preset: 'application',
+  remotes: ['origin', 'upstream'],
+  steps: [
+    { step: PUSH, origin: 'preset' },
+    { step: PULL_REQUEST, origin: 'preset' },
+    { step: BUMP, origin: 'preset' },
+    {
+      step: step('db-check', { kind: 'command', command: 'db-migrate-check' }),
+      origin: 'added',
+    },
+    { step: step('merge', { kind: 'merge', method: 'rebase' }), origin: 'changed' },
+    { step: CI, origin: 'preset' },
+    {
+      step: step('deploy', { kind: 'remote-action', action: 'deploy-staging.yml' }, 'click'),
+      origin: 'added',
+    },
+  ],
+})
+
+/** web: no CI of its own after the merge, and a check by hand on staging. */
+export const WEB = repository({
+  path: 'web',
+  preset: 'application',
+  steps: [
+    { step: PUSH, origin: 'preset' },
+    { step: PULL_REQUEST, origin: 'preset' },
+    { step: BUMP, origin: 'preset' },
+    { step: MERGE, origin: 'preset' },
+    { step: CI, origin: 'omitted' },
+    {
+      step: step(
+        'staging',
+        { kind: 'confirm', what: 'The release is checked on staging' },
+        'click',
+      ),
+      origin: 'added',
+    },
+  ],
+})
+
+/** ui-kit: on a Bitbucket Data Center Hemera cannot read from its remote, so forced. */
+export const UI_KIT = repository({
+  path: 'ui-kit',
+  preset: 'library',
+  forge: {
+    kind: 'bitbucket-dc',
+    host: 'bitbucket.acme.test',
+    forced: true,
+    cli: 'signed-out',
+    fix: 'bkt auth login --host bitbucket.acme.test',
+    sentence: 'bkt is signed out of bitbucket.acme.test',
+  },
+})
+
+/** billing: on GitHub, whose command line is not installed on this machine. */
+export const BILLING = repository({
+  path: 'billing',
+  preset: 'application',
+  base: 'develop',
+  forge: {
+    ...GITHUB,
+    cli: 'missing',
+    fix: 'brew install gh',
+    sentence: 'gh, the GitHub CLI, is not installed on this machine',
+  },
+})
+
+/** The repositories by wave, from the accepted dependencies; null for a cycle. */
+export function wavesOf(
+  paths: readonly string[],
+  dependencies: readonly Dependency[],
+): string[][] | null {
+  const kept = dependencies.filter((one) => !one.proposed)
+  const placed = new Set<string>()
+  const waves: string[][] = []
+  while (placed.size < paths.length) {
+    const wave = paths.filter(
+      (path) =>
+        !placed.has(path) &&
+        kept.filter((one) => one.repository === path).every((one) => placed.has(one.on)),
+    )
+    if (wave.length === 0) return null
+    for (const path of wave) placed.add(path)
+    waves.push(wave)
+  }
+  return waves
+}
+
+export const REVIEWERS: readonly Reviewer[] = [
+  { handle: '@acme/web' },
+  { handle: 'dreyes', name: 'Dana Reyes' },
+]
+
+/** Every reviewer the forge offers for Acme: teams first, then people. */
+export const CANDIDATES: readonly Reviewer[] = [
+  { handle: '@acme/web' },
+  { handle: '@acme/api' },
+  { handle: '@acme/platform' },
+  { handle: '@acme/design' },
+  { handle: '@acme/security' },
+  { handle: 'dreyes', name: 'Dana Reyes' },
+  { handle: 'mokafor', name: 'Mira Okafor' },
+  { handle: 'tlindqvist', name: 'Tomas Lindqvist' },
+  { handle: 'pnair', name: 'Priya Nair' },
+  { handle: 'jkowalski', name: 'Jan Kowalski' },
+  { handle: 'ahassan', name: 'Amal Hassan' },
+  { handle: 'sbrennan', name: 'Sean Brennan' },
+  { handle: 'ychen', name: 'Yun Chen' },
+  { handle: 'lmoreau', name: 'Lucie Moreau' },
+  { handle: 'rsantos', name: 'Rafael Santos' },
+  { handle: 'kito', name: 'Kenji Ito' },
+  { handle: 'nabara', name: 'Nora Abara' },
+  { handle: 'evolkov', name: 'Elena Volkov' },
+  { handle: 'gmensah', name: 'Grace Mensah' },
+  { handle: 'oberg', name: 'Olof Berg' },
+  { handle: 'hdubois', name: 'Hugo Dubois' },
+  { handle: 'wnakamura', name: 'Wren Nakamura' },
+]
+
+export const BODY = `{summary}
+
+{images}
+
+Branch: {branch}
+Refs {key}`
+
+/** The cleanup a Project starts with. */
+export const CLEANUP: readonly CleanupStep[] = [
+  { id: 'pull', label: 'Pull the main checkout' },
+  { id: 'services', label: 'Stop the mission’s services' },
+  { id: 'worktrees', label: 'Remove the worktrees and the Workspace' },
+]
+
+const DEPENDENCIES: readonly Dependency[] = [
+  { repository: 'api', on: 'shared', proposed: false },
+  { repository: 'web', on: 'shared', proposed: false },
+  { repository: 'web', on: 'api', proposed: true },
+]
+
+function rules(
+  repositories: readonly DeliveryRepository[],
+  dependencies: readonly Dependency[],
+  part: Partial<DeliveryRules> = {},
+): DeliveryRules {
+  return {
+    pullRequests: {
+      placement: 'review',
+      start: 'auto',
+      commit: '{key}: {title}',
+      title: '{key} {title}',
+      body: BODY,
+      reviewers: REVIEWERS,
+      requireApproval: true,
+      reviewDrafts: false,
+      commits: 'task',
+    },
+    repositories,
+    dependencies,
+    waves:
+      wavesOf(
+        repositories.map((one) => one.path),
+        dependencies,
+      ) ?? [],
+    cleanup: CLEANUP,
+    ...part,
+  }
+}
+
+/** Acme as it is lived in: shared first, then api and web; Hemera proposes that web waits for api. */
+export const RULES: DeliveryRules = rules([SHARED, API, WEB], DEPENDENCIES)
+
+/** Five repositories, many reviewers, two forges in trouble. */
+export const DENSE_RULES: DeliveryRules = rules(
+  [SHARED, UI_KIT, API, BILLING, WEB],
+  [
+    ...DEPENDENCIES,
+    { repository: 'web', on: 'ui-kit', proposed: false },
+    { repository: 'billing', on: 'shared', proposed: false },
+    { repository: 'billing', on: 'api', proposed: true },
+  ],
+  {
+    pullRequests: {
+      ...RULES.pullRequests,
+      reviewers: CANDIDATES.slice(0, 14),
+    },
+  },
+)
+
+/** A Project just added: every repository on its preset, nothing proposed, nothing changed. */
+export const PLAIN_RULES: DeliveryRules = rules(
+  [
+    SHARED,
+    repository({ path: 'api', preset: 'application' }),
+    repository({ path: 'web', preset: 'application' }),
+  ],
+  [],
+)
+
+const LONG_BODY = `## What changes
+
+{summary}
+
+## How it looks
+
+{images}
+
+## How to try it
+
+1. Check out {branch} and install the dependencies with the lockfile as it is.
+2. Start the services of the Workspace, then open the invoices page of a customer with at least
+   two hundred invoices across three fiscal years and several currencies.
+3. Export them as CSV and open the file in a spreadsheet: every row holds its currency.
+
+## Notes for the reviewers
+
+The export streams its rows; nothing is held in memory past one page of the query.
+
+Refs {key} · {slug}`
+
+/** A long template in every field and a long path in every place. */
+export const LONG_RULES: DeliveryRules = rules(
+  [
+    repository({
+      path: 'services/platform-api-and-background-workers',
+      preset: 'application',
+      base: 'release/2026-q4-long-term-support',
+    }),
+    SHARED,
+    WEB,
+  ],
+  [],
+  {
+    pullRequests: {
+      ...RULES.pullRequests,
+      commit:
+        '{key}({slug}): {title} — generated by the Builder from the mission’s Spec, task by task',
+      title: '[{key}] {title} · {branch} · {slug} · please read the summary before reviewing',
+      body: LONG_BODY,
+      reviewers: CANDIDATES,
+    },
+  },
+)
+
+/** One repository whose recipe holds every kind of step. */
+export const EVERY_STEP_RULES: DeliveryRules = rules(
+  [
+    repository({
+      path: 'api',
+      preset: 'library',
+      steps: [
+        { step: PUSH, origin: 'preset' },
+        { step: PULL_REQUEST, origin: 'preset' },
+        { step: BUMP, origin: 'preset' },
+        { step: MERGE, origin: 'preset' },
+        { step: CI, origin: 'preset' },
+        {
+          step: step('release', { kind: 'remote-action', action: 'release.yml' }, 'click'),
+          origin: 'added',
+        },
+        {
+          step: step('published', { kind: 'published', by: 'tag', pattern: 'v*' }),
+          origin: 'changed',
+        },
+        { step: step('notify', { kind: 'command', command: 'notify-release' }), origin: 'added' },
+        {
+          step: step('changelog', {
+            kind: 'agent',
+            task: 'Write the release note of the published version in docs/releases.md',
+          }),
+          origin: 'added',
+        },
+        {
+          step: step('announce', { kind: 'confirm', what: 'The release is announced' }, 'click'),
+          origin: 'added',
+        },
+      ],
+    }),
+  ],
+  [],
+)
+
+// ——— The refused rules, one per reason ———
+
+/** A step of a recipe, refused with these words. */
+function refusedAs(recipe: RecipeStep, words: string): RecipeStep {
+  return { ...recipe, refused: words }
+}
+
+function refusing(
+  path: string,
+  stepId: string,
+  words: string,
+  change: (steps: readonly RecipeStep[]) => readonly RecipeStep[] = (steps) => steps,
+): DeliveryRules {
+  return {
+    ...RULES,
+    repositories: RULES.repositories.map((one) =>
+      one.path !== path
+        ? one
+        : {
+            ...one,
+            steps: change(one.steps).map((recipe) =>
+              recipe.step.id === stepId ? refusedAs(recipe, words) : recipe,
+            ),
+          },
+    ),
+  }
+}
+
+function leaveOut(id: string): (steps: readonly RecipeStep[]) => readonly RecipeStep[] {
+  return (steps) => steps.map((one) => (one.step.id === id ? { ...one, origin: 'omitted' } : one))
+}
+
+export const MERGE_WITHOUT_PR = refusing(
+  'api',
+  'merge',
+  'Merge needs a pull request, and api leaves out Pull request. Put it back, or leave out Merge.',
+  leaveOut('pull-request'),
+)
+
+export const PR_WITHOUT_PUSH = refusing(
+  'web',
+  'pull-request',
+  'A pull request needs the branch pushed, and web leaves out Push. Put Push back.',
+  leaveOut('push'),
+)
+
+export const BUMP_WITHOUT_UPSTREAM: DeliveryRules = {
+  ...refusing(
+    'web',
+    'bump',
+    'web bumps what api publishes, and api publishes no version. Add a Published version step to api, or leave out Bump in web.',
+  ),
+  dependencies: [
+    { repository: 'api', on: 'shared', proposed: false },
+    { repository: 'web', on: 'api', proposed: false },
+  ],
+  waves: [['shared'], ['api'], ['web']],
+}
+
+export const CYCLE_RULES: DeliveryRules = {
+  ...RULES,
+  dependencies: [
+    { repository: 'api', on: 'shared', proposed: false },
+    { repository: 'shared', on: 'api', proposed: false },
+    { repository: 'web', on: 'shared', proposed: false },
+  ],
+  waves: [],
+}
+
+export const CYCLE: DeliveryRefusals = {
+  dependencies:
+    'shared delivers after api, which delivers after shared: no wave can go first. Remove one of the two in the repository’s dialog.',
+}
+
+export const APPROVAL_AFTER_SHIP_RULES: DeliveryRules = {
+  ...RULES,
+  pullRequests: { ...RULES.pullRequests, placement: 'waves', requireApproval: true },
+}
+
+export const APPROVAL_AFTER_SHIP: DeliveryRefusals = {
+  approval:
+    'Approvals before Ship need the pull requests open before Ship, and they open after it. Open them when Review starts, or stop requiring approvals.',
+}
+
+export const FORGE_CANNOT: DeliveryRules = {
+  ...RULES,
+  repositories: [
+    SHARED,
+    {
+      ...UI_KIT,
+      forge: { ...UI_KIT.forge, cli: 'ready' },
+      steps: [
+        ...UI_KIT.steps,
+        {
+          step: step('release', { kind: 'remote-action', action: 'release pipeline' }, 'click'),
+          origin: 'added',
+          refused:
+            'Bitbucket Data Center cannot start a pipeline from its command line. Use Confirm, and start it yourself.',
+        },
+      ],
+    },
+    API,
+    WEB,
+  ],
+  dependencies: DEPENDENCIES,
+  waves: [
+    ['shared', 'ui-kit'],
+    ['api', 'web'],
+  ],
+}
+
+/** Every refusal at once, as a save that meets them all would show. */
+export const EVERY_REFUSAL: DeliveryRules = {
+  ...APPROVAL_AFTER_SHIP_RULES,
+  repositories: [
+    ...MERGE_WITHOUT_PR.repositories.filter((one) => one.path !== 'web'),
+    ...PR_WITHOUT_PUSH.repositories.filter((one) => one.path === 'web'),
+  ],
+}
+
+// ——— The forge's command line, one state each ———
+
+export function withForge(forge: Partial<ForgeView>, base: DeliveryRules = RULES): DeliveryRules {
+  return {
+    ...base,
+    repositories: base.repositories.map((one) =>
+      one.path === 'api' ? { ...one, forge: { ...one.forge, ...forge } } : one,
+    ),
+  }
+}
+
+export const CLI_MISSING = withForge({
+  cli: 'missing',
+  fix: 'brew install gh',
+  sentence: 'gh, the GitHub CLI, is not installed on this machine',
+})
+
+export const CLI_SIGNED_OUT = withForge({
+  cli: 'signed-out',
+  fix: 'gh auth login --hostname github.com',
+  sentence: 'gh is signed out of github.com',
+})
+
+export const CLI_UNREACHABLE = withForge({
+  cli: 'unreachable',
+  sentence: 'github.com did not answer gh within 10 seconds',
+})
+
+export const CLI_CHECKING = withForge({ cli: null })
+
+export const FORCED = withForge({
+  kind: 'bitbucket-dc',
+  host: 'bitbucket.acme.test',
+  forced: true,
+  cli: 'ready',
+})
+
+// ——— Templates ———
+
+/** What a template is filled with, for the example under its field: ACME-12. */
+export const EXAMPLE: Record<(typeof TEMPLATE_VARIABLES)[number]['name'], string> = {
+  '{key}': 'ACME-12',
+  '{title}': 'Export invoices as CSV',
+  '{slug}': 'export-invoices-as-csv',
+  '{branch}': 'acme/ACME-12-export-invoices-as-csv',
+  '{summary}': 'The invoices page exports its rows as CSV, streamed page by page.',
+  '{images}': '![The export button](export.png)',
+}
+
+/** The names a template holds that Hemera does not fill. */
+export function unknownNames(template: string): string[] {
+  const known = new Set<string>(TEMPLATE_VARIABLES.map((one) => one.name))
+  return [...template.matchAll(/\{[^{}\s]*\}/g)]
+    .map((match) => match[0])
+    .filter((name) => !known.has(name))
+}
+
+/** The engine's refusal of a template, in its words. */
+export function templateRefusal(template: string): string | undefined {
+  const unknown = unknownNames(template)
+  if (unknown.length === 0) return undefined
+  const names = TEMPLATE_VARIABLES.map((one) => one.name).join(', ')
+  return `${unknown.join(', ')} ${unknown.length === 1 ? 'is not a name' : 'are not names'} Hemera fills. Use ${names}.`
+}
+
+/** A template as ACME-12 fills it. */
+export function filled(template: string): string {
+  let text = template
+  for (const [name, value] of Object.entries(EXAMPLE)) text = text.replaceAll(name, value)
+  return text
+}
+
+// ——— Who commits ———
+
+/** What api's history reads after ACME-12, under each value of “who commits”. */
+export const HISTORIES: Record<WhoCommits, readonly string[]> = {
+  task: [
+    'ACME-12: Add the export endpoint',
+    'ACME-12: Stream the rows page by page',
+    'ACME-12: Name the currency of each row',
+    'ACME-12: Export invoices as CSV (at the push: the documentation)',
+  ],
+  agent: [
+    'ACME-12: wip export endpoint',
+    'ACME-12: Fix the page size',
+    'ACME-12: Stream rows, name currencies',
+    'ACME-12: Export invoices as CSV (at the push: what was left)',
+  ],
+  push: ['ACME-12: Export invoices as CSV'],
+}

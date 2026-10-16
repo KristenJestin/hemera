@@ -32,6 +32,7 @@ import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
 import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
 import { Diffs, LARGE_BYTES } from '../src/engine/review/diffs.ts'
+import type { SecretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   buildingLaunches,
@@ -40,6 +41,7 @@ import {
 } from '../src/engine/storage/schema.ts'
 import { call } from './building-world.ts'
 import { builderAgents, builderOf, launched } from './builder-world.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { git } from './repositories.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -60,12 +62,16 @@ const QUIET_TIMERS: Partial<OutsideSettings> = {
   baseEveryMillis: 3_600_000,
 }
 
-const engine = (snapshots: (real: SnapshotsService) => SnapshotsService = (real) => real) =>
+const engine = (
+  snapshots: (real: SnapshotsService) => SnapshotsService = (real) => real,
+  secrets?: SecretsRegistry,
+) =>
   sessionsEngine(data, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: { outside: QUIET_TIMERS },
     snapshots,
+    secrets,
   })
 
 /**
@@ -366,6 +372,68 @@ describe('A large change is loaded on request', () => {
     )
     expect(textOf(seen.forced, 'after')).toBe(`${lines}\n`)
     expect(entry(seen.diff, 'api', 'big.txt')?.generated).toBe(false)
+  })
+})
+
+describe('A large file is masked in slices the engine answers between (#402)', () => {
+  test('a large JSON file of the live diff, read with force, comes masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    const expected = unwatched.mask(original)
+    expect(expected).not.toContain(value)
+    const { run } = engine(undefined, secrets)
+    const forced = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth()
+          writeFileSync(join(api, 'lock.json'), original)
+          yield* live(missionId)
+          return yield* fileOf(missionId, 'api', 'lock.json', true)
+        }),
+      ),
+    )
+    expect(textOf(forced, 'after')).toBe(expected)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns.length).toBeGreaterThan(0)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
+  })
+
+  test('a large JSON file whose base side is read through Git’s conversions comes masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const changed = `${original.slice(0, -1)},{"extra":true}]`
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    const { run } = engine(undefined, secrets)
+    const forced = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth(() =>
+            Effect.sync(() => {
+              const base = join(work, 'acme', 'api')
+              writeFileSync(join(base, 'lock.json'), original)
+              git(base, 'add', '.')
+              git(base, 'commit', '-q', '-m', 'lock')
+              git(base, 'push', '-q', 'origin', 'HEAD')
+            }),
+          )
+          writeFileSync(join(api, 'lock.json'), changed)
+          yield* live(missionId)
+          return yield* fileOf(missionId, 'api', 'lock.json', true)
+        }),
+      ),
+    )
+    expect(textOf(forced, 'before')).toBe(unwatched.mask(original))
+    expect(textOf(forced, 'after')).toBe(unwatched.mask(changed))
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns.length).toBeGreaterThan(1)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
   })
 })
 

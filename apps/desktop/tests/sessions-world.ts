@@ -151,6 +151,8 @@ export const sessionsEngine = (
     readonly snapshots?: ProfileParts['snapshots']
     /** The database wrapped, when a suite makes a read fail (#341). */
     readonly database?: ProfileParts['database']
+    /** The secrets registry watched, when a suite counts how its masks run (#402). */
+    readonly secrets?: ProfileParts['secrets']
     /** The fake trackers of the ticket sync's suites, and its schedule (#97). */
     readonly ticketProviders?: ProfileParts['ticketProviders']
     readonly ticketSync?: ProfileParts['ticketSync']
@@ -160,6 +162,8 @@ export const sessionsEngine = (
     readonly building?: ProfileParts['building']
     /** Where a suite holds Review's feedback (#341). */
     readonly review?: ProfileParts['review']
+    /** Where a suite holds a run as it is written or launched. */
+    readonly runs?: ProfileParts['runs']
     /** The engine on a test clock the suite moves (#85). */
     readonly testClock?: boolean
     /** The machine's processes as the supervisor sees them, when a suite answers for some. */
@@ -221,11 +225,15 @@ export const sessionsEngine = (
     options.database === undefined
       ? withSnapshots
       : { ...withSnapshots, database: options.database }
+  const withRuns =
+    options.runs === undefined ? withDatabase : { ...withDatabase, runs: options.runs }
+  const withSecrets =
+    options.secrets === undefined ? withRuns : { ...withRuns, secrets: options.secrets }
   const run = commandsEngine(
     data,
     options.reconciliationSteps === undefined
-      ? withDatabase
-      : { ...withDatabase, reconciliationSteps: options.reconciliationSteps },
+      ? withSecrets
+      : { ...withSecrets, reconciliationSteps: options.reconciliationSteps },
     options.testClock,
   )
   return { world, run }

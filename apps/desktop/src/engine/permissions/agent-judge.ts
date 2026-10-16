@@ -29,7 +29,7 @@ import {
   type JudgeScores,
   judgeTurn,
   maskAction,
-  maskText,
+  maskPrinted,
   readJudgeReply,
 } from '@hemera/core/domain'
 import {
@@ -395,7 +395,7 @@ export const agentJudgesLayer = (settings: AgentJudgeSettings) =>
           const action = maskAction(input.action, known)
           if (action === null)
             return { kind: 'unavailable', judge, failure: 'input', ms: null } as const
-          const told = input.humanContext.map((item) => maskText(item, known))
+          const told = input.humanContext.map((item) => maskPrinted(item, known))
           const slot = slotOf(session.projectId, provider)
           const began = yield* Clock.currentTimeMillis
           const since = Effect.map(Clock.currentTimeMillis, (now) =>

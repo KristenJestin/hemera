@@ -728,7 +728,8 @@ export const retryNeed = (id: string) =>
     const owners = yield* NeedOwners
     const handler = owners.handlers.get(row.service)
     if (handler?.recheck === undefined) return need
-    if (yield* handler.recheck(need, true)) return need
+    // Still missing: the need as the recheck left it, which may have revised what it says (#362).
+    if (yield* handler.recheck(need, true)) return yield* getNeed(id)
     const { retriedIn } = handler
     return yield* endNeed(
       id,

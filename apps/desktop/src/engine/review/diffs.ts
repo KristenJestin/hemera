@@ -739,18 +739,22 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
           )
         })
 
-      /** A text's bytes as they are kept: masked when they hold a known secret. */
-      const textSide = (side: FileSide, bytes: Buffer): FileSide => {
-        if (bytes.includes(0) || !isUtf8(bytes)) return side
-        const original = bytes.toString('utf8')
-        const masked = secrets.mask(original)
-        return {
-          ...side,
-          size: bytes.length,
-          content: Buffer.from(masked, 'utf8'),
-          masked: masked !== original,
-        }
-      }
+      /**
+       * A text's bytes as they are kept: masked when they hold a known secret, in slices of time
+       * so the engine answers while a large file is masked (#402).
+       */
+      const textSide = (side: FileSide, bytes: Buffer): Effect.Effect<FileSide> =>
+        Effect.gen(function* () {
+          if (bytes.includes(0) || !isUtf8(bytes)) return side
+          const original = bytes.toString('utf8')
+          const masked = yield* secrets.maskPaced(original)
+          return {
+            ...side,
+            size: bytes.length,
+            content: Buffer.from(masked, 'utf8'),
+            masked: masked !== original,
+          }
+        })
 
       /**
        * Both sides as the user's checkout has them, on any Git configuration: the snapshot holds
@@ -783,7 +787,9 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
           if (filtered) return sides
           const onDisk = readable(sides.after) ? diskBytes(join(place.folder, found.path)) : null
           const after =
-            onDisk === null || sides.after === null ? sides.after : textSide(sides.after, onDisk)
+            onDisk === null || sides.after === null
+              ? sides.after
+              : yield* textSide(sides.after, onDisk)
           const was = sides.before
           const before =
             readable(was) && base !== null
@@ -792,7 +798,7 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
                   ['cat-file', '--filters', `${base}:${stored}`],
                   'read',
                 ).pipe(
-                  Effect.map((bytes) => textSide(was, bytes)),
+                  Effect.flatMap((bytes) => textSide(was, bytes)),
                   Effect.orElseSucceed(() => was),
                 )
               : was
