@@ -344,6 +344,8 @@ export const AddAStep: Story = {
         'Pull request',
       )
     })
+    // The When list leaves on an exit motion: read the Kind options once it has gone.
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
     const kinds = await body().findAllByRole('option')
     expect(kinds.map((one) => one.textContent)).toEqual([
