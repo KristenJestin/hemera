@@ -20,19 +20,17 @@ import {
   wavesOf,
 } from './delivery-fixtures.ts'
 import {
-  CLEANUP_KINDS,
   CommitsForm,
   PushForm,
   type PushDraft,
-  RECIPE_KINDS,
   type RepositoryDraft,
   RepositoryForm,
   ReviewersForm,
   type StepDraft,
   StepForm,
   TemplateForm,
-  newStep,
 } from './delivery-forms.tsx'
+import { CLEANUP_KINDS, RECIPE_KINDS, newStep } from './delivery-form-options.ts'
 import {
   type DeliveryRefusals,
   type DeliveryRules,

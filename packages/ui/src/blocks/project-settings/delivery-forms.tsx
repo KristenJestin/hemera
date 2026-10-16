@@ -9,7 +9,6 @@ import { Select } from '../../components/select/select.tsx'
 import { IconBraces, IconPlus, IconSearch, IconWorld, IconX } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
-  ADDABLE,
   type ForgeKind,
   FORGE_WORDS,
   MERGE_WORDS,
@@ -25,6 +24,7 @@ import {
   type WhoCommits,
   writesToNetwork,
 } from './delivery-model.ts'
+import { COMMITS, START_ITEMS, newStep } from './delivery-form-options.ts'
 
 /**
  * The dialogs of the delivery rules: where the push and the pull requests stand, a template, the
@@ -61,11 +61,6 @@ function Labelled<Value extends string>({
     </div>
   )
 }
-
-export const START_ITEMS: { value: StepStart; label: string }[] = [
-  { value: 'auto', label: 'On its own' },
-  { value: 'click', label: 'Waits for your click' },
-]
 
 export interface PushDraft {
   placement: PushPlacement
@@ -270,26 +265,6 @@ const RADIO =
 
 const DOT = 'size-1.5 rounded-full bg-primary'
 
-/** Each value of “who commits”: its words and what it does. */
-export const COMMITS: readonly { value: WhoCommits; label: string; effect: string }[] = [
-  {
-    value: 'task',
-    label: 'Hemera, after each verified task',
-    effect: 'A commit per task, named by the commit template. What is left goes in at the push.',
-  },
-  {
-    value: 'agent',
-    label: 'The agent, as it works',
-    effect:
-      'The agent commits when it sees fit, with the commit template. What is left goes in at the push.',
-  },
-  {
-    value: 'push',
-    label: 'Hemera, once, at the push',
-    effect: 'Nothing is committed during Building: the push makes one commit per repository.',
-  },
-]
-
 /**
  * Who commits during Building, as three choices, each with what it does, and under them what the
  * history of a repository reads after an example mission: the visible effect of the choice.
@@ -447,31 +422,6 @@ export function RepositoryForm({
       </AnimatePresence>
     </>
   )
-}
-
-/** A step not written yet, of each kind. */
-export function newStep(kind: StepKind): StepConfig {
-  switch (kind) {
-    case 'bump':
-      return { kind, how: 'command', command: null }
-    case 'merge':
-      return { kind, method: 'squash' }
-    case 'remote-action':
-      return { kind, action: '' }
-    case 'published':
-      return { kind, by: 'tag', pattern: '' }
-    case 'command':
-      return { kind, command: '' }
-    case 'agent':
-      return { kind, task: '' }
-    case 'confirm':
-      return { kind, what: '' }
-    case 'push':
-    case 'pull-request':
-    case 'ci':
-    case 'local-merge':
-      return { kind }
-  }
 }
 
 export interface StepDraft {
@@ -639,8 +589,3 @@ export function StepForm({ draft, onChange, adding, commands, refused }: StepFor
     </>
   )
 }
-
-/** The kinds a step added to a recipe may be; a cleanup step is a command, an agent or a confirm. */
-export const RECIPE_KINDS = ADDABLE
-
-export const CLEANUP_KINDS: readonly StepKind[] = ['command', 'agent', 'confirm']
