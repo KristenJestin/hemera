@@ -30,6 +30,7 @@ import {
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
+import { AskBeforeRunning } from '../src/engine/ask-before-running.ts'
 import {
   BuildingEnd,
   type BuilderHold,
@@ -100,10 +101,13 @@ const proofsEngine = (
     readonly snapshots?: (real: SnapshotsService) => SnapshotsService
     /** The detector of changes outside Hemera's timers. */
     readonly outside?: Partial<OutsideSettings>
+    /** Who answers a command marked "ask before running". */
+    readonly askBeforeRunning?: Layer.Layer<AskBeforeRunning>
   } = {},
 ) =>
   sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
+    askBeforeRunning: more.askBeforeRunning,
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     snapshots: more.snapshots ?? ((real) => real),
     building:
@@ -493,6 +497,111 @@ describe('The red phase (CT-35)', () => {
     expect(
       seen.evidence.startsWith(`$ ${seen.proof.red?.line}\nHemera added: --test-reporter=spec`),
     ).toBe(true)
+  })
+
+  test('a red whose output was cut at its start is not read from its report: without a key line it is no red (#342)', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(() => ({
+            'R1.S2': automated(
+              EXPORT_PATH,
+              testFile(
+                [
+                  "  console.log('x'.repeat(100_000))",
+                  "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'export.ts exports nothing yet')",
+                ].join('\n'),
+              ),
+            ),
+          }))
+          yield* until(
+            Effect.map(
+              payloadsOf(mission.id, 'building.red_invalid'),
+              (events) => events.length > 0,
+            ),
+            20_000,
+          )
+          return {
+            proof: yield* proofOf(mission.id, 'R1.S2'),
+            events: yield* payloadsOf(mission.id, 'building.red_invalid'),
+          }
+        }),
+      ),
+    )
+    expect(seen.proof.state).toBe('waiting_red')
+    expect(seen.proof.runs.map((one) => one.classification)).toEqual(['assertion_failed'])
+    expect(seen.events).toEqual([{ scenario: 'R1.S2', classification: 'assertion_failed' }])
+  })
+
+  test('a catalogue command marked "ask before running" is asked about with the line Hemera runs, its reporting included (#342)', async () => {
+    const asked: string[] = []
+    const allowed = Layer.succeed(AskBeforeRunning, {
+      decide: (run) =>
+        Effect.sync(() => {
+          asked.push(run.line)
+          return 'allowed' as const
+        }),
+    })
+    const seen = await proofsEngine(data, undefined, undefined, undefined, {
+      askBeforeRunning: allowed,
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          let proofCommand = ''
+          const { mission } = yield* launched(
+            work,
+            (projectId) =>
+              Effect.gen(function* () {
+                const saved = yield* saveCommand({
+                  projectId,
+                  id: null,
+                  command: {
+                    name: 'export proof',
+                    type: 'script',
+                    line: testLine(`api/${EXPORT_PATH}`),
+                    lineWindows: null,
+                    lineLinux: null,
+                    repositoryId: null,
+                    folder: null,
+                    scope: 'workspace',
+                    portless: false,
+                    portlessName: null,
+                    check: false,
+                    atOpen: false,
+                    askBeforeRunning: true,
+                    readOnly: false,
+                    writeGlobs: [],
+                  },
+                })
+                proofCommand = saved.id
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => ({
+              'R1.S2': automated(EXPORT_PATH, EXPORT_TEST, {
+                test: {
+                  repository: 'api',
+                  path: EXPORT_PATH,
+                  code: EXPORT_TEST,
+                  insertion: 'new_file',
+                  command: proofCommand,
+                },
+              }),
+            }),
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          return yield* proofOf(mission.id, 'R1.S2')
+        }),
+      ),
+    )
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked[0]?.startsWith(`"${process.execPath}" --test `)).toBe(true)
+    expect(asked[0]).toContain('--test-reporter=junit --test-reporter-destination=')
+    expect(asked[0]).toBe(seen.red?.line)
   })
 
   test('a compilation error is error_before_test and comes back as an attempt', async () => {
