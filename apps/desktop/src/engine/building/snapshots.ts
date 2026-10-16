@@ -655,6 +655,8 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
        * shared one of each of its repositories in the main checkout. They are named by the main
        * checkout, never by a Workspace an agent writes in.
        */
+      /** The shared Git folder of a repository of a main checkout, once found: it does not move. */
+      const sharedOf = new Map<string, string>()
       const ownGitFolders = (missionId: string) =>
         Effect.gen(function* () {
           const rows = yield* database
@@ -669,14 +671,21 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
               row.path === null ? [row.main] : [row.main, join(row.main, row.path)],
             ),
           )
-          const found = yield* Effect.forEach([...folders], (folder) =>
-            run(folder, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read').pipe(
+          const found = yield* Effect.forEach([...folders], (folder) => {
+            const known = sharedOf.get(folder)
+            if (known !== undefined) return Effect.succeed(Option.some(known))
+            return run(
+              folder,
+              ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+              'read',
+            ).pipe(
               Effect.flatMap((printed) =>
                 Effect.try({ try: () => realpathSync.native(text(printed).trim()), catch: String }),
               ),
+              Effect.tap((shared) => Effect.sync(() => sharedOf.set(folder, shared))),
               Effect.option,
-            ),
-          )
+            )
+          })
           return found.flatMap(Option.toArray)
         })
 
@@ -687,18 +696,25 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
        */
       const gitFoldersOf = (repository: RepositoryPlace, missionId: string) =>
         Effect.gen(function* () {
-          const asked = (...flags: ReadonlyArray<string>) =>
-            run(repository.folder, ['rev-parse', '--path-format=absolute', ...flags], 'read').pipe(
-              Effect.map((printed) => text(printed).trim()),
-            )
+          // Both in one call: each Git process is tens of milliseconds on Windows, and a Building
+          // takes dozens of snapshots (#442). Its own Git folder's `index` is the one Git uses (no
+          // GIT_INDEX_FILE is set).
+          const [common = '', own = ''] = text(
+            yield* run(
+              repository.folder,
+              ['rev-parse', '--path-format=absolute', '--git-common-dir', '--absolute-git-dir'],
+              'read',
+            ),
+          )
+            .trim()
+            .split('\n')
           const real = (path: string) =>
             Effect.try({ try: () => realpathSync.native(path), catch: String })
-          const shared = yield* Effect.flatMap(asked('--git-common-dir'), real)
-          // Its own Git folder, whose `index` is the one Git uses (no GIT_INDEX_FILE is set).
-          const folder = yield* Effect.flatMap(asked('--absolute-git-dir'), real)
-          const own = yield* ownGitFolders(missionId)
+          const shared = yield* real(common)
+          const folder = yield* real(own)
+          const project = yield* ownGitFolders(missionId)
           const ownEntry = folder === shared || dirname(folder) === join(shared, 'worktrees')
-          if (!own.includes(shared) || !ownEntry) {
+          if (!project.includes(shared) || !ownEntry) {
             return yield* Effect.fail(`${FOREIGN_GIT_FOLDER}: ${folder}`)
           }
           return { index: join(folder, 'index'), objects: join(shared, 'objects') }

@@ -269,6 +269,39 @@ describe('Two first snapshots of a Project at once share one store', () => {
   })
 })
 
+describe('A snapshot costs as few Git processes as it needs', () => {
+  // Every `git` is a process, and on a Windows runner one costs 40 to 50 ms where Linux takes 2:
+  // a Building takes dozens of snapshots, so the tests that run one are as slow as their count.
+  test('a snapshot of a linked worktree asks Git where its objects and its index are in one call', async () => {
+    const { main, worktree } = workspace()
+    const asked: string[][] = []
+    const seen = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (folder === worktree) asked.push([...args])
+        return real(folder, args, kind, options)
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const place = { name: 'acme', folder: worktree }
+          // The first snapshot makes the Project's store; the second is the steady state.
+          yield* Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'start')))
+          asked.length = 0
+          yield* Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'end')))
+          // The subcommand: what follows the options (`-c key=value`, `--no-optional-locks`).
+          return asked.map((args) => {
+            let at = 0
+            while (args[at]?.startsWith('-') === true) at += args[at] === '-c' ? 2 : 1
+            return args[at] ?? ''
+          })
+        }),
+      ),
+    )
+    expect(seen).toEqual(['rev-parse', 'ls-files', 'add', 'write-tree'])
+  })
+})
+
 describe('Two snapshots around a change give exactly its files', () => {
   test('each file with its status, its old path, its line counts and the size of each side', async () => {
     const { main, worktree } = workspace()
