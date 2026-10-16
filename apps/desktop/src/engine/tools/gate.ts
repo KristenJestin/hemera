@@ -861,12 +861,13 @@ export const toolGateLayer = (settings: GateSettings) =>
       const execute = (grant: Grant, prepared: Prepared) =>
         Effect.gen(function* () {
           const { call, path } = prepared
-          /** A file tool's call; `asked` when the verdict judged that very file (`./withholding.ts`). */
-          const fileCall = (resolved: JudgedPath, asked: boolean) =>
+          /**
+           * A file tool's call; it reads the file of the call the verdict judged, when one did
+           * (`./withholding.ts`).
+           */
+          const fileCall = (resolved: JudgedPath, judged: JudgedCall | null) =>
             Effect.map(
-              asked
-                ? Withholding.asked(prepared.session, resolved.resolved)
-                : Withholding.of(prepared.session),
+              judged === null ? Withholding.of(prepared.session) : Withholding.asked(judged),
               (withholding): FileCall => ({
                 sessionId: grant.sessionId,
                 owner: ownerOf(grant),
@@ -880,24 +881,24 @@ export const toolGateLayer = (settings: GateSettings) =>
             path ?? { named: '.', resolved: grant.place.root, inside: true, certain: true }
           switch (call.tool) {
             case 'fs_read': {
-              const read = yield* fsRead(yield* fileCall(pathOf(), true), call.args)
+              const read = yield* fsRead(yield* fileCall(pathOf(), prepared.judged), call.args)
               return yield* uncommittedNoted(grant, pathOf().resolved, read)
             }
             case 'fs_list':
-              return yield* fsList(yield* fileCall(pathOf(), false), call.args)
+              return yield* fsList(yield* fileCall(pathOf(), null), call.args)
             case 'search':
-              return yield* search(yield* fileCall(pathOf(), false), call.args)
+              return yield* search(yield* fileCall(pathOf(), null), call.args)
             case 'fs_write':
               return yield* held(
                 grant,
                 pathOf(),
-                fsWrite(yield* fileCall(pathOf(), true), call.args),
+                fsWrite(yield* fileCall(pathOf(), prepared.judged), call.args),
               )
             case 'fs_edit':
               return yield* held(
                 grant,
                 pathOf(),
-                fsEdit(yield* fileCall(pathOf(), true), call.args),
+                fsEdit(yield* fileCall(pathOf(), prepared.judged), call.args),
               )
             case 'commands_list':
               return yield* commandsList(grant)

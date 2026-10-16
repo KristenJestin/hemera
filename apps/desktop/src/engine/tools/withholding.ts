@@ -1,18 +1,22 @@
 /**
  * Whose content a file read for an agent withholds, in one place (#392).
  *
- * Every tool that reads a file for an agent reads it through the judged open (`./judged.ts`), and
- * that open takes a `Withholding`, which only the sensitive places (`SensitivePlaces`) make: a
- * read path that skips them does not compile. A file in a sensitive place is never opened; its
- * read fails with `content withheld: sensitive place: …`, which a search names beside the file.
+ * A file tool reads a file for an agent through the judged open (`./judged.ts`), and that open
+ * takes a `Withholding`, which only the sensitive places (`SensitivePlaces`) make: a read through
+ * it that skips them does not compile. A file in a sensitive place, or a second name of one (a
+ * hard link), is never opened; its read fails with `content withheld: sensitive place: …`, which
+ * a search names beside the file. What holds it beyond the types is checked by
+ * `tools/boundaries.ts`: under `engine/tools/`, only `judged.ts` reads a file with `node:fs`, and
+ * only the gate makes the exception below.
  *
- * The one exception is the file a verdict judged (`asked`): a sensitive place always asks there,
- * so the read only happens once the human allowed it, and what it reads is masked as #74 masks it.
+ * The one exception is the file of the call a verdict judged (`asked`): a sensitive place always
+ * asks there, so the read only happens once the human allowed it, and what it reads is masked as
+ * #74 masks it.
  */
 
 import { Effect } from 'effect'
 
-import { type CallSession, SensitiveLinks, SensitivePlaces } from './ports.ts'
+import { type CallSession, type JudgedCall, SensitiveLinks, SensitivePlaces } from './ports.ts'
 
 /** What starts the reason a read is refused for when the file's content is withheld. */
 export const CONTENT_WITHHELD = 'content withheld: '
@@ -38,12 +42,13 @@ export class Withholding {
   }
 
   /**
-   * What a session reads of the file a verdict judged (`fs_read`, and what `fs_write` and
-   * `fs_edit` compare): that one file is read, since the verdict asked about it; any other is
-   * withheld as `of` withholds it.
+   * What a session reads of the file of a call a verdict judged (`fs_read`, and what `fs_write`
+   * and `fs_edit` compare): that call's own path is read, since the verdict asked about it; any
+   * other file is withheld as `of` withholds it. Made by the gate only, once the verdict allowed
+   * the call or the human did (`tools/boundaries.ts`).
    */
-  static asked(session: CallSession, judged: string) {
-    return Withholding.besides(session, judged)
+  static asked(judged: JudgedCall) {
+    return Withholding.besides(judged.session, judged.path?.resolved ?? null)
   }
 
   private static besides(session: CallSession, judged: string | null) {
