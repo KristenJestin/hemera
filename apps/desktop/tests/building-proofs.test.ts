@@ -57,6 +57,7 @@ import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.
 import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
 import { Runs } from '../src/engine/runs.ts'
+import { type SecretsRegistry, secretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { activeBuildingIn, decisionsIn, tasksIn } from '../src/engine/building/tasks.ts'
@@ -103,10 +104,13 @@ const proofsEngine = (
     readonly outside?: Partial<OutsideSettings>
     /** Who answers a command marked "ask before running". */
     readonly askBeforeRunning?: Layer.Layer<AskBeforeRunning>
+    /** The values the engine masks. */
+    readonly secrets?: SecretsRegistry
   } = {},
 ) =>
   sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
+    secrets: more.secrets,
     askBeforeRunning: more.askBeforeRunning,
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     snapshots: more.snapshots ?? ((real) => real),
@@ -1381,6 +1385,33 @@ describe('A failed green', () => {
     )
     expect(seen.refreshed.proofs).toEqual(['R1.S2'])
     expect(seen.proof.state).toBe('green')
+  })
+
+  test('a proof whose test prints a known value hands its run back through proof_run masked (#392)', async () => {
+    const value = 'violet-heron-5521-quartz'
+    const secrets = secretsRegistry()
+    secrets.register('suite', [value])
+    // The value is put together as the test runs (a proof is kept masked, so a value written in
+    // its code never runs), and printed in the failure's message, which the run's tail holds.
+    const printing = testFile(
+      "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'export.ts exports nothing yet; region ' + ['violet-heron', '5521-quartz'].join('-'))",
+    )
+    const seen = await proofsEngine(data, undefined, undefined, undefined, { secrets }).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(() => ({
+              'R1.S2': automated(EXPORT_PATH, printing),
+            }))
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            return yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          }),
+        ),
+    )
+    expect(seen).toContain('region •••')
+    expect(seen).not.toContain(value)
   })
 
   test('proof_run runs a failed green again and closes its attempt', async () => {

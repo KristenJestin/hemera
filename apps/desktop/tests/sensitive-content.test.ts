@@ -199,15 +199,16 @@ describe('A second name of a sensitive file is that file (hard links)', () => {
 
 /**
  * Every tool, by what it hands of a file: what it reads from the disk when it is called, what it
- * hands of what was kept before (a checkpoint, a Probe's capture, the evidence), or nothing of a
- * file. A tool that hands a file's content names the scenario that proves a sensitive one is
+ * hands of what was kept before (a checkpoint, a Probe's capture, the evidence), what code it runs
+ * printed (masked by the known values; a file that code reads itself is not asked about, the
+ * residual of running code), or nothing of a file. A tool that hands a file's content names the scenario that proves a sensitive one is
  * withheld from it, or asked about first. A tool added to the catalogue fails this suite (and the
  * typecheck) until it is put here; one put here as handing content fails it until its scenario
  * exists.
  */
 type Hands =
   | {
-      readonly hands: 'read' | 'kept'
+      readonly hands: 'read' | 'kept' | 'ran'
       /** How the content reaches the sensitive places. */
       readonly how: string
       /** The suite and the test that hold it. */
@@ -333,7 +334,14 @@ const CONTENT = {
   task_blocked: NOTHING,
   report_need: NOTHING,
   need_propose: NOTHING,
-  proof_run: NOTHING,
+  proof_run: {
+    hands: 'ran',
+    how: 'the output of the test it runs, masked by the known values as a run’s output is',
+    proof: {
+      suite: 'building-proofs.test.ts',
+      test: 'a proof whose test prints a known value hands its run back through proof_run masked (#392)',
+    },
+  },
   build_summary: NOTHING,
   helper_launch: NOTHING,
   helper_read: NOTHING,
