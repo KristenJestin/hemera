@@ -412,7 +412,7 @@ describe('The Builder reads a frozen prototype’s files, never writes them', ()
     expect(seen.kept.map((row) => row.sha256)).not.toContain(secret)
   })
 
-  test('a kept file that has a second name is refused, never read', async () => {
+  test('a kept file that has a second name is read, as any read', async () => {
     const { run } = prototyping(1)
     const answer = await run(({ profile }) =>
       within(
@@ -432,9 +432,8 @@ describe('The Builder reads a frozen prototype’s files, never writes them', ()
         }),
       ),
     )
-    expect(answer).toMatchObject({ ok: false, refused: true })
-    expect(answer.text).toContain('hard link')
-    expect(answer.text).not.toContain('not-a-real-key')
+    expect(answer).toMatchObject({ ok: true })
+    expect(answer.text).toContain('not-a-real-key')
   })
 
   test('a prototype that is not frozen with the Spec, or a file it does not hold, is refused naming it', async () => {

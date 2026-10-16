@@ -1,8 +1,9 @@
 /**
  * The path the gate allows is the one really used (#373): the file tools read, list, search and
  * write the very file the gate judged, never one a link or a junction planted between the check
- * and the use leads to, and never a file with a second name (a hard link) that may belong to a
- * place the session may not reach.
+ * and the use leads to. A file with a second name (a hard link) is read as any file, since a
+ * command that could plant one could as well copy the file; it is only never kept as evidence,
+ * nor written over.
  *
  * The verdict is asked between the check and the use, so a verdict of the suite's own plants the
  * swap there, as a command running beside the session could.
@@ -180,21 +181,57 @@ describe('fs_read reads the file the gate judged', () => {
     20_000,
   )
 
-  test('a hard link in the place to a file elsewhere is refused', async () => {
-    const outside = elsewhere()
+  test('a hard-linked file inside the Workspace is read by fs_read', async () => {
+    // What pnpm makes of every file under node_modules: a second name in its store.
+    const store = join(work, 'store')
+    mkdirSync(store)
+    writeFileSync(join(store, 'index.js'), 'export const left = 1\n')
     const answer = await engineSwapping(() => undefined).run(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          mkdirSync(join(main, 'node_modules', 'left'), { recursive: true })
+          linkSync(join(store, 'index.js'), join(main, 'node_modules', 'left', 'index.js'))
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          return yield* callTool(builder.grantId, 'fs_read', {
+            path: 'node_modules/left/index.js',
+          })
+        }),
+      ),
+    )
+    expect(answer).toMatchObject({ ok: true })
+    expect(answer.text).toContain('export const left = 1')
+  })
+
+  test('a hard-linked file is never written over, and neither of its names changes', async () => {
+    const outside = elsewhere()
+    const answers = await engineSwapping(() => undefined).run(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const { mission, main } = yield* acmeWithMission(work)
           linkSync(join(outside, 'notes.txt'), join(main, 'notes.txt'))
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
-          return yield* callTool(builder.grantId, 'fs_read', { path: 'notes.txt' })
+          return {
+            read: yield* callTool(builder.grantId, 'fs_read', { path: 'notes.txt' }),
+            write: yield* callTool(builder.grantId, 'fs_write', {
+              path: 'notes.txt',
+              content: 'written',
+            }),
+            edit: yield* callTool(builder.grantId, 'fs_edit', {
+              path: 'notes.txt',
+              edits: [{ old: 'key', new: 'lock' }],
+            }),
+          }
         }),
       ),
     )
-    expect(answer).toMatchObject({ ok: false, refused: true })
-    expect(answer.text).toContain('hard link')
-    expect(answer.text).not.toContain(SECRET)
+    expect(answers.read).toMatchObject({ ok: true })
+    for (const answer of [answers.write, answers.edit]) {
+      expect(answer).toMatchObject({ ok: false, refused: true })
+      expect(answer.text).toContain('hard link')
+    }
+    expect(readFileSync(join(outside, 'notes.txt'), 'utf8')).toBe(SECRET)
+    expect(readFileSync(join(work, 'acme', 'notes.txt'), 'utf8')).toBe(SECRET)
   })
 
   test('a file with a single name in the place is read as before', async () => {
@@ -340,7 +377,7 @@ describe('fs_list and search look where the gate judged', () => {
     expect(answer.text).toContain('notes.txt:1: token = ours')
   })
 
-  test('a search passes over a hard-linked file and says so', async () => {
+  test('a search reads a hard-linked file as any file', async () => {
     const outside = elsewhere()
     const answer = await engineSwapping(() => undefined).run(({ profile }) =>
       profile.use(
@@ -352,8 +389,7 @@ describe('fs_list and search look where the gate judged', () => {
         }),
       ),
     )
-    expect(answer.text).not.toContain(SECRET)
-    expect(answer.text).toContain('notes.txt (linked)')
+    expect(answer.text).toContain(`notes.txt:1: ${SECRET}`)
   })
 })
 
@@ -366,7 +402,7 @@ const PASSING: MissionParts['guards'] = {
 }
 
 describe('evidence_add keeps the file the gate judged', () => {
-  test("a hard link to another mission's evidence is refused, and nothing is kept", async () => {
+  test('`evidence_add` on a hard-linked file is refused, with a clear reason, and nothing is kept', async () => {
     const answer = await commandsEngine(data, { missions: { guards: PASSING } })(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
@@ -382,23 +418,28 @@ describe('evidence_add keeps the file the gate judged', () => {
           writeFileSync(theirs, SECRET)
           linkSync(theirs, join(main, 'log.txt'))
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
-          return yield* callTool(builder.grantId, 'evidence_add', {
+          const added = yield* callTool(builder.grantId, 'evidence_add', {
             name: 'a log',
             path: 'log.txt',
           })
+          const database = yield* Database
+          return { added, kept: yield* database.select().from(memoryEvidence) }
         }),
       ),
     )
-    expect(answer.ok).toBe(false)
-    expect(answer.text).toContain('hard link')
+    expect(answer.added).toMatchObject({ ok: false, refused: true })
+    expect(answer.added.text).toBe(
+      'refused: could not read log.txt: it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept as evidence',
+    )
+    expect(answer.kept).toEqual([])
   })
 })
 
 describe('A page is read from the file judged', () => {
-  test('readPage refuses a file with a second name', async () => {
+  test('readPage reads a file with a second name', async () => {
     const outside = elsewhere()
     linkSync(join(outside, 'notes.txt'), join(work, 'linked.txt'))
-    await expect(readPage(join(work, 'linked.txt'), 0, 100)).rejects.toThrow('hard link')
+    expect((await readPage(join(work, 'linked.txt'), 0, 100)).text).toBe(SECRET)
   })
 })
 

@@ -173,7 +173,7 @@ export const evidenceAdd = (
           : {
               bytes: new Uint8Array(
                 yield* Effect.tryPromise({
-                  try: () => readJudged(path),
+                  try: () => readJudged(path, { oneNameFor: 'evidence' }),
                   catch: (cause) =>
                     new EvidenceRefused({
                       reason: `could not read ${args.path ?? path}: ${cause instanceof Error ? cause.message : String(cause)}`,

@@ -27,14 +27,7 @@ import { join } from 'node:path'
 
 import { SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, SEARCH_SKIPS_LISTED } from '@hemera/core/domain'
 
-import {
-  MORE_THAN_ONE_NAME,
-  NotJudged,
-  THROUGH_A_LINK,
-  openFolder,
-  openJudged,
-  readJudged,
-} from './judged.ts'
+import { NotJudged, THROUGH_A_LINK, openFolder, openJudged, readJudged } from './judged.ts'
 
 /** What a search hit is: where it is, and the line as it was found. */
 export interface SearchHit {
@@ -219,9 +212,7 @@ async function scanFile(
 
   const handle = await openJudged(file, { real }).catch((cause: Error) => {
     signal?.throwIfAborted()
-    const linked =
-      cause instanceof NotJudged &&
-      (cause.message === THROUGH_A_LINK || cause.message === MORE_THAN_ONE_NAME)
+    const linked = cause instanceof NotJudged && cause.message === THROUGH_A_LINK
     skip(progress, rel, linked ? 'linked' : 'unreadable')
     return null
   })

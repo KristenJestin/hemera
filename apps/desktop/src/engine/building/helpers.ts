@@ -642,7 +642,9 @@ export const helpersLayer = (settings: HelpersSettings) =>
             }
             // Read from the file judged only, as the file tools read (#373): never through a link
             // planted since, nor a file with a second name, nor a pipe.
-            const bytes = yield* Effect.tryPromise(() => readJudged(real)).pipe(Effect.result)
+            const bytes = yield* Effect.tryPromise(() =>
+              readJudged(real, { oneNameFor: 'evidence' }),
+            ).pipe(Effect.result)
             if (Result.isFailure(bytes)) {
               const cause = bytes.failure.cause
               const reason = cause instanceof Error ? cause.message : String(cause)

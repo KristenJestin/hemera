@@ -11,7 +11,8 @@
  * - where the handle really is, as the system has it, is the real path the gate judged: on Linux
  *   the path of the open file (`/proc/self/fd/<fd>`), so no link or junction stood on the way when
  *   it was opened, whatever the names say before or after;
- * - a file has a single name on the disk, under the rule `secondNameRefused` (one place).
+ * - a file kept as evidence or written over has a single name on the disk, under the rule on
+ *   hard links (`SECOND_NAME_REFUSED`, one place); a file only read may have several.
  *
  * A folder is used through its handle too: on Linux a name in it is reached through
  * `/proc/self/fd/<fd>/<name>`, which is the opened folder itself whatever happens to its path, so
@@ -41,9 +42,22 @@ import { Predicate } from 'effect'
 export const THROUGH_A_LINK =
   'a link or a junction now stands on its way, and a path is never followed after it was judged'
 
-/** Why a file with more than one name is not used. */
-export const MORE_THAN_ONE_NAME =
-  'it has more than one name on the disk (a hard link), and what it holds may belong to a place this session may not reach'
+/**
+ * The rule on files with more than one name on the disk (hard links), in one place: what such a
+ * file is never used for, and why. It is read as any file (pnpm, bun and uv make one of every
+ * dependency file, and a command that could plant one could as well copy the file); it is never
+ * kept as evidence, where a hard link would carry a file from outside the Workspace into the
+ * mission's evidence, and never written over, the rule #373 set for writes.
+ */
+const SECOND_NAME_REFUSED = {
+  evidence:
+    'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept as evidence',
+  write:
+    'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never written over',
+} as const
+
+/** What a file with more than one name is refused for. */
+export type OneNameFor = keyof typeof SECOND_NAME_REFUSED
 
 /** Why a pipe, a device or a folder is not read or written as a file. */
 export const NOT_A_FILE = 'it is not a regular file (a pipe, a device or a folder)'
@@ -61,11 +75,16 @@ const BY_HANDLE = process.platform === 'linux'
 /** Never waiting on a pipe, and never through a link as the last name, where the flags exist. */
 const NEVER_WAITING = BY_HANDLE ? constants.O_NONBLOCK | constants.O_NOFOLLOW : 0
 
-/**
- * The rule on files with more than one name, in one place: refused, as #373 asks. Hemera never
- * makes a hard link; package managers do (pnpm, bun, uv), and those are refused too.
- */
-const secondNameRefused = (file: BigIntStats): boolean => file.nlink > 1n
+/** The reasons a use of a judged path is refused rather than failed. */
+export const JUDGED_REFUSALS: ReadonlyArray<string> = [
+  THROUGH_A_LINK,
+  NOT_A_FILE,
+  ...Object.values(SECOND_NAME_REFUSED),
+]
+
+/** Why a file is refused for `use` under the rule on hard links, or null. */
+const secondNameRefused = (file: BigIntStats, use: OneNameFor | undefined): string | null =>
+  use !== undefined && file.nlink > 1n ? SECOND_NAME_REFUSED[use] : null
 
 /** Where an open handle is, as the system has it. */
 const whereIs = (handle: FileHandle) => readlink(`/proc/self/fd/${String(handle.fd)}`)
@@ -100,8 +119,9 @@ async function proven(handle: FileHandle, path: string, real: string): Promise<v
 
 /**
  * Opens the file at `path` and proves the opened file is the one judged at the real path `real`
- * (the path itself when the gate handed it over): a regular file, with a single name. With
- * `create`, the file is made and must not exist. The handle is the caller's to close.
+ * (the path itself when the gate handed it over), a regular file; with `oneNameFor`, one with a
+ * single name. With `create`, the file is made and must not exist. The handle is the caller's to
+ * close.
  */
 export async function openJudged(
   path: string,
@@ -109,6 +129,7 @@ export async function openJudged(
     readonly real?: string
     readonly create?: boolean
     readonly mode?: number | undefined
+    readonly oneNameFor?: OneNameFor
   } = {},
 ): Promise<FileHandle> {
   const flags =
@@ -120,7 +141,8 @@ export async function openJudged(
     const file = await handle.stat({ bigint: true })
     if (!file.isFile()) throw new NotJudged(NOT_A_FILE)
     await proven(handle, path, options.real ?? path)
-    if (secondNameRefused(file)) throw new NotJudged(MORE_THAN_ONE_NAME)
+    const refused = secondNameRefused(file, options.oneNameFor)
+    if (refused !== null) throw new NotJudged(refused)
     return handle
   } catch (cause) {
     await handle.close()
@@ -131,7 +153,7 @@ export async function openJudged(
 /** The whole file at a judged path (at `real`, when it is reached by another), read through the handle that was proven. */
 export async function readJudged(
   path: string,
-  options: { readonly real?: string } = {},
+  options: { readonly real?: string; readonly oneNameFor?: OneNameFor } = {},
 ): Promise<Buffer> {
   const handle = await openJudged(path, options)
   try {

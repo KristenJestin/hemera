@@ -34,12 +34,10 @@ import { mutate } from '../transaction.ts'
 import type { ActionOwner } from './actions.ts'
 import { EffectfulActions } from './actions.ts'
 import {
+  JUDGED_REFUSALS,
   type JudgedFolder,
-  MORE_THAN_ONE_NAME,
   MOVED,
-  NOT_A_FILE,
   NotJudged,
-  THROUGH_A_LINK,
   madeFolder,
   openFolder,
   openJudged,
@@ -190,9 +188,7 @@ export const attempt = <A>(run: (signal: AbortSignal) => Promise<A>) =>
  * was judged (`./judged.ts`), a failure otherwise.
  */
 export const failedOn = (reason: string, text: string): ToolAnswer =>
-  reason === THROUGH_A_LINK || reason === MORE_THAN_ONE_NAME || reason === NOT_A_FILE
-    ? refusal(`refused: ${text}`)
-    : failure(text)
+  JUDGED_REFUSALS.includes(reason) ? refusal(`refused: ${text}`) : failure(text)
 
 /** A page of a file as an agent reads it: its numbered lines, where it stands in the file, and the range. */
 export const pageSaid = (value: Page): string => {
@@ -455,7 +451,7 @@ const versionRefusal = (
  */
 const currentOf = (path: string) =>
   attempt(async () => {
-    const handle = await openJudged(path).catch((cause: Error) => {
+    const handle = await openJudged(path, { oneNameFor: 'write' }).catch((cause: Error) => {
       if (codeOf(cause) === 'ENOENT') return null
       throw cause
     })
