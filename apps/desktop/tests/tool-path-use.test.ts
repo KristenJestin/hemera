@@ -354,6 +354,28 @@ describe('fs_list and search look where the gate judged', () => {
     expect(answer.text).toContain('no match')
   })
 
+  test('a hard-linked .gitignore steers the search as any .gitignore', async () => {
+    // What a dotfiles manager or a `cp -l` checkout leaves: the root .gitignore has a second name.
+    const dotfiles = join(work, 'dotfiles')
+    mkdirSync(dotfiles)
+    writeFileSync(join(dotfiles, 'gitignore'), 'dist\n')
+    const answer = await engineSwapping(() => undefined).run(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          linkSync(join(dotfiles, 'gitignore'), join(main, '.gitignore'))
+          mkdirSync(join(main, 'dist'))
+          writeFileSync(join(main, 'dist', 'out.js'), 'token = built\n')
+          writeFileSync(join(main, 'src.js'), 'token = ours\n')
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          return yield* callTool(builder.grantId, 'search', { pattern: 'token' })
+        }),
+      ),
+    )
+    expect(answer.text).toContain('src.js:1: token = ours')
+    expect(answer.text).not.toContain('dist/')
+  })
+
   test('a .gitignore that is a link to a file elsewhere steers nothing', async (context) => {
     const outside = elsewhere()
     writeFileSync(join(outside, 'ignore'), 'notes.txt\n')
@@ -504,7 +526,7 @@ const racing = async <A>(
  * between the proof and that very call.
  */
 const swappingBefore = async <A>(
-  name: 'rename' | 'mkdir',
+  name: 'rename' | 'mkdir' | 'lstat',
   swap: () => void,
   use: () => Promise<A>,
 ): Promise<A> => {
@@ -526,6 +548,28 @@ const swappingBefore = async <A>(
     syncBuiltinESMExports()
   }
 }
+
+describe('A write replaces the name, never writes through it', () => {
+  // On every platform: a hard link needs no privilege on Windows (NTFS, same volume), and the
+  // `lstat` the write makes of its target, before the new file is made, is where it is planted.
+  test('a hard link planted right before the write is replaced, its other name untouched', async () => {
+    const outside = elsewhere()
+    const root = join(work, 'root')
+    mkdirSync(root)
+    writeFileSync(join(root, 'notes.txt'), SECRET)
+    const target = join(root, 'notes.txt')
+    await swappingBefore(
+      'lstat',
+      () => {
+        rmSync(target)
+        linkSync(join(outside, 'notes.txt'), target)
+      },
+      () => replaceFile(realpathSync.native(target), 'the agent content'),
+    )
+    expect(readFileSync(target, 'utf8')).toBe('the agent content')
+    expect(readFileSync(join(outside, 'notes.txt'), 'utf8')).toBe(SECRET)
+  })
+})
 
 // Windows has no path of an open handle that Node can read: there, the check still looks the
 // path up by name, the residual put to the maintainer (#373).
