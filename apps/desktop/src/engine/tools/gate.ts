@@ -244,7 +244,6 @@ const REASON_KEPT = 500
 const ARGUMENTS_KEPT = 2000
 
 const readArgumentFields = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
-const readArgumentList = Schema.decodeUnknownOption(Schema.Array(Schema.Json))
 const readProposedChanges = Schema.decodeUnknownOption(
   Schema.Struct({ changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)) }),
 )
@@ -270,27 +269,44 @@ const withoutProposedValues = (tool: string, args: Schema.Json): Schema.Json =>
         }),
       })
 
+/**
+ * How deep in a call's arguments a long string is looked for: past it, the masking of the record
+ * keeps nothing but `•••` (its nesting limit), so there is nothing to cut.
+ */
+const HEADS_DEPTH = 32
+
+/** `Array.isArray` does not narrow a read-only array out of a union: this does. */
+const isJsonList = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
 /** A value of a call's arguments with each string longer than a record keeps as its masked head. */
-const headsOf = (secrets: SecretsRegistry, value: Schema.Json): Effect.Effect<Schema.Json> => {
+const headsOf = (
+  secrets: SecretsRegistry,
+  value: Schema.Json,
+  depth: number,
+): Effect.Effect<Schema.Json> => {
   if (Predicate.isString(value)) {
     return value.length <= ARGUMENTS_KEPT
       ? Effect.succeed(value)
       : maskedHead(secrets, value, ARGUMENTS_KEPT)
   }
-  const list = readArgumentList(value)
-  if (Option.isSome(list)) return Effect.forEach(list.value, (item) => headsOf(secrets, item))
-  const record = readArgumentFields(value)
-  return Option.isSome(record) ? headsIn(secrets, record.value) : Effect.succeed(value)
+  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
+    return Effect.succeed(value)
+  }
+  if (depth >= HEADS_DEPTH) return Effect.succeed(value)
+  return isJsonList(value)
+    ? Effect.forEach(value, (item) => headsOf(secrets, item, depth + 1))
+    : headsIn(secrets, value, depth + 1)
 }
 
 /** The fields of a record, each as `headsOf` keeps it. */
 const headsIn = (
   secrets: SecretsRegistry,
   record: Schema.JsonObject,
+  depth: number,
 ): Effect.Effect<Schema.JsonObject> =>
   Effect.map(
     Effect.forEach(Object.entries(record), ([name, value]) =>
-      Effect.map(headsOf(secrets, value), (head): [string, Schema.Json] => [name, head]),
+      Effect.map(headsOf(secrets, value, depth), (head): [string, Schema.Json] => [name, head]),
     ),
     (fields) => Object.fromEntries(fields),
   )
@@ -306,7 +322,7 @@ const argumentsKept = (secrets: SecretsRegistry, tool: string, given: Schema.Jso
     const fields = readArgumentFields(args)
     const masked = Option.isNone(fields)
       ? yield* maskedHead(secrets, agentText(args), ARGUMENTS_KEPT + 1)
-      : maskedJson(secrets.maskArguments(yield* headsIn(secrets, fields.value)))
+      : maskedJson(secrets.maskArguments(yield* headsIn(secrets, fields.value, 1)))
     return masked.length > ARGUMENTS_KEPT
       ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
       : masked
