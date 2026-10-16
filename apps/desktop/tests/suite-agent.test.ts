@@ -12,11 +12,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Discovery } from '../src/engine/agents/discovery.ts'
 import { Agents } from '../src/engine/agents/service.ts'
-import { suiteAgent, suiteFor } from '../src/engine/agents/suite-agent.ts'
+import { fakeAgentsFor, suiteAgent, suiteFor } from '../src/engine/agents/suite-agent.ts'
 import { Chats } from '../src/engine/chat/service.ts'
 import { transcriptOf } from '../src/engine/chat/store.ts'
 import { createProject } from '../src/engine/projects.ts'
-import { commandsEngine } from './commands-engine.ts'
+import { NO_AGENTS, commandsEngine } from './commands-engine.ts'
 import { FAST, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -40,6 +40,24 @@ describe('The suite’s agent', () => {
       if (variable === undefined) delete process.env['HEMERA_E2E_HEADLESS']
       else process.env['HEMERA_E2E_HEADLESS'] = variable
     }
+  })
+
+  test('an application opened on a fixture profile starts no real agent: every agent is the fake', async () => {
+    // Main says the engine opens a fixture (#420); the probe's port is still the suite's alone.
+    expect(await Effect.runPromise(fakeAgentsFor(undefined, {}))).toBeNull()
+    expect(await Effect.runPromise(fakeAgentsFor(undefined, { fixture: false }))).toBeNull()
+    const fixture = await Effect.runPromise(fakeAgentsFor(undefined, { fixture: true }))
+    expect(fixture).not.toBeNull()
+    const listed = await Effect.runPromise(
+      Effect.provide(
+        Discovery.use((discovery) => discovery.list),
+        fixture?.sessions.discovery ?? NO_AGENTS,
+      ),
+    )
+    expect(listed.filter((agent) => agent.installed).map((agent) => agent.path)).toEqual([
+      '/suite/claude',
+    ])
+    expect(await Effect.runPromise(fakeAgentsFor({}, {}))).not.toBeNull()
   })
 
   test('the agents the window lists are the suite’s, not this machine’s', async () => {

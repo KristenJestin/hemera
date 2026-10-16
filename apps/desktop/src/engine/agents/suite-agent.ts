@@ -104,3 +104,14 @@ export const suiteAgent: Effect.Effect<SuiteAgent> = Effect.map(
 /** The suite's agent when main handed the engine the probe's port, and none otherwise. */
 export const suiteFor = <Port>(probe: Port | undefined): Effect.Effect<SuiteAgent | null> =>
   probe === undefined ? Effect.succeed(null) : suiteAgent
+
+/**
+ * The fake agents of a run: the suite's when main handed the probe's port, and the same fake when
+ * main opened the engine on a fixture's profile (#420), so that a fixture never starts a real
+ * agent; none otherwise, and the machine's agents are found.
+ */
+export const fakeAgentsFor = <Port>(
+  probe: Port | undefined,
+  start: { readonly fixture?: boolean | undefined },
+): Effect.Effect<SuiteAgent | null> =>
+  probe === undefined && start.fixture !== true ? Effect.succeed(null) : suiteAgent
