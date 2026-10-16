@@ -112,6 +112,7 @@ import {
   IconBrandJira as TablerBrandJira,
   IconHistory as TablerHistory,
   IconBrandBitbucket as TablerBrandBitbucket,
+  IconGitCommit as TablerGitCommit,
   IconGitMerge as TablerGitMerge,
   IconGitPullRequest as TablerGitPullRequest,
   IconTag as TablerTag,
@@ -315,6 +316,7 @@ export const IconBrandBitbucket = catalogued(
   TablerBrandBitbucket,
   'IconBrandBitbucket',
 )
+export const IconGitCommit = catalogued(TablerGitCommit, TablerGitCommit, 'IconGitCommit')
 export const IconGitMerge = catalogued(TablerGitMerge, TablerGitMerge, 'IconGitMerge')
 export const IconGitPullRequest = catalogued(
   TablerGitPullRequest,

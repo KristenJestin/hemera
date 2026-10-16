@@ -1,4 +1,4 @@
-import { presetSteps, wavesOf } from './delivery-fixtures.ts'
+import { presetSteps, pushedIn, wavesOf } from './delivery-fixtures.ts'
 import type { Dependency, DeliveryRules, Preset, StepConfig } from './delivery-model.ts'
 
 /** What the page does to the rules a story holds, as the engine would answer it. */
@@ -12,10 +12,7 @@ export function withPreset(rules: DeliveryRules, path: string, preset: Preset): 
         ? {
             ...one,
             preset,
-            steps: presetSteps(preset, `@acme/${path}`).map((s) => ({
-              step: s,
-              origin: 'preset',
-            })),
+            steps: presetSteps(preset, `@acme/${path}`),
           }
         : one,
     ),
@@ -31,12 +28,17 @@ export function withPutBack(rules: DeliveryRules, path: string, id: string): Del
         ? {
             ...one,
             steps: one.steps.map((s) =>
-              s.step.id === id ? { step: s.step, origin: 'preset' } : s,
+              s.step.id === id ? { step: s.step, origin: 'preset', moment: s.moment } : s,
             ),
           }
         : one,
     ),
   }
+}
+
+/** The push and the pull requests moved, in every repository, where Push and open says. */
+export function withPushIn(rules: DeliveryRules, placement: 'review' | 'waves'): DeliveryRules {
+  return { ...rules, repositories: pushedIn(rules.repositories, placement) }
 }
 
 /** A proposed dependency accepted: the waves follow it. */

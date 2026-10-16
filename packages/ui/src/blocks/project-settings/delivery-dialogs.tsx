@@ -4,16 +4,9 @@ import { IconGitMerge } from '../../icons.ts'
 import type { SettingsForm } from '../../surfaces/project-settings/project-settings.tsx'
 import { CLEANUP_KINDS, RECIPE_KINDS } from './delivery-form-options.ts'
 import type { Drafts } from './delivery-drafts.ts'
-import { withCleanup } from './delivery-edits.ts'
+import { withCleanup, withPushIn } from './delivery-edits.ts'
+import { CANDIDATES, DELIVERY_COMMANDS, filled, templateRefusal } from './delivery-fixtures.ts'
 import {
-  CANDIDATES,
-  DELIVERY_COMMANDS,
-  HISTORIES,
-  filled,
-  templateRefusal,
-} from './delivery-fixtures.ts'
-import {
-  CommitsForm,
   PushForm,
   type PushDraft,
   type RepositoryDraft,
@@ -28,7 +21,7 @@ import {
   type PullRequestRules,
   type Reviewer,
   STEP_WORDS,
-  type WhoCommits,
+  MOMENT_WORDS,
 } from './delivery-model.ts'
 import type { DeliveryTarget } from './delivery-rules.tsx'
 import type { FormFootProps } from './parts.tsx'
@@ -50,7 +43,6 @@ const TEMPLATE_LABELS: Record<Template, string> = {
 export interface DialogContext {
   rules: DeliveryRules
   drafts: Drafts
-  histories: Readonly<Record<WhoCommits, readonly string[]>> | undefined
   /** Whether a story's save is refused, and what the page does on a save. */
   foot: (
     what: string,
@@ -61,7 +53,6 @@ export interface DialogContext {
   onTemplate: (next: string) => void
   onPush: (next: PushDraft) => void
   onReviewers: (next: Reviewer[]) => void
-  onCommits: (next: WhoCommits) => void
   onRepository: (next: RepositoryDraft) => void
   onStep: (next: StepDraft) => void
   onClose: () => void
@@ -124,8 +115,9 @@ function stepDialog(form: Of<'step'> | Of<'add-step'>, context: DialogContext): 
   const existing =
     form.kind === 'step' ? found?.steps.find((one) => one.step.id === form.id) : undefined
   const name = existing === undefined ? 'New step' : STEP_WORDS[existing.step.config.kind]
+  const when = existing === undefined ? '' : ` · ${MOMENT_WORDS[existing.moment]}`
   return {
-    title: `${name} · ${form.repository}`,
+    title: `${name} · ${form.repository}${when}`,
     icon: <IconGitMerge size="sm" />,
     body: (
       <StepForm
@@ -137,9 +129,11 @@ function stepDialog(form: Of<'step'> | Of<'add-step'>, context: DialogContext): 
           form.kind === 'add-step'
             ? {
                 kinds: RECIPE_KINDS,
+                moments: true,
                 after: (found?.steps ?? []).map((one) => ({
                   id: one.step.id,
                   label: STEP_WORDS[one.step.config.kind],
+                  moment: one.moment,
                 })),
               }
             : undefined
@@ -192,7 +186,7 @@ function cleanupDialog(
 
 /** The dialog a line opens. */
 export function dialogFor(form: DeliveryTarget, context: DialogContext): SettingsForm {
-  const { drafts, histories, foot, onPush, onReviewers, onCommits, setPullRequests } = context
+  const { drafts, foot, onPush, onReviewers, setPullRequests, edit } = context
   switch (form.kind) {
     case 'commit':
     case 'title':
@@ -203,7 +197,10 @@ export function dialogFor(form: DeliveryTarget, context: DialogContext): Setting
         title: 'Push and open the pull requests',
         icon: <IconGitMerge size="sm" />,
         body: <PushForm draft={drafts.push} onChange={onPush} />,
-        footer: foot('push', () => setPullRequests(drafts.push)),
+        footer: foot('push', () => {
+          setPullRequests(drafts.push)
+          edit((before) => withPushIn(before, drafts.push.placement))
+        }),
       }
     case 'reviewers':
       return {
@@ -213,19 +210,6 @@ export function dialogFor(form: DeliveryTarget, context: DialogContext): Setting
           <ReviewersForm chosen={drafts.reviewers} candidates={CANDIDATES} onChange={onReviewers} />
         ),
         footer: foot('reviewers', () => setPullRequests({ reviewers: drafts.reviewers })),
-      }
-    case 'commits':
-      return {
-        title: 'Who commits',
-        icon: <IconGitMerge size="sm" />,
-        body: (
-          <CommitsForm
-            value={drafts.commits}
-            histories={histories ?? HISTORIES}
-            onChange={onCommits}
-          />
-        ),
-        footer: foot('commits', () => setPullRequests({ commits: drafts.commits })),
       }
     case 'repository':
       return repositoryDialog(form, context)
