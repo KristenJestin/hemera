@@ -79,10 +79,15 @@ export const ENV_TEMPLATE_ENDINGS = ['.example', '.sample', '.template', '.dist'
 const envTemplate = (name: string): boolean =>
   ENV_TEMPLATE_ENDINGS.some((ending) => name.toLowerCase().endsWith(ending))
 
-/** A `*.env` that is a template by the name before `.env` (`example.env`, `app.sample.env`). */
+/**
+ * The names before `.env` that make a `*.env` a template (`example.env`, `app.sample.env`); not
+ * `dist`, which a build's real environment may be called.
+ */
+const ENV_FILE_TEMPLATES = ['example', 'sample', 'template'] as const
+
 const envFileTemplate = (name: string): boolean => {
   const stem = name.toLowerCase().slice(0, -'.env'.length)
-  return ENV_TEMPLATE_ENDINGS.some((ending) => stem === ending.slice(1) || stem.endsWith(ending))
+  return ENV_FILE_TEMPLATES.some((one) => stem === one || stem.endsWith(`.${one}`))
 }
 
 const named = (...names: readonly string[]): Segment[] => names.map((name) => ({ name }))

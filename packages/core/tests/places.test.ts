@@ -197,6 +197,11 @@ describe('Sensitive places always ask', () => {
     expect(sensitivePlace(path, context)).toBeNull()
   })
 
+  test('dist.env, which may be a build’s real environment, is no template', () => {
+    const path = '/home/me/work/app/deploy/dist.env'
+    expect(sensitivePlace(path, LINUX, { reading: true })).toBe('~/work/app/deploy/dist.env')
+  })
+
   test.each(['example.env', 'app.sample.env', '.env.example'])(
     'the template %s is read freely, and still asks to be written',
     (name) => {
