@@ -19,7 +19,6 @@ export const HEMERA_RULES: DeliveryRules = {
     body: '{summary}\n\n{images}\n\nCloses {key}',
     reviewers: [],
     requireApproval: false,
-    commits: 'task',
   },
   repositories: [
     {
@@ -30,7 +29,7 @@ export const HEMERA_RULES: DeliveryRules = {
       base: 'dev',
       forge: { kind: 'github', host: 'github.com', forced: false, cli: 'ready' },
       steps: [
-        ...presetSteps('application').map((step) => ({ step, origin: 'preset' as const })),
+        ...presetSteps('application'),
         {
           step: {
             id: 'published',
@@ -38,6 +37,7 @@ export const HEMERA_RULES: DeliveryRules = {
             config: { kind: 'published', by: 'tag', pattern: 'v*-beta.*' },
           },
           origin: 'added',
+          moment: 'waves',
         },
       ],
     },
@@ -63,7 +63,7 @@ export const LOCAL_MERGE_RULES: DeliveryRules = {
   repositories: [
     {
       ...LOCAL_REPOSITORY,
-      steps: presetSteps('local').map((step) => ({ step, origin: 'preset' })),
+      steps: presetSteps('local'),
     },
   ],
   dependencies: [],

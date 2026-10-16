@@ -7,19 +7,27 @@ import {
   IconBrandGithub,
   IconChecklist,
   IconDeviceDesktop,
+  IconGitCommit,
   IconGitMerge,
   IconGitPullRequest,
   IconListCheck,
   IconPackage,
   IconPlayerPlay,
+  IconPlayerStop,
+  IconRefresh,
   IconTag,
   IconTerminal,
+  IconTrash,
 } from '../../icons.ts'
 import type { ForgeView, StepKind } from './delivery-model.ts'
 
 /** The glyph of a step's kind. */
 export function stepIcon(kind: StepKind): ReactNode {
   switch (kind) {
+    case 'commit-by-hemera':
+    case 'commit-by-me':
+    case 'commit-by-agent':
+      return <IconGitCommit size="sm" />
     case 'push':
       return <IconArrowUp size="sm" />
     case 'pull-request':
@@ -41,6 +49,13 @@ export function stepIcon(kind: StepKind): ReactNode {
       return <IconBolt size="sm" />
     case 'confirm':
       return <IconListCheck size="sm" />
+    case 'pull-main-checkout':
+      return <IconRefresh size="sm" />
+    case 'stop-services':
+      return <IconPlayerStop size="sm" />
+    case 'remove-worktrees':
+    case 'remove-workspace':
+      return <IconTrash size="sm" />
   }
 }
 

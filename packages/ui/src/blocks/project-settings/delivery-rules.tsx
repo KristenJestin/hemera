@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 // react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { Fragment, type ReactNode, useState } from 'react'
 
 import { Button, IconButton } from '../../components/button/button.tsx'
 import { Checkbox } from '../../components/checkbox/checkbox.tsx'
@@ -35,6 +35,8 @@ import {
   type DeliveryRepository,
   type DeliveryRules,
   type ForgeView,
+  type Moment,
+  MOMENT_WORDS,
   PRESET_WORDS,
   PRESETS,
   type Preset,
@@ -42,7 +44,6 @@ import {
   type RecipeStep,
   STEP_WORDS,
   type StepConfig,
-  type StepKind,
   FORGE_WORDS,
   detailOf,
   writesToNetwork,
@@ -53,7 +54,6 @@ import {
   changesWords,
   cliTroubled,
   cliWords,
-  COMMITS_WORDS,
   pushWords,
   reviewersWords,
   stepWords,
@@ -67,15 +67,17 @@ import { FixCommand } from './provider-forms.tsx'
  *
  * **Pull requests** — before Ship: when the branch is pushed and the pull requests open (in Review
  * or in the waves, on their own or on a click), the templates of the commits, titles and bodies,
- * the reviewers, the approvals Ship waits for, and who commits during Building. One line each,
- * its value beside its name; a line opens its dialog.
+ * the reviewers, and the approvals Ship waits for. One line each, its value beside its name; a
+ * line opens its dialog.
  *
  * **Waves** — after Ship: the repositories in the order they deliver, each wave under its band, one
  * line per repository: its preset, what it changes of it, the repository it waits for, where it
  * pushes, and its forge with the state of the forge's command line. A line unfolds into its
- * recipe — the steps it runs, each with where it comes from: the preset, changed here, added here,
- * or left out — and folds back. Hemera's proposed dependencies stand under the waves, quiet, with
- * Accept.
+ * recipe, moment by moment — after each task, when Review starts, after Ship — the steps each runs,
+ * each with where it comes from: the preset, changed here, added here, or left out — and folds
+ * back. Committing is a step like the others: Hemera commits, I commit myself, an agent commits.
+ * Any step of the catalogue may be added to any moment. Hemera's proposed dependencies stand under
+ * the waves, quiet, with Accept.
  *
  * **End** — Closing, always there and never removed, then Cleanup, whose steps are removed or
  * added.
@@ -85,7 +87,7 @@ import { FixCommand } from './provider-forms.tsx'
 
 /** What a line of the section opens. */
 export type DeliveryTarget =
-  | { readonly kind: 'push' | 'commit' | 'title' | 'body' | 'reviewers' | 'commits' }
+  | { readonly kind: 'push' | 'commit' | 'title' | 'body' | 'reviewers' }
   | { readonly kind: 'repository'; readonly repository: string }
   | { readonly kind: 'step'; readonly repository: string; readonly id: string }
   | { readonly kind: 'add-step'; readonly repository: string }
@@ -286,11 +288,6 @@ function PullRequests({
           label="Reviewers"
           value={reviewersWords(rules)}
           onOpen={() => onOpen({ kind: 'reviewers' })}
-        />
-        <OpenLine
-          label="Who commits"
-          value={COMMITS_WORDS[rules.commits]}
-          onOpen={() => onOpen({ kind: 'commits' })}
         />
         <li className={cn(ITEM, 'flex flex-col')}>
           <div className={CELLS}>
@@ -503,8 +500,6 @@ export interface RepositoryRowProps {
   repository: DeliveryRepository
   /** The repositories it waits for. */
   after: readonly string[]
-  /** Whether Push and Pull request run in Review rather than in the waves. */
-  inReview: boolean
   initiallyOpen?: boolean | undefined
   checking: boolean
   onOpen: (target: DeliveryTarget) => void
@@ -515,11 +510,26 @@ export interface RepositoryRowProps {
   onCopy: (line: string) => void
 }
 
+const MOMENTS_SHOWN: readonly Moment[] = ['tasks', 'review', 'waves']
+
+/** How each moment's list is named after the repository's: its waves are its steps. */
+const STEPS_OF: Record<Moment, string> = {
+  tasks: ' after each task',
+  review: ' in Review',
+  waves: '',
+}
+
+/** What an empty moment says: nothing runs there, and what follows. */
+const NOTHING: Record<Moment, string> = {
+  tasks: 'Nothing after each task: the work waits in the Workspace until Review.',
+  review: 'Nothing when Review starts: the work waits in the Workspace until Ship.',
+  waves: 'Nothing after Ship: Ship records the delivery, then the End runs.',
+}
+
 /** A repository of a wave: one line, which unfolds into its recipe. */
 export function RepositoryRow({
   repository,
   after,
-  inReview,
   initiallyOpen = false,
   checking,
   onOpen,
@@ -534,10 +544,6 @@ export function RepositoryRow({
   const { forge, path } = repository
   const refused = repository.steps.filter((one) => one.refused !== undefined).length
   const changes = changesOf(repository)
-  const early = (kind: StepKind): boolean => kind === 'push' || kind === 'pull-request'
-  const review = inReview ? repository.steps.filter((one) => early(one.step.config.kind)) : []
-  const inReviewSteps = new Set(review)
-  const waves = repository.steps.filter((one) => !inReviewSteps.has(one))
   const row = (one: RecipeStep): ReactNode => (
     <StepRow
       key={one.step.id}
@@ -640,23 +646,22 @@ export function RepositoryRow({
                 onCopy={onCopy}
               />
             )}
-            {review.length > 0 && (
-              <>
-                <RecipeHead label="When Review starts" />
-                <ul aria-label={`Steps of ${path} in Review`} className="flex flex-col">
-                  {review.map(row)}
-                </ul>
-              </>
-            )}
-            <RecipeHead label="After Ship" />
-            <ul aria-label={`Steps of ${path}`} className="flex flex-col">
-              {waves.map(row)}
-              {waves.length === 0 && (
-                <li className="py-2 pr-4 pl-10 text-sm text-muted-foreground">
-                  Nothing after Ship: Ship records the delivery, then the End runs.
-                </li>
-              )}
-            </ul>
+            {MOMENTS_SHOWN.map((moment) => {
+              const steps = repository.steps.filter((one) => one.moment === moment)
+              return (
+                <Fragment key={moment}>
+                  <RecipeHead label={MOMENT_WORDS[moment]} />
+                  <ul aria-label={`Steps of ${path}${STEPS_OF[moment]}`} className="flex flex-col">
+                    {steps.map(row)}
+                    {steps.length === 0 && (
+                      <li className="py-2 pr-4 pl-10 text-sm text-muted-foreground">
+                        {NOTHING[moment]}
+                      </li>
+                    )}
+                  </ul>
+                </Fragment>
+              )
+            })}
             <div className="flex border-t border-border py-1.5 pl-8">
               <Button
                 size="sm"
@@ -800,7 +805,6 @@ function Waves({
                   key={path}
                   repository={repository}
                   after={upstreamOf(path, rules.dependencies)}
-                  inReview={rules.pullRequests.placement === 'review'}
                   initiallyOpen={opened.has(path)}
                   checking={busy.has(path)}
                   onOpen={onOpen}
@@ -1061,8 +1065,9 @@ export function DeliveryRulesSection({
           />
           <End cleanup={rules.cleanup} onOpen={onOpen} onRemoveCleanup={onRemoveCleanup} />
           <p className={NOTE}>
-            Missions already shipped keep the rules they shipped with: the pull requests’ part is
-            copied at the first push, the waves and the End at Ship.
+            Missions already under way keep the rules they started with: what runs after each task
+            is copied at the first task done, the pull requests’ part at the first push, the waves
+            and the End at Ship.
           </p>
         </>
       )}
