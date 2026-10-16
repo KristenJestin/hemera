@@ -53,7 +53,7 @@ export function checkFixtureFolder(
 ): Result.Result<string, string> {
   const path = real(folder)
   const root = real(places.root)
-  if (!within(path, root) || relative(root, path) === '') {
+  if (!within(path, root) || within(root, path)) {
     return Result.fail(`${folder} is not under the fixtures root ${places.root}.`)
   }
   const normal = real(places.normalProfile)
