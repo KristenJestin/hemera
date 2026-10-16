@@ -10,6 +10,7 @@
 
 import { execFileSync } from 'node:child_process'
 import {
+  chmodSync,
   linkSync,
   mkdirSync,
   readFileSync,
@@ -191,6 +192,56 @@ describe('A second name of a sensitive file is that file (hard links)', () => {
     expect(asked.map((one) => one.call.tool)).toEqual(['fs_read'])
     expect(asked[0]?.reason).toMatch(/sensitive place: .*\.env, through a hard link/)
   })
+
+  test('a search prints no line of docs/notes.txt, a hard link to src/settings/.env', async () => {
+    const { answers } = await builderCalls(
+      [{ tool: 'search', args: { pattern: WORD } }],
+      (main) => {
+        mkdirSync(join(main, 'src', 'settings'), { recursive: true })
+        mkdirSync(join(main, 'docs'), { recursive: true })
+        writeFileSync(join(main, 'src', 'settings', '.env'), `ACME_REGION=${REGION}\n`)
+        linkSync(join(main, 'src', 'settings', '.env'), join(main, 'docs', 'notes.txt'))
+      },
+    )
+    const text = answers[0]?.text ?? ''
+    expect(text).not.toContain(REGION)
+    expect(text).toMatch(
+      /docs\/notes\.txt \(content withheld: sensitive place: [^)]*settings\/\.env, through a hard link\)/,
+    )
+  })
+
+  // A folder that cannot be read may hold the sensitive file a second name leads to: a file with
+  // two names is withheld then, rather than read. Root reads every folder, so it has no such case.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a file with two names is withheld when a folder of the place cannot be read',
+    async () => {
+      let closed = ''
+      try {
+        const { answers } = await builderCalls(
+          [{ tool: 'search', args: { pattern: WORD } }],
+          (main) => {
+            linkSync(join(main, 'invoices.ts'), join(main, 'copy.ts'))
+            closed = join(main, 'private')
+            mkdirSync(closed)
+            chmodSync(closed, 0o000)
+          },
+        )
+        const text = answers[0]?.text ?? ''
+        // Both names of the linked file are withheld; a file with one name is still searched.
+        expect(text).toContain('.env.example:1: ACME_REGION=')
+        for (const name of ['copy', 'invoices']) {
+          expect(text).not.toMatch(new RegExp(`^${name}\\.ts:\\d+:`, 'm'))
+          expect(text).toMatch(
+            new RegExp(
+              `${name}\\.ts \\(content withheld: sensitive place: [^)]*private could not be read, through a hard link\\)`,
+            ),
+          )
+        }
+      } finally {
+        if (closed !== '') chmodSync(closed, 0o700)
+      }
+    },
+  )
 
   test('a file whose second name no sensitive file shares is searched and read without a question', async () => {
     const { answers, asked } = await builderCalls(

@@ -21,11 +21,11 @@ import { readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { sensitivePlace, shownFromHome } from '@hemera/core/domain'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 
 import { ProfileHome } from '../profile-home.ts'
 import { containedIn } from '../tools/paths.ts'
-import { type PlaceAsked, SensitivePlaces } from '../tools/ports.ts'
+import { type LinkedFiles, type PlaceAsked, SensitivePlaces } from '../tools/ports.ts'
 import { MissionPlaces } from './ports.ts'
 
 export interface PlacesSettings {
@@ -44,23 +44,35 @@ const spellings = (folder: string): ReadonlyArray<string> => {
   }
 }
 
-/** The folders a place's sensitive files are not looked for in: Git's own, and dependencies. */
-const NOT_LOOKED_IN = new Set(['.git', 'node_modules'])
+/**
+ * The folders a place's sensitive files are not looked for in: Git's own, and those a package
+ * manager fills with hard links of its own (npm and pnpm, Cargo, uv).
+ */
+const NOT_LOOKED_IN = new Set(['.git', 'node_modules', 'target', '.venv'])
 
 /** A file's identity on the disk, the same for each of its names. */
 const identityOf = (file: BigIntStats) => `${String(file.dev)}:${String(file.ino)}`
 
+/** The code of a system error, when it has one. */
+const codeOf = (cause: Error): string | undefined =>
+  'code' in cause && Predicate.isString(cause.code) ? cause.code : undefined
+
 /**
  * The files below `root` that `sensitive` names and that have another name on the disk, by their
- * identity: what a hard link may be a second name of.
+ * identity: what a hard link may be a second name of. A folder that cannot be read (but one gone
+ * meanwhile) may hold one: it is named, and the files are not known.
  */
 async function linkedSensitiveFiles(
   root: string,
   sensitive: (path: string) => string | null,
-): Promise<ReadonlyMap<string, string>> {
+): Promise<LinkedFiles> {
   const found = new Map<string, string>()
+  let unread: string | null = null
   const lookIn = async (folder: string): Promise<void> => {
-    const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
+    const entries = await readdir(folder, { withFileTypes: true }).catch((cause: Error) => {
+      if (codeOf(cause) !== 'ENOENT') unread ??= folder
+      return []
+    })
     await Promise.all(
       entries.map(async (entry) => {
         const path = join(folder, entry.name)
@@ -76,7 +88,7 @@ async function linkedSensitiveFiles(
     )
   }
   await lookIn(root)
-  return found
+  return { files: found, unread }
 }
 
 export const sensitivePlacesLayer = (settings: PlacesSettings) =>
@@ -104,9 +116,11 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
           const file = await stat(path, { bigint: true }).catch(() => null)
           if (file === null || !file.isFile() || file.nlink < 2n) return null
           const find = () => linkedSensitiveFiles(root, (one) => below(root, one, true))
-          const files = await (asked.links?.below(root, find) ?? find())
-          const place = files.get(identityOf(file))
-          return place === undefined ? null : `${place}, through a hard link`
+          const { files, unread } = await (asked.links?.below(root, find) ?? find())
+          const place =
+            files.get(identityOf(file)) ??
+            (unread === null ? null : `${said(shownFromHome(unread, context))} could not be read`)
+          return place === null ? null : `${place}, through a hard link`
         })
       /** The sensitive place below a folder, by a path's names, then by its other names. */
       const belowOrLinked = (root: string, path: string, asked: PlaceAsked) => {

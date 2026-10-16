@@ -37,8 +37,8 @@ export class Withholding {
    * What a session reads without a verdict on the file itself (a search's files, a prototype's
    * kept file, an evidence): every file in a sensitive place is withheld.
    */
-  static of(session: CallSession) {
-    return Withholding.besides(session, null)
+  static of(session: CallSession, links = new SensitiveLinks()) {
+    return Withholding.besides(session, null, links)
   }
 
   /**
@@ -48,13 +48,16 @@ export class Withholding {
    * the call or the human did (`tools/boundaries.ts`).
    */
   static asked(judged: JudgedCall) {
-    return Withholding.besides(judged.session, judged.path?.resolved ?? null)
+    return Withholding.besides(
+      judged.session,
+      judged.path?.resolved ?? null,
+      judged.links ?? new SensitiveLinks(),
+    )
   }
 
-  private static besides(session: CallSession, judged: string | null) {
+  private static besides(session: CallSession, judged: string | null, links: SensitiveLinks) {
     return Effect.gen(function* () {
       const places = yield* SensitivePlaces
-      const links = new SensitiveLinks()
       return new Withholding(async (real) => {
         if (real === judged) return null
         const place = await Effect.runPromise(

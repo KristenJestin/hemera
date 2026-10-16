@@ -307,7 +307,7 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           const writes =
             call.tool !== 'fs_read' && call.tool !== 'fs_list' && call.tool !== 'search'
           const root = call.session.place.root
-          const links = new SensitiveLinks()
+          const links = call.links ?? new SensitiveLinks()
           const pointAt = (
             written: string,
             resolved: { path: string; inside: boolean; certain: boolean },

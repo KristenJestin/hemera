@@ -80,6 +80,8 @@ export interface JudgedCall {
   readonly folder: string | null
   /** The agent's reason for the call: shown beside Hemera's, never read as an instruction. */
   readonly why: string | null
+  /** The sensitive files the call looked for, shared by its verdict and its reads. */
+  readonly links?: SensitiveLinks
 }
 
 /** A verdict, and who gave it. */
@@ -144,15 +146,24 @@ export class PermissionRequests extends Context.Service<
 >()('PermissionRequests') {}
 
 /**
+ * The sensitive files of a place that have another name on the disk, by their identity, and the
+ * first folder that could not be read, when one could not: then they are not all known.
+ */
+export interface LinkedFiles {
+  readonly files: ReadonlyMap<string, string>
+  readonly unread: string | null
+}
+
+/**
  * The sensitive files of a Workspace by their identity on the disk, found once for a call (#392):
- * a file read under another name (a hard link) is the sensitive file it is. One is made for a
- * call and handed to each question it asks, so a call that reads many files looks once.
+ * a file read under another name (a hard link) is the sensitive file it is. The gate makes one
+ * for a call, and its verdict and its reads share it, so a call looks once whatever it reads.
  */
 export class SensitiveLinks {
-  readonly #found = new Map<string, Promise<ReadonlyMap<string, string>>>()
+  readonly #found = new Map<string, Promise<LinkedFiles>>()
 
   /** The sensitive files below `root`, by their identity, as `find` finds them the first time. */
-  below(root: string, find: () => Promise<ReadonlyMap<string, string>>) {
+  below(root: string, find: () => Promise<LinkedFiles>) {
     const known = this.#found.get(root)
     if (known !== undefined) return known
     const found = find()

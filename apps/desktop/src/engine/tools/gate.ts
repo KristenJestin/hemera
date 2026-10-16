@@ -151,6 +151,7 @@ import {
   type JudgedCall,
   type JudgedPath,
   PermissionRequests,
+  SensitiveLinks,
   SensitivePlaces,
   SessionNotes,
   SetupDesk,
@@ -796,6 +797,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                   tool: name,
                   gate: entry.gate,
                   path,
+                  links: new SensitiveLinks(),
                   command:
                     command === null
                       ? null
@@ -869,7 +871,9 @@ export const toolGateLayer = (settings: GateSettings) =>
            */
           const fileCall = (resolved: JudgedPath, judged: JudgedCall | null) =>
             Effect.map(
-              judged === null ? Withholding.of(prepared.session) : Withholding.asked(judged),
+              judged === null
+                ? Withholding.of(prepared.session, prepared.judged?.links)
+                : Withholding.asked(judged),
               (withholding): FileCall => ({
                 sessionId: grant.sessionId,
                 owner: ownerOf(grant),
