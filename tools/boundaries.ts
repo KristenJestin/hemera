@@ -13,6 +13,12 @@
  * gets two writers. So `node:sqlite`, Drizzle and the Effect SQLite client are imported under
  * `apps/desktop/src/engine/` and nowhere else.
  *
+ * A file tool hands an agent a file's content through the judged open (`judged.ts`), which asks
+ * the sensitive places first (#392). So under `apps/desktop/src/engine/tools/`, no other file
+ * imports what of `node:fs` reads a file, but for the few listed with their reason; and the one
+ * exception to the sensitive places, the file of a call a verdict judged (`Withholding.asked`), is
+ * made by the gate alone. What the agents' other tools read is not seen here.
+ *
  *   node tools/boundaries.ts
  */
 
@@ -87,6 +93,98 @@ export function storageRefusalsOf(file: string, source: string): Refusal[] {
     }))
 }
 
+/** The file tools, which read files for an agent. */
+export const FILE_TOOLS = 'apps/desktop/src/engine/tools/'
+
+/** The judged open, the one file tool that reads a file's content with `node:fs`. */
+const JUDGED_OPEN = `${FILE_TOOLS}judged.ts`
+
+/** The gate, the one place that makes the exception for the file a verdict judged. */
+const GATE = `${FILE_TOOLS}gate.ts`
+
+/** What of `node:fs` opens or reads a file, `promises` holding them all. */
+const READS = new Set([
+  'promises',
+  'open',
+  'openSync',
+  'openAsBlob',
+  'read',
+  'readSync',
+  'readv',
+  'readvSync',
+  'readFile',
+  'readFileSync',
+  'createReadStream',
+])
+
+/** The reads a file tool other than the judged open makes, each with what makes it harmless. */
+export const READS_ALLOWED: ReadonlyArray<{ file: string; name: string; why: string }> = [
+  {
+    file: `${FILE_TOOLS}read.ts`,
+    name: 'open',
+    why: 'the fingerprint of a file a write compares, never its content',
+  },
+]
+
+const FS = String.raw`[\`'"](?:node:)?fs(?:/promises)?[\`'"]`
+
+/** `{ a, b as c, type D }`'s names as the module has them, its types left out. */
+const namesIn = (list: string, renamed: RegExp): string[] =>
+  list
+    .split(',')
+    .map((one) => one.trim())
+    .filter((one) => one !== '' && !one.startsWith('type '))
+    .map((one) => one.split(renamed)[0]!.trim())
+
+/** What a source takes of `node:fs`: its names, or `node:fs` for the whole module. */
+function fsTaken(source: string): string[] {
+  const taken: string[] = []
+  for (const match of source.matchAll(
+    new RegExp(String.raw`\bimport\s+(type\s+)?\{([^}]*)\}\s*from\s*${FS}`, 'g'),
+  )) {
+    if (match[1] === undefined) taken.push(...namesIn(match[2]!, /\s+as\s+/))
+  }
+  const whole = [
+    String.raw`\bimport\s+(?!type\b)(?:\*\s*as\s+\w+|\w+)[^;'"]*?from\s*${FS}`,
+    String.raw`\b(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*${FS}\s*\)`,
+    String.raw`\bimport\s*\(\s*${FS}\s*\)`,
+  ]
+  for (const pattern of whole) {
+    for (const _ of source.matchAll(new RegExp(pattern, 'g'))) taken.push('node:fs')
+  }
+  for (const match of source.matchAll(
+    new RegExp(String.raw`\{([^}]*)\}\s*=\s*require\s*\(\s*${FS}\s*\)`, 'g'),
+  )) {
+    taken.push(...namesIn(match[1]!, /\s*:\s*/))
+  }
+  return taken
+}
+
+/** What a file tool other than the judged open takes of `node:fs` to read a file. */
+export function readRefusalsOf(file: string, source: string): Refusal[] {
+  if (!file.startsWith(FILE_TOOLS) || file === JUDGED_OPEN) return []
+  return fsTaken(source)
+    .filter((name) => name === 'node:fs' || READS.has(name))
+    .filter((name) => !READS_ALLOWED.some((one) => one.file === file && one.name === name))
+    .map((name) => ({
+      file,
+      found: name,
+      problem: `a file tool reads a file without the judged open (${JUDGED_OPEN})`,
+    }))
+}
+
+/** A use of the exception for a judged call's file anywhere but the gate. */
+export function askedRefusalsOf(file: string, source: string): Refusal[] {
+  if (file === GATE || !/\bWithholding\.asked\b/.test(source)) return []
+  return [
+    {
+      file,
+      found: 'Withholding.asked',
+      problem: `the file of a call a verdict judged is read by ${GATE} only`,
+    },
+  ]
+}
+
 function sourceFilesOf(directory: string): string[] {
   if (!existsSync(directory)) return []
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -127,7 +225,13 @@ export function analyze(root: string): Refusal[] {
   const storage = [join(root, 'packages'), ...applicationSources(root)]
     .flatMap(sourceFilesOf)
     .flatMap((path) => storageRefusalsOf(named(path), sourceOf(path)))
-  return [...shared, ...storage]
+  const reads = applicationSources(root)
+    .flatMap(sourceFilesOf)
+    .flatMap((path) => {
+      const source = sourceOf(path)
+      return readRefusalsOf(named(path), source).concat(askedRefusalsOf(named(path), source))
+    })
+  return [...shared, ...storage, ...reads]
 }
 
 if (import.meta.main) {
@@ -135,6 +239,6 @@ if (import.meta.main) {
   for (const { file, found, problem } of refusals) console.error(`${file}: ${found} — ${problem}`)
   if (refusals.length > 0) process.exit(1)
   console.log(
-    'the shared packages import no Electron, and no React outside the design system; the storage layer stays in the engine',
+    'the shared packages import no Electron, and no React outside the design system; the storage layer stays in the engine; the file tools read through the judged open',
   )
 }

@@ -13,8 +13,9 @@
  * than silently left out.
  *
  * A file is read only as the file found under the folder searched (`./judged.ts`): opened once,
- * then checked to be at its real path with no link or junction on the way, and to have a single
- * name; one that is not is passed over as linked.
+ * then checked to be at its real path with no link or junction on the way; one that is not is
+ * passed over as linked. A file in a sensitive place is never opened: it is named as withheld,
+ * as `fs_read` asks before reading it (#392).
  *
  * `.gitignore` is respected from the workspace root, and `.git` never is: what the user told Git
  * to ignore is not what they told an agent to read. Only the root's file is read, and only its
@@ -28,6 +29,7 @@ import { join } from 'node:path'
 import { SEARCH_MATCH_LIMIT, SEARCH_SCAN_BYTES, SEARCH_SKIPS_LISTED } from '@hemera/core/domain'
 
 import { NotJudged, THROUGH_A_LINK, openFolder, openJudged, readJudged } from './judged.ts'
+import { CONTENT_WITHHELD, type Withholding } from './withholding.ts'
 
 /** What a search hit is: where it is, and the line as it was found. */
 export interface SearchHit {
@@ -37,13 +39,12 @@ export interface SearchHit {
 }
 
 /**
- * A file a search did not read, and why: what looks binary, what could not be read, or what is
- * reached through a link or has a second name.
+ * A file a search did not read, and why: what looks binary, what could not be read, what is
+ * reached through a link, or what is withheld (`withheld` says why: `content withheld: …`).
  */
-export interface SearchSkip {
-  readonly path: string
-  readonly reason: 'binary' | 'unreadable' | 'linked'
-}
+export type SearchSkip =
+  | { readonly path: string; readonly reason: 'binary' | 'unreadable' | 'linked' }
+  | { readonly path: string; readonly reason: 'withheld'; readonly withheld: string }
 
 /** Which of the two limits stopped a search. */
 export type SearchLimit = 'matches' | 'scanned'
@@ -76,6 +77,8 @@ export interface SearchRequest {
   readonly cursor?: string | null
   /** Aborted when the caller gave up: the search stops where it is and answers nothing more. */
   readonly signal?: AbortSignal
+  /** What the session searching may not read: each file is asked before it is opened. */
+  readonly withholding: Withholding
 }
 
 /** Folders that are never walked: what Git keeps, and what no search should ever read. */
@@ -107,7 +110,7 @@ interface Progress {
 export async function searchIn(request: SearchRequest): Promise<SearchResult> {
   // A root that is not there is said file by file, as a file that could not be read.
   const real = request.judged ?? (await realpath(request.root).catch(() => request.root))
-  const ignored = await ignoredPatterns(request.root, real)
+  const ignored = await ignoredPatterns(request.root, real, request.withholding)
   const only =
     request.glob === null || request.glob === undefined ? null : globMatcher(request.glob)
   const cursor = parseCursor(request.cursor ?? null)
@@ -145,13 +148,11 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
     }
     // The cursor names the last line the previous call examined, so this one starts after it.
     const ended = await scanFile(
-      file,
-      at,
-      rel,
+      { file, real: at, rel },
       rel === resumePath ? resumeLine : 0,
       query,
       progress,
-      request.signal,
+      request,
     )
     if (progress.stoppedBy !== null) break
     if (ended && progress.scanned >= SEARCH_SCAN_BYTES) spent = true
@@ -168,9 +169,9 @@ export async function searchIn(request: SearchRequest): Promise<SearchResult> {
 }
 
 /** Notes a file the search passed over: named while the list is short, counted always. */
-function skip(progress: Progress, path: string, reason: SearchSkip['reason']): void {
+function skip(progress: Progress, skipped: SearchSkip): void {
   progress.skippedCount += 1
-  if (progress.skipped.length < SEARCH_SKIPS_LISTED) progress.skipped.push({ path, reason })
+  if (progress.skipped.length < SEARCH_SKIPS_LISTED) progress.skipped.push(skipped)
 }
 
 /**
@@ -188,13 +189,11 @@ function skip(progress: Progress, path: string, reason: SearchSkip['reason']): v
  * and cut there; the cursor names it, so the next call goes on from the line after it.
  */
 async function scanFile(
-  file: string,
-  real: string,
-  rel: string,
+  { file, real, rel }: { readonly file: string; readonly real: string; readonly rel: string },
   from: number,
   query: string,
   progress: Progress,
-  signal: AbortSignal | undefined,
+  { signal, withholding }: Pick<SearchRequest, 'signal' | 'withholding'>,
 ): Promise<boolean> {
   let carry = ''
   let index = 0
@@ -210,10 +209,14 @@ async function scanFile(
     if (progress.hits.length >= SEARCH_MATCH_LIMIT) progress.stoppedBy = 'matches'
   }
 
-  const handle = await openJudged(file, { real }).catch((cause: Error) => {
+  const handle = await openJudged(file, { real, withholding }).catch((cause: Error) => {
     signal?.throwIfAborted()
-    const linked = cause instanceof NotJudged && cause.message === THROUGH_A_LINK
-    skip(progress, rel, linked ? 'linked' : 'unreadable')
+    const judged = cause instanceof NotJudged ? cause.message : null
+    if (judged?.startsWith(CONTENT_WITHHELD) === true) {
+      skip(progress, { path: rel, reason: 'withheld', withheld: judged })
+    } else {
+      skip(progress, { path: rel, reason: judged === THROUGH_A_LINK ? 'linked' : 'unreadable' })
+    }
     return null
   })
   if (handle === null) return true
@@ -225,7 +228,7 @@ async function scanFile(
       // A NUL byte in the first chunk is what a binary file looks like read as text, and a
       // search that returned matches inside a bundle would be a search nobody trusts.
       if (first && text.includes('\u0000')) {
-        skip(progress, rel, 'binary')
+        skip(progress, { path: rel, reason: 'binary' })
         return true
       }
       first = false
@@ -247,7 +250,7 @@ async function scanFile(
     signal?.throwIfAborted()
     // A file that cannot be read — gone since it was listed, or not ours to open — is said to
     // have been passed over rather than left out without a word.
-    skip(progress, rel, 'unreadable')
+    skip(progress, { path: rel, reason: 'unreadable' })
     return true
   } finally {
     stream.destroy()
@@ -346,10 +349,14 @@ async function* filesUnder(
  * The root's `.gitignore`, as the simple patterns it holds, comments and blanks left out: read
  * from the root judged only (`./judged.ts`), never through a link.
  */
-async function ignoredPatterns(root: string, real: string): Promise<string[]> {
+async function ignoredPatterns(
+  root: string,
+  real: string,
+  withholding: Withholding,
+): Promise<string[]> {
   try {
     const text = (
-      await readJudged(join(root, '.gitignore'), { real: join(real, '.gitignore') })
+      await readJudged(join(root, '.gitignore'), { real: join(real, '.gitignore'), withholding })
     ).toString('utf8')
     return text
       .split('\n')

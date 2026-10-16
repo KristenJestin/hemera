@@ -71,6 +71,7 @@ import {
   type JudgedCall,
   PermissionRequests,
   type RequestAsked,
+  SensitiveLinks,
   SensitivePlaces,
 } from '../tools/ports.ts'
 import { fingerprintFile } from '../tools/read.ts'
@@ -301,7 +302,11 @@ const registerSensitiveValues = (call: JudgedCall, settings: RequestsSettings) =
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const places = yield* SensitivePlaces
-    const asked = { session: call.session, writes: false }
+    const asked = {
+      session: call.session,
+      writes: false,
+      links: call.links ?? new SensitiveLinks(),
+    }
     for (const { written, led } of yield* namedPaths(call, settings)) {
       const sensitive =
         (yield* places.sensitive(written, asked)) ?? (yield* places.sensitive(led, asked))

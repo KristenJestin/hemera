@@ -21,9 +21,11 @@ import { ToolAccess, ToolGate } from '../src/engine/tools/index.ts'
 import {
   type JudgedCall,
   PermissionRequests,
+  SensitivePlaces,
   type Verdict,
   Verdicts,
 } from '../src/engine/tools/ports.ts'
+import { Withholding } from '../src/engine/tools/withholding.ts'
 
 /** A verdict that answers as told and keeps every call it was asked about. */
 export const verdictsSaying = (answer: (call: JudgedCall) => Verdict) => {
@@ -101,3 +103,19 @@ export const callTool = (
   args: Schema.Json,
   callKey: string | null = null,
 ) => ToolGate.use((gate) => gate.call({ grantId, tool, arguments: args, callKey }))
+
+/**
+ * What a suite that reads files below the gate (a search, a page) withholds: nothing, as for a
+ * session whose place holds no sensitive file. The sensitive places have suites of their own.
+ */
+export const NOTHING_WITHHELD = Effect.runSync(
+  Withholding.of({
+    sessionId: 'suite',
+    role: 'builder',
+    projectId: 'suite',
+    missionId: null,
+    place: { kind: 'workspace', readOnly: false, root: '' },
+  }).pipe(
+    Effect.provide(Layer.succeed(SensitivePlaces, { sensitive: () => Effect.succeed(null) })),
+  ),
+)

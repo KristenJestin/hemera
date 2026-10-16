@@ -99,6 +99,29 @@ export function secretsRegistry(): SecretsRegistry {
 
 export class Secrets extends Context.Service<Secrets, SecretsRegistry>()('Secrets') {}
 
+/** How far past what is kept the head of a long text is masked: past any credential cut in two. */
+const HEAD_MARGIN = 4096
+
+/**
+ * The first `kept` characters of a text as they read masked, without masking the whole of a large
+ * one (a call's arguments, a minified line, #392): a head two margins longer is masked in slices
+ * of time, then one margin is dropped from its end. A value or a credential the cut split in two
+ * is no longer recognised, and stays in clear; it is the last characters of the head, masked or
+ * not, so the margin takes it away. The margin is longer than any credential masked by its shape,
+ * and than the longest value registered; the second one leaves `kept` characters whole unless the
+ * masks shortened the head by more than a margin, and then fewer are kept, never a piece in clear.
+ */
+export const maskedHead = (secrets: SecretsRegistry, text: string, kept: number) =>
+  Effect.gen(function* () {
+    const margin = Math.max(HEAD_MARGIN, ...secrets.values().map((value) => value.length))
+    const whole = text.length <= kept + 2 * margin
+    const masked = yield* secrets.maskPaced(whole ? text : text.slice(0, kept + 2 * margin))
+    const safe = whole ? masked.length : Math.max(0, masked.length - margin)
+    return masked.length <= kept && whole
+      ? masked
+      : secrets.mask(masked.slice(0, Math.min(kept, safe)))
+  })
+
 /** The source of a Project's own variables, or of a Workspace's. */
 export const variablesSource = (projectId: string, workspaceId: string | null): string =>
   workspaceId === null ? `project-variables:${projectId}` : `workspace-variables:${workspaceId}`

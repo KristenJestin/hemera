@@ -42,7 +42,14 @@ import { readPage } from '../src/engine/tools/read.ts'
 import { searchIn } from '../src/engine/tools/search.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
-import { ALLOW, acmeWithMission, callTool, sessionOf, verdictsSaying } from './tools-world.ts'
+import {
+  ALLOW,
+  NOTHING_WITHHELD,
+  acmeWithMission,
+  callTool,
+  sessionOf,
+  verdictsSaying,
+} from './tools-world.ts'
 
 let data: string
 let work: string
@@ -461,7 +468,7 @@ describe('A page is read from the file judged', () => {
   test('readPage reads a file with a second name', async () => {
     const outside = elsewhere()
     linkSync(join(outside, 'notes.txt'), join(work, 'linked.txt'))
-    expect((await readPage(join(work, 'linked.txt'), 0, 100)).text).toBe(SECRET)
+    expect((await readPage(join(work, 'linked.txt'), 0, 100, NOTHING_WITHHELD)).text).toBe(SECRET)
   })
 })
 
@@ -581,7 +588,9 @@ describe.skipIf(process.platform === 'win32')(
       writeFileSync(join(folders.root, 'D', 'f.txt'), 'ours')
       writeFileSync(join(folders.outside, 'D', 'f.txt'), SECRET)
       const read = await racing(folders, async () => {
-        const handle = await openJudged(join(folders.root, 'D', 'f.txt'))
+        const handle = await openJudged(join(folders.root, 'D', 'f.txt'), {
+          withholding: NOTHING_WITHHELD,
+        })
         try {
           return (await handle.readFile()).toString()
         } finally {
@@ -643,7 +652,9 @@ describe.skipIf(process.platform === 'win32')(
       writeFileSync(join(folders.root, 'D', 'notes.txt'), 'token = inside\n')
       writeFileSync(join(folders.outside, 'D', 'notes.txt'), `token = ${SECRET}\n`)
       const root = join(folders.root, 'D')
-      const found = await racing(folders, () => searchIn({ root, judged: root, query: 'token' }))
+      const found = await racing(folders, () =>
+        searchIn({ root, judged: root, query: 'token', withholding: NOTHING_WITHHELD }),
+      )
       expect(found.hits.map((hit) => hit.text).join('\n')).not.toContain(SECRET)
     })
   },
