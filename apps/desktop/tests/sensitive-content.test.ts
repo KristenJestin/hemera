@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { TOOL_NAMES, type ToolName } from '@hemera/core/domain'
@@ -64,6 +64,7 @@ const committed = (main: string) => {
 /** The answers of a Builder's calls on a committed place, and the questions they became. */
 const builderCalls = async (
   calls: ReadonlyArray<{ readonly tool: string; readonly args: Schema.JsonObject }>,
+  more: (main: string) => void = () => undefined,
 ) => {
   const questions = questionsKept()
   const answers = await commandsEngine(data, {
@@ -73,6 +74,7 @@ const builderCalls = async (
       Effect.gen(function* () {
         const { mission, main } = yield* acmeWithMission(work)
         committed(main)
+        more(main)
         const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
         return yield* Effect.forEach(calls, (one) => callTool(builder.grantId, one.tool, one.args))
       }),
@@ -148,6 +150,50 @@ describe('fs_read and fs_edit of a sensitive file ask before reading it', () => 
     expect(asked.map((one) => one.call.tool)).toEqual(['fs_read', 'fs_edit'])
     expect(asked[0]?.reason).toMatch(/sensitive place: .*\.env/)
     expect(asked[1]?.reason).toMatch(/sensitive place: .*\.env\.production/)
+  })
+})
+
+describe('A second name of a sensitive file is that file (hard links)', () => {
+  /** `notes.txt`, a second name of the `.env` on the disk, made after the commit. */
+  const linked = (main: string) => linkSync(join(main, '.env'), join(main, 'notes.txt'))
+
+  test('a search prints no line of notes.txt, a hard link to .env, and names it as withheld', async () => {
+    const { answers, asked } = await builderCalls(
+      [{ tool: 'search', args: { pattern: WORD } }],
+      linked,
+    )
+    const text = answers[0]?.text ?? ''
+    expect(text).not.toContain(REGION)
+    expect(text).not.toMatch(/^notes\.txt:\d+:/m)
+    expect(text).toMatch(
+      /notes\.txt \(content withheld: sensitive place: [^)]*\.env, through a hard link\)/,
+    )
+    expect(asked).toEqual([])
+  })
+
+  test('fs_read of notes.txt, a hard link to .env, asks as fs_read of .env does', async () => {
+    const { answers, asked } = await builderCalls(
+      [{ tool: 'fs_read', args: { path: 'notes.txt' } }],
+      linked,
+    )
+    expect(answers[0]?.text).not.toContain(REGION)
+    expect(asked.map((one) => one.call.tool)).toEqual(['fs_read'])
+    expect(asked[0]?.reason).toMatch(/sensitive place: .*\.env, through a hard link/)
+  })
+
+  test('a file whose second name no sensitive file shares is searched and read without a question', async () => {
+    const { answers, asked } = await builderCalls(
+      [
+        { tool: 'search', args: { pattern: WORD } },
+        { tool: 'fs_read', args: { path: 'copy.ts' } },
+      ],
+      (main) => linkSync(join(main, 'invoices.ts'), join(main, 'copy.ts')),
+    )
+    const [search, read] = answers
+    expect(search?.text).toContain('copy.ts:1: export const acme = []')
+    expect(read?.ok).toBe(true)
+    expect(read?.text).toContain('export const acme = []')
+    expect(asked).toEqual([])
   })
 })
 

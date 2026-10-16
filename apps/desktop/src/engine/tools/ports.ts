@@ -143,10 +143,30 @@ export class PermissionRequests extends Context.Service<
   { readonly request: (asked: RequestAsked) => Effect.Effect<{ readonly answer: string }> }
 >()('PermissionRequests') {}
 
+/**
+ * The sensitive files of a Workspace by their identity on the disk, found once for a call (#392):
+ * a file read under another name (a hard link) is the sensitive file it is. One is made for a
+ * call and handed to each question it asks, so a call that reads many files looks once.
+ */
+export class SensitiveLinks {
+  readonly #found = new Map<string, Promise<ReadonlyMap<string, string>>>()
+
+  /** The sensitive files below `root`, by their identity, as `find` finds them the first time. */
+  below(root: string, find: () => Promise<ReadonlyMap<string, string>>) {
+    const known = this.#found.get(root)
+    if (known !== undefined) return known
+    const found = find()
+    this.#found.set(root, found)
+    return found
+  }
+}
+
 /** Who asks about a place, and whether the call may write there. */
 export interface PlaceAsked {
   readonly session: CallSession
   readonly writes: boolean
+  /** The sensitive files the call already looked for; none, and they are looked for again. */
+  readonly links?: SensitiveLinks
 }
 
 /**

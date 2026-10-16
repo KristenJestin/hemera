@@ -12,7 +12,7 @@
 
 import { Effect } from 'effect'
 
-import { type CallSession, SensitivePlaces } from './ports.ts'
+import { type CallSession, SensitiveLinks, SensitivePlaces } from './ports.ts'
 
 /** What starts the reason a read is refused for when the file's content is withheld. */
 export const CONTENT_WITHHELD = 'content withheld: '
@@ -49,9 +49,12 @@ export class Withholding {
   private static besides(session: CallSession, judged: string | null) {
     return Effect.gen(function* () {
       const places = yield* SensitivePlaces
+      const links = new SensitiveLinks()
       return new Withholding(async (real) => {
         if (real === judged) return null
-        const place = await Effect.runPromise(places.sensitive(real, { session, writes: false }))
+        const place = await Effect.runPromise(
+          places.sensitive(real, { session, writes: false, links }),
+        )
         return place === null ? null : `${CONTENT_WITHHELD}${place}`
       })
     })

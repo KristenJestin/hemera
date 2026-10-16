@@ -8,17 +8,23 @@
  * folder, `missions/<key>/` is the session's mission's own, and `missions/<key>/` of an accepted
  * dependency may be read; everything else (other missions, their evidence and checkpoints,
  * `snapshots/`, other Workspaces) is a sensitive place. Paths are the caller's, links resolved.
+ *
+ * A file read under the session's place with more than one name on the disk (a hard link) is
+ * compared with the sensitive files of that place, found by their names: one that is one of them
+ * is that sensitive place (#392). A hard link from the place to a sensitive file outside it is
+ * not seen: the residual #380 accepted.
  */
 
-import { realpathSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { type BigIntStats, realpathSync } from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { sensitivePlace, shownFromHome } from '@hemera/core/domain'
 import { Effect, Layer } from 'effect'
 
 import { ProfileHome } from '../profile-home.ts'
 import { containedIn } from '../tools/paths.ts'
-import { SensitivePlaces } from '../tools/ports.ts'
+import { type PlaceAsked, SensitivePlaces } from '../tools/ports.ts'
 import { MissionPlaces } from './ports.ts'
 
 export interface PlacesSettings {
@@ -37,6 +43,39 @@ const spellings = (folder: string): ReadonlyArray<string> => {
   }
 }
 
+/** The folders a place's sensitive files are not looked for in: Git's own, and dependencies. */
+const NOT_LOOKED_IN = new Set(['.git', 'node_modules'])
+
+/** A file's identity on the disk, the same for each of its names. */
+const identityOf = (file: BigIntStats) => `${String(file.dev)}:${String(file.ino)}`
+
+/**
+ * The files below `root` that `sensitive` names and that have another name on the disk, by their
+ * identity: what a hard link may be a second name of.
+ */
+async function linkedSensitiveFiles(
+  root: string,
+  sensitive: (path: string) => string | null,
+): Promise<ReadonlyMap<string, string>> {
+  const found = new Map<string, string>()
+  const lookIn = async (folder: string): Promise<void> => {
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const path = join(folder, entry.name)
+      if (entry.isDirectory()) {
+        if (!NOT_LOOKED_IN.has(entry.name)) await lookIn(path)
+        continue
+      }
+      const place = entry.isFile() ? sensitive(path) : null
+      if (place === null) continue
+      const file = await stat(path, { bigint: true }).catch(() => null)
+      if (file !== null && file.nlink > 1n) found.set(identityOf(file), place)
+    }
+  }
+  await lookIn(root)
+  return found
+}
+
 export const sensitivePlacesLayer = (settings: PlacesSettings) =>
   Layer.effect(
     SensitivePlaces,
@@ -52,20 +91,39 @@ export const sensitivePlacesLayer = (settings: PlacesSettings) =>
         const found = sensitivePlace(relative(root, path), context, { reading })
         return found === null ? null : said(shownFromHome(join(root, found), context))
       }
+      /**
+       * The sensitive place a file read below `root` is under another of its names, or null: a
+       * file with one name, or whose other names are no sensitive file of `root`, is none.
+       */
+      const linkedBelow = (root: string, path: string, asked: PlaceAsked) =>
+        Effect.promise(async () => {
+          if (asked.writes || !isAbsolute(path)) return null
+          const file = await stat(path, { bigint: true }).catch(() => null)
+          if (file === null || !file.isFile() || file.nlink < 2n) return null
+          const find = () => linkedSensitiveFiles(root, (one) => below(root, one, true))
+          const files = await (asked.links?.below(root, find) ?? find())
+          const place = files.get(identityOf(file))
+          return place === undefined ? null : `${place}, through a hard link`
+        })
+      /** The sensitive place below a folder, by a path's names, then by its other names. */
+      const belowOrLinked = (root: string, path: string, asked: PlaceAsked) => {
+        const named = below(root, path, !asked.writes)
+        return named === null ? linkedBelow(root, path, asked) : Effect.succeed(named)
+      }
       const dataFolders = spellings(dataFolder)
       return {
         sensitive: (path, asked) =>
           Effect.gen(function* () {
             const reading = !asked.writes
             const root = spellings(asked.session.place.root).find((one) => containedIn(one, path))
-            if (root !== undefined) return below(root, path, reading)
+            if (root !== undefined) return yield* belowOrLinked(root, path, asked)
             // The Workspace a place reads beside its own folder, for a read only (#145).
             const readable = asked.session.place.readable
             const read =
               reading && readable !== undefined
                 ? spellings(readable).find((one) => containedIn(one, path))
                 : undefined
-            if (read !== undefined) return below(read, path, reading)
+            if (read !== undefined) return yield* belowOrLinked(read, path, asked)
             const data = dataFolders.find((one) => containedIn(one, path))
             if (data === undefined) {
               const found = sensitivePlace(path, context, { reading })
