@@ -8,39 +8,18 @@ import { Effect } from 'effect'
 import type { Cause } from 'effect'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
-import { createMission, moveMission } from '../src/engine/missions.ts'
-import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
+import { moveMission } from '../src/engine/missions.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { PLANS_THE_EXPORT, QUIET, READS_COLD } from './agents.ts'
 import type { FixtureGit } from './git.ts'
-import { larkspur } from './larkspur.ts'
-
-/** Waits, on the real clock, until `check` holds; fails naming what never came after `bound` ms. */
-export const reached = <E, R>(what: string, check: Effect.Effect<boolean, E, R>, bound = 60_000) =>
-  Effect.gen(function* () {
-    const deadline = Date.now() + bound
-    while (!(yield* check)) {
-      if (Date.now() > deadline) {
-        return yield* Effect.die(new Error(`the fixture never reached ${what}`))
-      }
-      yield* Effect.sleep('50 millis')
-    }
-  })
-
-/** Larkspur's mission of the CSV export, planned by its scripted Planner and read cold. */
-const plannedExport = (world: FixtureWorld) =>
-  Effect.gen(function* () {
-    const { project } = yield* larkspur(world.work, world.git)
-    const mission = yield* createMission({
-      projectId: project.id,
-      idea: { sentence: 'Export the invoices of a month as CSV', ticket: null },
-    })
-    yield* reached(
-      'a cold read done',
-      Effect.map(listColdReads(mission.id), (passes) => passes.some((one) => one.state === 'done')),
-    )
-    return { project, mission }
-  })
+import { EXPORT_DRAFT, INVOICES, larkspur } from './larkspur.ts'
+import {
+  builderAsks,
+  builderBuilds,
+  launchedExport,
+  plannedExport,
+  proofReached,
+} from './missions.ts'
 
 /** What a group builds in: its folder for repositories, and a Git that commits the same way twice. */
 export interface FixtureWorld {
@@ -60,6 +39,14 @@ export interface FixtureGroup {
   /** Its state, through the engine's services, on a Profile opened from nothing. */
   readonly build: (world: FixtureWorld) => Effect.Effect<void, Cause.YieldableError, EngineServices>
 }
+
+/** `src/invoices.js` once the Builder added `toCents`: R1.S2's proof passes. */
+const WITH_CENTS = `${INVOICES}
+/** An amount as the invoice prints it read back in cents: "21.00" is 2100. */
+export function toCents(printed) {
+  return Math.round(Number(printed) * 100)
+}
+`
 
 export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
   {
@@ -81,9 +68,36 @@ export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
     build: (world) => Effect.asVoid(plannedExport(world)),
   },
   {
+    name: 'building-red',
+    look: "Larkspur's CSV export in Building: R1.S1 has its red proof recorded and waits for its task (T1, available); R1.S2 is green, its task done by the Builder. The Building page, the proofs, the tasks.",
+    agents: (index) => [PLANS_THE_EXPORT, READS_COLD][index] ?? QUIET,
+    build: (world) =>
+      Effect.gen(function* () {
+        const { mission } = yield* launchedExport(world)
+        yield* builderBuilds(mission.id, 'T2', [
+          { repository: 'api', path: 'src/invoices.js', content: WITH_CENTS },
+        ])
+        yield* proofReached(mission.id, 'R1.S2', 'green')
+      }),
+  },
+  {
+    name: 'permission-request',
+    look: "Larkspur's CSV export in Building: the Builder started T1 and asks to write src/export.js; the request waits for your approval (Allow once, Allow for this mission, Deny). Needs you, the permission card.",
+    agents: (index) => [PLANS_THE_EXPORT, READS_COLD][index] ?? QUIET,
+    build: (world) =>
+      Effect.gen(function* () {
+        const { mission } = yield* launchedExport(world)
+        yield* builderAsks(mission.id, 'T1', {
+          repository: 'api',
+          path: 'src/export.js',
+          content: EXPORT_DRAFT,
+          creates: true,
+        })
+      }),
+  },
+  {
     name: 'cancelled',
-    look:
-      'Larkspur\'s CSV export, planned whole then cancelled by the user: the mission page and the lists as a cancelled mission shows them.',
+    look: "Larkspur's CSV export, planned whole then cancelled by the user: the mission page and the lists as a cancelled mission shows them.",
     agents: (index) => [PLANS_THE_EXPORT, READS_COLD][index] ?? QUIET,
     build: (world) =>
       Effect.gen(function* () {

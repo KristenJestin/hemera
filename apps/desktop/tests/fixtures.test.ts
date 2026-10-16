@@ -11,11 +11,13 @@ import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
 import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
+import { proofsRead } from '../src/engine/building/proofs.ts'
 import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
 import { freezeReadiness } from '../src/engine/planning/freeze.ts'
 import { readSpec } from '../src/engine/planning/store.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { listMissions } from '../src/engine/missions.ts'
+import { listNeeds } from '../src/engine/needs.ts'
 import { listProjects } from '../src/engine/projects.ts'
 import { listVariables, revealVariable } from '../src/engine/variables.ts'
 import { commandsEngine } from './commands-engine.ts'
@@ -192,6 +194,41 @@ describe('The mission groups reach their state through the engine, with scripted
     expect(seen.coldReads.map((pass) => pass.state)).toEqual(['done'])
     expect(seen.readiness.ready).toBe(true)
   })
+
+  test('building-red: a mission in Building; one scenario has a red proof waiting, another is green', async () => {
+    const { root } = places()
+    const fixture = await built('building-red', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        return { mission, proofs: yield* proofsRead(mission.id) }
+      }),
+    )
+    expect(seen.mission.stage).toBe('building')
+    const states = Object.fromEntries(
+      (seen.proofs?.scenarios ?? []).map((one) => [one.scenario, one.state]),
+    )
+    expect(states).toEqual({ 'R1.S1': 'red_recorded', 'R1.S2': 'green' })
+  }, 120_000)
+
+  test("permission-request: an agent's call waiting for approval", async () => {
+    const { root } = places()
+    const fixture = await built('permission-request', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        return { mission, needs: (yield* listNeeds).flatMap((group) => group.needs) }
+      }),
+    )
+    expect(seen.mission.stage).toBe('building')
+    // A pending request survives the engine's restart: the application opens on it.
+    const asking = seen.needs.filter((need) => need.choices.length > 0)
+    expect(asking).toHaveLength(1)
+    expect(asking[0]?.requestedBy).toBe('builder')
+    expect(asking[0]?.choices).toEqual(expect.arrayContaining(['allow-once', 'deny']))
+  }, 120_000)
 
   test('cancelled: a planned mission the user cancelled', async () => {
     const { root } = places()

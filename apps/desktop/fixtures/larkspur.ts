@@ -33,7 +33,7 @@ const API_PACKAGE = `{
 }
 `
 
-const INVOICES = `/** The total of an invoice's lines, in cents. */
+export const INVOICES = `/** The total of an invoice's lines, in cents. */
 export function total(lines) {
   return lines.reduce((sum, line) => sum + line.quantity * line.unitCents, 0)
 }
@@ -74,7 +74,7 @@ test('a share rounds half to even', () => {
 })
 `
 
-const EXPORT_DRAFT = `import { formatAmount, total } from './invoices.js'
+export const EXPORT_DRAFT = `import { formatAmount, total } from './invoices.js'
 
 /** The invoices as CSV, one line each: its number and its total. */
 export function toCsv(invoices) {

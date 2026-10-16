@@ -65,10 +65,38 @@ const SECTIONS: Readonly<Record<(typeof SPEC_SECTIONS)[number], string>> = {
   open_questions: 'None left.',
 }
 
+/** What runs a test file of `api`, its report in TAP whatever the terminal. */
+const testLine = (path: string) => `node --test --test-reporter=tap ${path}`
+
+/** R1.S1's proof: red until `src/export.js` writes one line per invoice. */
+export const EXPORT_TEST_PATH = 'tests/export.test.js'
+const EXPORT_TEST = `import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+test('the invoices of a month export as one line each', async () => {
+  const exported = await import('../src/export.js').catch(() => ({}))
+  assert.equal(typeof exported.toCsv, 'function', 'src/export.js has no toCsv yet')
+  assert.equal(exported.toCsv([{ number: 'A1', lines: [] }]).split('\\n').length, 2)
+})
+`
+
+/** R1.S2's proof: red until `src/invoices.js` reads an amount back. */
+export const CENTS_TEST_PATH = 'tests/cents.test.js'
+const CENTS_TEST = `import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+import * as invoices from '../src/invoices.js'
+
+test('an amount printed as 21.00 reads back as 2100 cents', () => {
+  assert.equal(typeof invoices.toCents, 'function', 'src/invoices.js has no toCents yet')
+  assert.equal(invoices.toCents('21.00'), 2100)
+})
+`
+
 /**
  * The Planner of Larkspur's CSV export: it writes the whole Spec through Hemera's tools (its
- * sections, one requirement with two scenarios and their automated proofs, two tasks, a model for
- * Building) and declares it complete, as a real Planner does over its first turn.
+ * sections, one requirement with two scenarios, each with an automated proof red at the base, one
+ * task per scenario, a model for Building) and declares it complete, as a real Planner does over its first turn.
  */
 export const PLANS_THE_EXPORT: FakeScript = {
   turns: [
@@ -101,14 +129,14 @@ export const PLANS_THE_EXPORT: FakeScript = {
         proof: {
           mode: 'automated',
           actions: ['Export the invoices of March', 'Count the lines of the file'],
-          starting_data: 'Two invoices in March, one in April.',
-          expected: 'A header and two lines.',
+          starting_data: 'One invoice in March.',
+          expected: 'A header and one line.',
           test: {
             repository: 'api',
-            path: 'tests/export.test.js',
-            code: "import { test } from 'node:test'\nimport assert from 'node:assert/strict'\n\nimport { toCsv } from '../src/export.js'\n\ntest('one line per invoice', () => {\n  assert.equal(toCsv([{ number: 'A1', lines: [] }]).split('\\n').length, 2)\n})\n",
+            path: EXPORT_TEST_PATH,
+            code: EXPORT_TEST,
             insertion: 'new_file',
-            command: 'node --test tests/export.test.js',
+            command: testLine(EXPORT_TEST_PATH),
           },
           seen_today: false,
         },
@@ -118,15 +146,15 @@ export const PLANS_THE_EXPORT: FakeScript = {
         scenario: 'R1.S2',
         proof: {
           mode: 'automated',
-          actions: ['Export an invoice of 21 euros'],
-          starting_data: 'One invoice of two lines, 21 euros in all.',
-          expected: 'Its line ends with 21.00.',
+          actions: ['Read the amount "21.00" of an invoice line'],
+          starting_data: 'None.',
+          expected: 'It is 2100 cents.',
           test: {
             repository: 'api',
-            path: 'tests/export-amounts.test.js',
-            code: "import { test } from 'node:test'\nimport assert from 'node:assert/strict'\n\nimport { toCsv } from '../src/export.js'\n\ntest('two decimals', () => {\n  assert.match(toCsv([{ number: 'A1', lines: [{ quantity: 1, unitCents: 2100 }] }]), /21\\.00$/)\n})\n",
+            path: CENTS_TEST_PATH,
+            code: CENTS_TEST,
             insertion: 'new_file',
-            command: 'node --test tests/export-amounts.test.js',
+            command: testLine(CENTS_TEST_PATH),
           },
           seen_today: false,
         },
@@ -138,17 +166,17 @@ export const PLANS_THE_EXPORT: FakeScript = {
             title: 'Write the export',
             result: 'toCsv writes one line per invoice with its total.',
             requirements: ['R1'],
-            scenarios: ['R1.S1', 'R1.S2'],
+            scenarios: ['R1.S1'],
             targets: [{ repository: 'api', path: 'src/export.js', intent: 'create' }],
             depends_on: [],
           },
           {
-            title: 'Document the export',
-            result: 'The README says how to export a month.',
+            title: 'Read the amounts back',
+            result: 'toCents reads an amount as the export prints it.',
             requirements: ['R1'],
-            scenarios: ['R1.S1'],
-            targets: [{ repository: 'api', path: 'README.md', intent: 'change' }],
-            depends_on: ['Write the export'],
+            scenarios: ['R1.S2'],
+            targets: [{ repository: 'api', path: 'src/invoices.js', intent: 'change' }],
+            depends_on: [],
           },
         ],
         base_version: 0,
