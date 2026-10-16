@@ -18,21 +18,26 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 
 import { DatabaseSync } from 'node:sqlite'
-import { Deferred, Effect, Fiber } from 'effect'
+import { Deferred, Effect, Fiber, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
+  FOREIGN_GIT_FOLDER,
   type FileDiff,
+  READ_CAP,
   SNAPSHOTS_FOLDER,
   type SnapshotOwner,
   Snapshots,
 } from '../src/engine/building/snapshots.ts'
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
+import { NOT_A_FILE, OVER_CAP, THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
 import { createMission } from '../src/engine/missions.ts'
 import { DATABASE_FILE } from '../src/engine/migrate.ts'
 import { createProject } from '../src/engine/projects.ts'
@@ -971,6 +976,172 @@ describe('A refused snapshot leaves nothing behind', () => {
     )
 
     expect(refusal.message).toMatch(/^fatal: /)
+  })
+})
+
+describe('A checkpoint reads only the repository’s own Git folder, and never waits on it (#439)', () => {
+  /** The Workspace's worktree, and the Git folder the main checkout keeps for it. */
+  const ownEntry = () => {
+    const { main, worktree } = workspace()
+    const entry = git(worktree, 'rev-parse', '--path-format=absolute', '--absolute-git-dir')
+    return { main, worktree, entry }
+  }
+
+  /** A Git folder of an agent's making, which the worktree's `.git` is pointed at. */
+  const pointedAtFake = (worktree: string, index: (fake: string) => void) => {
+    const fake = join(work, 'fake-git')
+    mkdirSync(fake)
+    git(fake, 'init', '-q', '-b', 'main')
+    const folder = join(fake, '.git')
+    index(join(folder, 'index'))
+    writeFileSync(join(worktree, '.git'), `gitdir: ${folder}\n`)
+    return folder
+  }
+
+  /** A checkpoint of the worktree, taken while another call of the engine is answered. */
+  const checkpointOf = (main: string, worktree: string) =>
+    commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const checkpoints = yield* Checkpoints
+          const taking = yield* Effect.forkChild(
+            Effect.result(
+              checkpoints.take(missionId, 'review', [
+                { name: 'acme', folder: worktree, baseRef: 'origin/main', baseCommit: null },
+              ]),
+            ),
+          )
+          // Another call of the engine, answered while the checkpoint is taken.
+          const answered = yield* Database.use((database) =>
+            database.select().from(domainEvents),
+          ).pipe(Effect.orDie)
+          const taken = yield* Fiber.join(taking)
+          return {
+            answered: answered.length > 0,
+            refusal: Result.isFailure(taken) ? taken.failure.message : null,
+          }
+        }),
+      ),
+    )
+
+  test.skipIf(process.platform === 'win32')(
+    'a worktree whose .git points at a Git folder with a pipe as index: the checkpoint is refused at once, and the engine answers another call meanwhile',
+    async () => {
+      const { main, worktree } = workspace()
+      pointedAtFake(worktree, (index) => execFileSync('mkfifo', [index]))
+
+      const seen = await checkpointOf(main, worktree)
+
+      expect(seen.answered).toBe(true)
+      expect(seen.refusal).toContain(FOREIGN_GIT_FOLDER)
+    },
+  )
+
+  test('a worktree whose .git points at a Git folder outside the repository: its index is never read', async () => {
+    const { main, worktree } = workspace()
+    const fake = pointedAtFake(worktree, (index) => writeFileSync(index, 'an index of elsewhere'))
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(FOREIGN_GIT_FOLDER)
+    expect(seen.refusal).toContain(realpathSync.native(fake))
+  })
+
+  test('a worktree whose .git points at a Git folder of its own making that names the repository’s shared one: its index is never read', async () => {
+    const { main, worktree, entry } = ownEntry()
+    const fake = join(work, 'fake-entry')
+    mkdirSync(fake)
+    writeFileSync(join(fake, 'HEAD'), readFileSync(join(entry, 'HEAD')))
+    writeFileSync(join(fake, 'commondir'), `${join(main, '.git')}\n`)
+    writeFileSync(join(fake, 'gitdir'), `${join(worktree, '.git')}\n`)
+    writeFileSync(join(fake, 'index'), 'an index of elsewhere')
+    writeFileSync(join(worktree, '.git'), `gitdir: ${fake}\n`)
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(FOREIGN_GIT_FOLDER)
+    expect(seen.refusal).toContain(realpathSync.native(fake))
+  })
+
+  test('a sensitive file reached through a folder link leading outside is never read', async () => {
+    const { main, worktree } = workspace()
+    mkdirSync(join(worktree, 'config'))
+    writeFileSync(join(worktree, 'config', '.env.local'), 'TOKEN=inside\n')
+    git(worktree, 'add', 'config/.env.local')
+    git(worktree, 'commit', '-q', '-m', 'config')
+    const outside = join(work, 'outside-config')
+    mkdirSync(outside)
+    writeFileSync(join(outside, '.env.local'), 'TOKEN=outside\n')
+    rmSync(join(worktree, 'config'), { recursive: true })
+    symlinkSync(outside, join(worktree, 'config'), 'junction')
+
+    const seen = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const tree = yield* Snapshots.use((snapshots) =>
+            snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'end')),
+          )
+          return { projectId, tree }
+        }),
+      ),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(treeFiles(store, seen.tree, objectsOf(main))).not.toContain('config/.env.local')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe as the index of the worktree’s own Git folder: the checkpoint is refused at once',
+    async () => {
+      const { main, worktree, entry } = ownEntry()
+      rmSync(join(entry, 'index'))
+      execFileSync('mkfifo', [join(entry, 'index')])
+
+      const seen = await checkpointOf(main, worktree)
+
+      expect(seen.answered).toBe(true)
+      expect(seen.refusal).toContain(NOT_A_FILE)
+    },
+  )
+
+  test('a link as the index of the worktree’s own Git folder is never followed', async (context) => {
+    const { main, worktree, entry } = ownEntry()
+    const elsewhere = join(work, 'elsewhere-index')
+    renameSync(join(entry, 'index'), elsewhere)
+    try {
+      symlinkSync(elsewhere, join(entry, 'index'), 'file')
+    } catch {
+      context.skip()
+    }
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(THROUGH_A_LINK)
+  })
+
+  test('an index larger than the cap is refused, never read', async () => {
+    const { main, worktree, entry } = ownEntry()
+    truncateSync(join(entry, 'index'), READ_CAP + 1)
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(OVER_CAP)
+  })
+
+  test('an ordinary checkpoint of a worktree is still taken', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+    expect(await checkpointOf(main, worktree)).toEqual({ answered: true, refusal: null })
+  })
+
+  test('an ordinary checkpoint of the main checkout is still taken', async () => {
+    const { main } = workspace()
+    writeFileSync(join(main, 'form.txt'), 'the form\n')
+
+    expect(await checkpointOf(main, main)).toEqual({ answered: true, refusal: null })
   })
 })
 
