@@ -32,6 +32,7 @@ import { getSession } from '../src/engine/sessions/store.ts'
 import {
   FIXTURE_FORGE,
   FIXTURE_MARKER,
+  FORGE_KEYS,
   checkFixtureFolder,
   checkFixturePlace,
   checkFixturesRoot,
@@ -116,7 +117,9 @@ const forgeIn = (folder: string, profile: string) => {
   // The fake's own configuration folder stays the fake's: the application keeps the user's
   // XDG_CONFIG_HOME, which is where Electron finds the profile it must not open.
   const { XDG_CONFIG_HOME: _config, ...env } = forge.env
-  writeFileSync(join(profile, FIXTURE_FORGE), `${JSON.stringify(env)}\n`)
+  // Only its own places go in the profile: what Windows needs to run a shim is the user's own.
+  const opened = Object.fromEntries(FORGE_KEYS.map((key) => [key, forge.env[key] ?? '']))
+  writeFileSync(join(profile, FIXTURE_FORGE), `${JSON.stringify(opened)}\n`)
   return env
 }
 

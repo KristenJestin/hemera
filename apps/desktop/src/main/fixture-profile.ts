@@ -17,6 +17,8 @@ import { basename, delimiter, dirname, isAbsolute, join, posix, resolve, win32 }
 
 import { Result, Schema } from 'effect'
 
+import { FORGE_TOKEN_VARIABLES } from '../engine/permissions/defence.ts'
+
 /** The flag that points the application at a fixture's profile. */
 export const FIXTURE_FLAG = '--fixture-profile'
 
@@ -175,26 +177,59 @@ export function checkFixtureFolder(
 
 const ForgeFile = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String))
 
+/** The variables the fake forge is opened with: each one a place inside the fixture. */
+export const FORGE_KEYS = ['PATH', 'GH_CONFIG_DIR', 'FAKE_FORGE_RULES', 'FAKE_FORGE_LOG'] as const
+
+/** The forge CLIs the fakes stand for; their folder must hold both. */
+const FAKE_CLIS = ['gh', 'bkt'] as const
+
+/** The fake forge's environment, read from the profile when it is the shape the command writes. */
+const forgeOf = (profile: string): Result.Result<Readonly<Record<string, string>>, string> => {
+  const file = join(profile, FIXTURE_FORGE)
+  const found = lstatSync(file, { throwIfNoEntry: false })
+  if (found === undefined) {
+    return Result.fail(
+      `${profile} has no fake forge (${FIXTURE_FORGE}): pnpm fixtures <group> writes it.`,
+    )
+  }
+  if (found.isSymbolicLink()) return Result.fail(`${file} is a link: the fake forge is refused.`)
+  const decoded = Schema.decodeUnknownResult(ForgeFile)(readFileSync(file, 'utf8'))
+  if (Result.isFailure(decoded)) return Result.fail(`${file} is not a fake forge's environment.`)
+  const forge = decoded.success
+  const fixture = dirname(real(profile))
+  const unknown = Object.keys(forge).find((key) => !FORGE_KEYS.some((known) => known === key))
+  if (unknown !== undefined) return Result.fail(`${unknown} is not a variable of the fake forge.`)
+  for (const key of FORGE_KEYS) {
+    const value = forge[key]
+    if (value === undefined) return Result.fail(`${file} names no ${key}.`)
+    const place = real(value)
+    if (value.includes(delimiter) || !isWithin(place, fixture) || isWithin(fixture, place)) {
+      return Result.fail(`${key} is not inside the fixture ${fixture}: ${value}`)
+    }
+  }
+  const fakes = forge['PATH'] ?? ''
+  const shims = (cli: string) => (process.platform === 'win32' ? [`${cli}.cmd`] : [cli])
+  const missing = FAKE_CLIS.find((cli) => !shims(cli).some((name) => existsSync(join(fakes, name))))
+  if (missing !== undefined) return Result.fail(`${fakes} holds no fake ${missing}.`)
+  return Result.succeed(forge)
+}
+
 /**
  * The environment the application runs in on a fixture's profile: the fixture's fake `gh` and
  * `bkt` first on the `PATH` (the same key, `Path` on Windows), with the account and the log they
- * keep. A profile without its fake forge is refused, so the real CLIs never run on a fixture.
+ * keep, and every forge token of the user's environment emptied. A profile whose fake forge is
+ * missing, a link, of another shape, or names a place outside the fixture is refused, so the real
+ * CLIs never run on a fixture.
  */
 export function fixtureEnvironment(
   profile: string,
   env: NodeJS.ProcessEnv,
 ): Result.Result<Readonly<Record<string, string>>, string> {
-  const file = join(profile, FIXTURE_FORGE)
-  if (!existsSync(file)) {
-    return Result.fail(
-      `${profile} has no fake forge (${FIXTURE_FORGE}): pnpm fixtures <group> writes it.`,
-    )
-  }
-  const decoded = Schema.decodeUnknownResult(ForgeFile)(readFileSync(file, 'utf8'))
-  if (Result.isFailure(decoded)) return Result.fail(`${file} is not a fake forge's environment.`)
-  const { PATH: fakes = '', ...forge } = decoded.success
-  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
-  return Result.succeed({ ...forge, [pathKey]: [fakes, env[pathKey] ?? ''].join(delimiter) })
+  return Result.map(forgeOf(profile), ({ PATH: fakes = '', ...forge }) => {
+    const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
+    const emptied = Object.fromEntries(FORGE_TOKEN_VARIABLES.map((name) => [name, '']))
+    return { ...emptied, ...forge, [pathKey]: [fakes, env[pathKey] ?? ''].join(delimiter) }
+  })
 }
 
 /** The folder the flag names, written `--fixture-profile=<folder>` or `--fixture-profile <folder>`. */

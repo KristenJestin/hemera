@@ -6,6 +6,7 @@
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -208,6 +209,77 @@ describe('The fixtures command', () => {
     expect(refused !== null && Result.isFailure(refused) && refused.failure).toMatch(
       /has no fake forge/,
     )
+  })
+
+  test('a fixture opened on a forge file of any other shape is refused: never the real gh', async () => {
+    const { base, root } = places()
+    const fixture = await built('empty', root)
+    const file = join(fixture.profile, FIXTURE_FORGE)
+    // SAFETY: the command writes the file as JSON of string values, read back here as written.
+    const written = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
+    const refusalWith = (forge: Readonly<Record<string, string>>) => {
+      writeFileSync(file, JSON.stringify(forge))
+      const opened = fixtureEnvironment(fixture.profile, { PATH: '/usr/bin' })
+      return Result.isFailure(opened) ? opened.failure : 'accepted'
+    }
+    expect(refusalWith(written)).toBe('accepted')
+    // A variable the fake forge does not write, NODE_OPTIONS first among them.
+    expect(refusalWith({ ...written, NODE_OPTIONS: '--require /elsewhere/evil.js' })).toMatch(
+      /NODE_OPTIONS is not a variable of the fake forge/,
+    )
+    // A PATH outside the fixture, or more than the fakes' one folder.
+    const outside = join(base, 'realbin')
+    mkdirSync(outside)
+    for (const cli of ['gh', 'bkt', 'gh.cmd', 'bkt.cmd']) writeFileSync(join(outside, cli), '')
+    expect(refusalWith({ ...written, PATH: outside })).toMatch(/is not inside the fixture/)
+    expect(
+      refusalWith({ ...written, PATH: `${written['PATH'] ?? ''}${delimiter}${outside}` }),
+    ).toMatch(/is not inside the fixture/)
+    // Another of its places outside the fixture.
+    expect(refusalWith({ ...written, GH_CONFIG_DIR: outside })).toMatch(/is not inside the fixture/)
+    // A forge file that is a link, even to a file the command wrote.
+    writeFileSync(file, JSON.stringify(written))
+    const elsewhere = join(base, 'forge.json')
+    writeFileSync(elsewhere, JSON.stringify(written))
+    rmSync(file)
+    symlinkSync(elsewhere, file, 'file')
+    const linked = fixtureEnvironment(fixture.profile, { PATH: '/usr/bin' })
+    expect(Result.isFailure(linked) && linked.failure).toMatch(/is a link/)
+  })
+
+  test('a fixture whose fakes are gone is refused rather than opened on the real gh', async () => {
+    const { root } = places()
+    const fixture = await built('empty', root)
+    // SAFETY: the command writes the file as JSON of string values, read back here as written.
+    const written = JSON.parse(
+      readFileSync(join(fixture.profile, FIXTURE_FORGE), 'utf8'),
+    ) as Record<string, string>
+    const fakes = written['PATH'] ?? ''
+    const bkt = readdirSync(fakes).find((name) => name.startsWith('bkt')) ?? 'bkt'
+    rmSync(join(fakes, bkt))
+    const missing = fixtureEnvironment(fixture.profile, { PATH: '/usr/bin' })
+    expect(Result.isFailure(missing) && missing.failure).toMatch(/holds no fake bkt/)
+    rmSync(fakes, { recursive: true })
+    const gone = fixtureEnvironment(fixture.profile, { PATH: '/usr/bin' })
+    expect(Result.isFailure(gone) && gone.failure).toMatch(/holds no fake gh/)
+  })
+
+  test('a fixture opens with every forge token of the user emptied', async () => {
+    const { root } = places()
+    const fixture = await built('empty', root)
+    const tokens = [
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+      'GH_ENTERPRISE_TOKEN',
+      'GITHUB_ENTERPRISE_TOKEN',
+      'BKT_TOKEN',
+    ]
+    const opened = fixtureEnvironment(fixture.profile, {
+      PATH: '/usr/bin',
+      ...Object.fromEntries(tokens.map((name) => [name, 'the-user-s-own'])),
+    })
+    if (Result.isFailure(opened)) throw new Error(opened.failure)
+    for (const name of tokens) expect(opened.success[name]).toBe('')
   })
 
   test('the command refuses to build over a folder without the marker, and leaves it as it was', async () => {

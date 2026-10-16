@@ -234,8 +234,10 @@ export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
         yield* proofRan(mission.id, 'R1.S1', 2)
         yield* fixedOutside(mission.id, 'api', 'src/export.js', EXPORT_DRAFT)
         yield* proofReached(mission.id, 'R1.S1', 'green')
-        yield* OUTSIDE_BUILDER.release
-      }),
+      }).pipe(
+        // Released even when the build fails, so the next build of the group starts unheld.
+        Effect.ensuring(OUTSIDE_BUILDER.release),
+      ),
   },
   {
     name: 'permission-request',
