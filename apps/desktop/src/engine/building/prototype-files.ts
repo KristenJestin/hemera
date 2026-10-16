@@ -29,7 +29,15 @@ import { listEvidence } from '../memory/evidence.ts'
 import { freezesOf } from '../planning/freeze-store.ts'
 import type { Database } from '../storage/database.ts'
 import type { Grant } from '../tools/access.ts'
-import { type ToolAnswer, answered, attempt, failure, pageSaid, refusal } from '../tools/files.ts'
+import {
+  type ToolAnswer,
+  answered,
+  attempt,
+  failedOn,
+  failure,
+  pageSaid,
+  refusal,
+} from '../tools/files.ts'
 import { containedIn, resolvePath } from '../tools/paths.ts'
 import { readPage } from '../tools/read.ts'
 import { helperRowsOf } from './helper-store.ts'
@@ -149,7 +157,7 @@ export const prototypeReadTool = (
       readPage(resolved.path, args.range?.offset ?? 0, args.range?.length ?? READ_PAGE_BYTES),
     ).pipe(Effect.result)
     return Result.isFailure(page)
-      ? failure(`could not read ${args.path}: ${page.failure}`)
+      ? failedOn(page.failure, `could not read ${args.path}: ${page.failure}`)
       : answered(pageSaid(page.success))
   }).pipe(
     Effect.catchCause((cause) =>
