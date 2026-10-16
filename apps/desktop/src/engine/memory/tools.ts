@@ -5,8 +5,6 @@
  * write takes a mission: a session writes its own mission's Memory.
  */
 
-import { readFile } from 'node:fs/promises'
-
 import { type ToolArguments, missionKeyParts, sizeSaid } from '@hemera/core/domain'
 import { AgentAuthor, type UnknownMission } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
@@ -16,6 +14,7 @@ import { Database, type DatabaseError, refusedWhile } from '../storage/database.
 import { missions } from '../storage/schema.ts'
 import type { Grant } from '../tools/access.ts'
 import { type ToolAnswer, answered, failure, refusal } from '../tools/files.ts'
+import { readJudged } from '../tools/judged.ts'
 import {
   Evidence,
   Memory,
@@ -174,7 +173,7 @@ export const evidenceAdd = (
           : {
               bytes: new Uint8Array(
                 yield* Effect.tryPromise({
-                  try: () => readFile(path),
+                  try: () => readJudged(path, { oneNameFor: 'evidence' }),
                   catch: (cause) =>
                     new EvidenceRefused({
                       reason: `could not read ${args.path ?? path}: ${cause instanceof Error ? cause.message : String(cause)}`,
