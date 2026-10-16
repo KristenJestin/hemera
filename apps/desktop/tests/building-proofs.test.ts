@@ -10,7 +10,16 @@
  * Workspace, and real `node --test` files as the proofs.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
@@ -116,8 +125,21 @@ const launchedWith = (
   plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
 ) => launched(work, undefined, undefined, plan, undefined, undefined, proofs)
 
-/** What runs a test file of `api`, its report in TAP whatever the terminal. */
-const testLine = (path: string) => `"${process.execPath}" --test --test-reporter=tap ${path}`
+/** A folder outside every repository for the runners' reports: a report written in one is a change. */
+const REPORTS = mkdtempSync(join(tmpdir(), 'hemera-reports-'))
+let reports = 0
+/** A report file of its own for each proof command. */
+const reportPath = () => {
+  reports += 1
+  return join(REPORTS, `report-${String(reports)}.xml`)
+}
+
+/**
+ * What runs a test file of `api`, its output in TAP whatever the terminal, and its JUnit report
+ * written outside the repository: the report is what names the test a proof adds (#342).
+ */
+const testLine = (path: string) =>
+  `"${process.execPath}" --test --test-reporter=tap --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination "${reportPath()}" ${path}`
 
 /** An automated proof whose test is a new file of `api`. */
 const automated = (

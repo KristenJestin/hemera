@@ -11,8 +11,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join, relative, resolve, sep } from 'node:path'
 
 import {
   DEFAULT_PROOF_MINUTES,
@@ -20,7 +20,10 @@ import {
   type Proof,
   type ProofPhase,
   type ProofRunClass,
+  type ReportFound,
   classifyProofRun,
+  foundReport,
+  guessReporting,
   keyLineFound,
   outputTail,
 } from '@hemera/core/domain'
@@ -77,6 +80,43 @@ export interface ProofRun extends ProofRunClass {
    * resource held elsewhere (#306). Known as it runs, never recorded.
    */
   readonly started: boolean
+}
+
+/** The most a runner's configuration file is read to, to guess where its report goes. */
+const CONFIGURATION_CAP = 256 * 1024
+
+/** A file of a folder, read whole when it is no larger than a cap; null otherwise. */
+const smallFile = (folder: string, path: string): string | null => {
+  try {
+    const file = resolve(folder, path)
+    return statSync(file).size > CONFIGURATION_CAP ? null : readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The runner's report a run left in its folder, as its command and its configuration name it,
+ * and the test file as it ran: refused unread when it is missing, too large or older than the run.
+ */
+const reportOf = (folder: string, line: string, launchedMs: number, testBytes: Buffer | null) => {
+  const reporting = guessReporting({ command: line, read: (path) => smallFile(folder, path) })
+  const path = reporting.report?.path
+  const found = ((): ReportFound => {
+    if (path === undefined) return { kind: 'unreadable', reason: 'missing' }
+    try {
+      const file = resolve(folder, path)
+      const stat = existsSync(file) ? statSync(file) : null
+      return foundReport(
+        stat === null ? null : { size: stat.size, modifiedMs: stat.mtimeMs },
+        launchedMs,
+        () => readFileSync(file, 'utf8'),
+      )
+    } catch {
+      return { kind: 'unreadable', reason: 'missing' }
+    }
+  })()
+  return { reporting, found, source: testBytes?.toString('utf8') ?? null }
 }
 
 /** The proof's command: what runs its test, or the command with no test file. */
@@ -151,6 +191,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
     // Its limit counts from its launch, never while it waits for a permission; a reservation held
     // elsewhere is waited for that long at most, then the run fails unstarted (#306).
     const started = Deferred.makeUnsafe<void>()
+    let launchedMs: number | null = null
     const launched = yield* startRun({
       projectId: mission.projectId,
       workspaceId: building.workspaceId,
@@ -167,13 +208,19 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
           : Effect.map(watch.launch, (taken) => {
               trees = taken
             }),
-        Deferred.succeed(started, undefined),
+        Effect.andThen(
+          Effect.sync(() => {
+            launchedMs = Date.now()
+          }),
+          Deferred.succeed(started, undefined),
+        ),
       ),
     }).pipe(Effect.result)
     let output = ''
     let exitCode: number | null = null
     let runId: string | null = null
     let line = command
+    let ranIn: string | null = null
     let timedOut = false
     if (Result.isFailure(launched)) {
       if (watch !== null) yield* watch.finish(null)
@@ -202,8 +249,19 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       // Ended by Hemera, it never exited on its own, whatever its runner said as it stopped.
       exitCode = ended.timedOut ? null : ended.run.exitCode
       line = ended.run.line
+      ranIn = ended.run.folder
     }
-    const classified = classifyProofRun({ output, exitCode, testPath: test?.path ?? null })
+    // The runner's report, from the folder the run ran in, is what names its tests.
+    const report =
+      test === null || ranIn === null || launchedMs === null
+        ? null
+        : reportOf(ranIn, line, launchedMs, testBytes)
+    const classified = classifyProofRun({
+      output,
+      exitCode,
+      testPath: test?.path ?? null,
+      report,
+    })
     const key = asked.proof.key_line
     const evidence = (name: string, text: string) =>
       putEvidence({

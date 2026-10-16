@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="4" time="0.030" timestamp="2026-10-16T10:13:15.002716+02:00" hostname="ci"><testcase classname="tests.test_export.TestExport" name="test_saves" time="0.001"><failure message="assert 1 == 2">self = &lt;test_export.TestExport object at 0x7f0e4118da90&gt;
+
+    def test_saves(self):
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:3: AssertionError</failure></testcase><testcase classname="tests.test_export.TestExport" name="test_keeps" time="0.000" /><testcase classname="tests.test_export.TestExport" name="test_throws" time="0.000"><failure message="AttributeError: 'NoneType' object has no attribute 'run'">self = &lt;test_export.TestExport object at 0x7f0e4110e8b0&gt;
+
+    def test_throws(self):
+        missing = None
+&gt;       missing.run()
+        ^^^^^^^^^^^
+E       AttributeError: 'NoneType' object has no attribute 'run'
+
+tests/test_export.py:10: AttributeError</failure></testcase><testcase classname="tests.test_export" name="test_alone" time="0.001"><failure message="AssertionError: assert 'csv' == 'md'&#10;  &#10;  - md&#10;  + csv">def test_alone():
+&gt;       assert "csv" == "md"
+E       AssertionError: assert 'csv' == 'md'
+E         
+E         - md
+E         + csv
+
+tests/test_export.py:14: AssertionError</failure></testcase></testsuite></testsuites>

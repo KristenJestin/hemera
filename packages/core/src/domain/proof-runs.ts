@@ -16,10 +16,13 @@
 
 import { Predicate, Schema } from 'effect'
 
+import {
+  type ReportFound,
+  type ReportedTest,
+  type TestReporting,
+  reportedTests,
+} from './test-reports.ts'
 import { jsTests, pythonTests } from './test-sources.ts'
-import { type SourceWorld, jsWorldCertain, pythonWorldCertain } from './test-world.ts'
-
-export type { SourceWorld } from './test-world.ts'
 
 /** How a proof run ended, as Hemera classifies it (CT-35). */
 export const PROOF_CLASSES = [
@@ -92,6 +95,14 @@ export interface ProofRunClass {
    * failure's title in its list, never its tree's line.
    */
   readonly printedFailures: ReadonlyArray<PrintedFailure>
+  /**
+   * The test file's tests as the runner's report names them, each with how it ended: read whole,
+   * and the same tests, path for path, as the file declares when it ran; null otherwise (no report,
+   * one not read, or one that does not agree with the file).
+   */
+  readonly reported?: ReadonlyArray<ReportedTest> | null
+  /** What the output prints as a passed test, uncoloured: a `✓` line's text, a pytest node id. */
+  readonly passedLines?: ReadonlyArray<string>
 }
 
 /** One failure a report names: its test, its file, and what it says. */
@@ -898,6 +909,80 @@ const classOfFailure = (failure: Failure): ProofClass => {
   return 'error_before_test'
 }
 
+/** A JavaScript or Python test file: its red is named only by a report the runner wrote. */
+const SCRIPTED = /\.(?:[cm]?[jt]sx?|py)$/
+/** The mark vitest and jest print before a passed test. */
+const PASSED_MARK = /^\s*[✓√]\s+/
+/** A duration at the end of a passed test's line, `12ms` or `(1.5 s)`, matched from its space. */
+const PASSED_DURATION = /(?<!\s)\s+\(?\d+(?:\.\d+)?\s?m?s\)?$/
+
+/** What a line prints as a passed test: a `✓` line's text, a pytest `PASSED` node id; or null. */
+const passedLine = (line: string): string | null => {
+  const mark = PASSED_MARK.exec(line)
+  if (mark !== null) return line.slice(mark[0].length).trimEnd().replace(PASSED_DURATION, '')
+  const [first = '', second = ''] = line.trim().split(/\s+/)
+  if (first === 'PASSED') return second.includes('::') ? second : null
+  if (second === 'PASSED') return first.includes('::') ? first : null
+  return null
+}
+
+/** The tests an output prints as passed. */
+const passedLinesOf = (output: string): ReadonlyArray<string> =>
+  output.split(/\r?\n/).flatMap((whole) => {
+    const text = passedLine(uncoloured(whole).slice(0, LINE_CAP))
+    return text === null ? [] : [text]
+  })
+
+/**
+ * The path a declared test's runner reports it by: its describes and title joined by ` > `
+ * (JavaScript), its classes and function by `::` (Python); null when it is not literal whole.
+ */
+const reportKey = (
+  scope: ReadonlyArray<string | TemplateTest>,
+  title: string | TemplateTest,
+  python: boolean,
+): string | null => {
+  const path = [...scope, title]
+  if (!path.every((one) => Predicate.isString(one) && !SEPARATOR.test(one))) return null
+  return path.join(python ? '::' : ' > ')
+}
+
+/** How many times each key is in a list. */
+const tally = (keys: ReadonlyArray<string>): ReadonlyMap<string, number> => {
+  const counts = new Map<string, number>()
+  for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1)
+  return counts
+}
+
+/**
+ * The test file's tests a run's report names, kept only when they are the tests its source
+ * declares, path for path and as many of each: a test declared by other code (a helper, a setup
+ * file, a hook renaming one), one the file declares that did not run, or a file not read whole,
+ * and no test of the report is kept.
+ */
+const reportOf = (
+  run: Parameters<typeof classifyProofRun>[0],
+): ReadonlyArray<ReportedTest> | null => {
+  const report = run.report
+  const testPath = run.testPath
+  if (report === undefined || report === null || testPath === null || report.source === null) {
+    return null
+  }
+  if (report.found.kind !== 'read' || !SCRIPTED.test(testPath)) return null
+  const tests = reportedTests(report.reporting, report.found.text, testPath)
+  if (tests === null) return null
+  const python = testPath.endsWith('.py')
+  const read = python ? pythonTests(report.source) : jsTests(report.source)
+  const keys = read.tests.map((one) => reportKey(one.scope, one.title, python))
+  if (!read.certain || keys.some((key) => key === null)) return null
+  const declared = tally(keys.flatMap((key) => (key === null ? [] : [key])))
+  const listed = tally(tests.map((one) => one.key))
+  const agree =
+    declared.size === listed.size &&
+    Array.from(declared).every(([key, count]) => listed.get(key) === count)
+  return agree ? tests : null
+}
+
 /**
  * Classifies a proof run (CT-35) from what it printed and its exit code, null when it never exited
  * on its own (killed, timed out, refused before it started). `testPath` is the scenario's test
@@ -907,8 +992,18 @@ export function classifyProofRun(run: {
   readonly output: string
   readonly exitCode: number | null
   readonly testPath: string | null
+  /** The runner's report, as found once the run ended, and the test file as it ran. */
+  readonly report?: {
+    readonly reporting: TestReporting
+    readonly found: ReportFound
+    readonly source: string | null
+  } | null
 }): ProofRunClass {
-  const lines = failingLinesOf(run.output)
+  const lines = {
+    ...failingLinesOf(run.output),
+    reported: reportOf(run),
+    passedLines: passedLinesOf(run.output),
+  }
   const none = { failingTest: null, assertion: null, failingFile: null, failures: [], ...lines }
   if (run.exitCode === null) return { classification: 'environment', ...none }
   const report = junitOf(run.output) ?? tapOf(run.output)
@@ -1270,6 +1365,67 @@ const reportFailure = (failure: ProofRunClass['failures'][number]): PrintedFailu
 })
 
 /**
+ * What the runner's report says of the tests a proof adds to a JavaScript or Python file: an
+ * assertion when one of them failed on an assertion and none on another error, another error when
+ * one did, passed when all passed; null when the report does not name them for certain (no report
+ * kept, a test not literal whole or sharing its path, one the report does not hold or skipped, or
+ * one the output prints as passed).
+ */
+const reportedVerdict = (
+  run: ProofRunClass,
+  testPath: string,
+  names: ReadonlyArray<TestName>,
+): 'assertion' | 'error' | 'passed' | null => {
+  const tests = run.reported
+  if (tests === null || tests === undefined || names.length === 0) return null
+  const python = testPath.endsWith('.py')
+  const verdicts = names.map((name) => {
+    if (!Predicate.hasProperty(name, 'scope') || name.scope === null || name.clash) return null
+    const key = reportKey(name.scope, name.title, python)
+    if (key === null) return null
+    const printedPassed = (run.passedLines ?? []).some((line) =>
+      python
+        ? line.endsWith(`::${key}`)
+        : line === key || line.endsWith(` > ${key}`) || line === name.title,
+    )
+    const own = tests.filter((one) => one.key === key)
+    const verdict = own.length === 1 ? (own[0]?.verdict ?? null) : null
+    // A failure the output prints as passed is a report that may not be this run's.
+    return (printedPassed && verdict === 'assertion') || verdict === 'skipped' ? null : verdict
+  })
+  if (verdicts.includes(null)) return null
+  if (verdicts.includes('error')) return 'error'
+  return verdicts.includes('assertion') ? 'assertion' : 'passed'
+}
+
+/**
+ * Whether a run is a valid red for a JavaScript or Python test file: its runner's report decides
+ * when it names the tests the proof adds for certain (an assertion of theirs is a red, another
+ * error or a pass is not). Otherwise the output is never trusted to name them, since a test can
+ * print anything: it can only refuse (a failure of theirs it shows as another error), and the key
+ * line decides, on a run where an assertion failed.
+ */
+const scriptedRed = (
+  run: ProofRunClass,
+  testPath: string,
+  names: ReadonlyArray<TestName>,
+  keyLineMatched: boolean | null,
+): boolean => {
+  const report = reportedVerdict(run, testPath, names)
+  if (report !== null) return report === 'assertion'
+  const located = run.failures.filter((one) => one.file !== null)
+  const own =
+    located.length > 0 ? located.filter((one) => sameFile(one.file ?? '', testPath)) : run.failures
+  const shown = run.failures.length > 0 ? own.map(reportFailure) : run.printedFailures
+  if (names.length > 0 && named(shown, names, testPath) === 'error') return false
+  const asserted =
+    run.failures.length > 0
+      ? own.some((one) => one.assertion)
+      : run.classification === 'assertion_failed'
+  return keyLineMatched === true && asserted
+}
+
+/**
  * Whether a run is a valid red (CT-35): an assertion that failed in the scenario's own test. A
  * report that names the files tells it by its file. When the proof's code names its tests, a test
  * it adds must be named among the failures (of its file, when the report names files; otherwise a
@@ -1289,6 +1445,7 @@ export const validRed = (
 ): boolean => {
   const asserted = run.classification === 'assertion_failed'
   if (testPath === null) return asserted
+  if (SCRIPTED.test(testPath)) return scriptedRed(run, testPath, testNames, keyLineMatched)
   const located = run.failures.filter((one) => one.file !== null)
   const own =
     located.length > 0
@@ -1368,35 +1525,24 @@ const addedLinesOf = (patch: string, lines: ReadonlyArray<string>): ReadonlySet<
  * nothing, and the key line decides. A title a template of the file could produce is a twin of the
  * template's tests, and a path one could produce a clash.
  */
-export const addedTests = (
-  test: {
-    readonly insertion: 'new_file' | 'addition'
-    readonly code: string
-    readonly patch: string | null
-  },
-  world: SourceWorld,
-): ReadonlyArray<TestName> => {
+export const addedTests = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<TestName> => {
   try {
-    return readAdded(test, world)
+    return readAdded(test)
   } catch {
-    // A reader that fails has read nothing for certain: the key line decides.
-    return [UNREAD]
+    // A reader that fails has read nothing for certain: no name, the key line decides.
+    return []
   }
 }
 
-/** A test the proof adds that no reader read for certain: it names nothing. */
-const UNREAD: DeclaredTest = { title: '', scope: null, twin: false, clash: false }
-/** The extensions of a JavaScript or TypeScript file. */
-const JAVASCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
-
-const readAdded = (
-  test: {
-    readonly insertion: 'new_file' | 'addition'
-    readonly code: string
-    readonly patch: string | null
-  },
-  world: SourceWorld,
-): ReadonlyArray<TestName> => {
+const readAdded = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<TestName> => {
   const lines = test.code.split('\n')
   const placed = test.insertion === 'new_file' ? null : addedLinesOf(test.patch ?? '', lines)
   const whole = test.insertion === 'new_file' || placed !== null
@@ -1432,24 +1578,8 @@ const readAdded = (
     for (const one of keys) counted.set(one, (counted.get(one) ?? 0) + 1)
     return counted
   }
-  // Each language's reader, by the file's extension (both for a file of neither), each certain
-  // only of a file in a closed world (`test-world.ts`).
-  const extension = /\.[^./]+$/.exec(world.path)?.[0] ?? ''
-  const javascript = JAVASCRIPT.has(extension)
-  const python = extension === '.py'
-  const readers = [
-    ...(javascript || !python ? [{ read: jsTests(added), closed: jsWorldCertain }] : []),
-    ...(python || !javascript ? [{ read: pythonTests(added), closed: pythonWorldCertain }] : []),
-  ].map(({ read, closed }) => ({
-    tests: read.tests,
-    certain:
-      whole &&
-      read.certain &&
-      (read.tests.length === 0 && !javascript && !python ? true : closed(test.code, world)),
-  }))
-  const certainFile = readers.every((one) => one.certain)
-  const sources = readers.flatMap((one) =>
-    one.tests.map((declared) => ({ ...declared, certain: one.certain })),
+  const sources = [jsTests(added), pythonTests(added)].flatMap((read) =>
+    read.tests.map((one) => ({ ...one, certain: whole && read.certain })),
   )
   // A test under a template (its title's or a describe's) is told apart from another only where no
   // title its template produces could be the other's: a title either could have makes them twins, a
@@ -1528,10 +1658,7 @@ const readAdded = (
     .filter((one) => placed === null || placed.has(lineAt(one.at) + 1))
     .toSorted((a, b) => a.at - b.at)
     .map((one) => one.name)
-  // A JavaScript or Python file not read for certain, whose added lines declare no test the
-  // reader saw, still adds a test: one that names nothing.
-  const unread = (javascript || python) && !certainFile && inOrder.length === 0
-  return [...inOrder, ...(unread ? [UNREAD] : []), ...subtestsOf(test)]
+  return [...inOrder, ...subtestsOf(test)]
 }
 
 /**
@@ -1644,15 +1771,12 @@ const goCode = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
 }
 
 /** The literal names a proof's tests are declared with, as its code reads. */
-export const addedTestNames = (
-  test: {
-    readonly insertion: 'new_file' | 'addition'
-    readonly code: string
-    readonly patch: string | null
-  },
-  world: SourceWorld,
-): ReadonlyArray<string> =>
-  addedTests(test, world).map((name) => {
+export const addedTestNames = (test: {
+  readonly insertion: 'new_file' | 'addition'
+  readonly code: string
+  readonly patch: string | null
+}): ReadonlyArray<string> =>
+  addedTests(test).map((name) => {
     if (Predicate.isString(name)) return name
     if (Predicate.hasProperty(name, 'template')) return name.template
     if (Predicate.hasProperty(name, 'scope')) {

@@ -28,7 +28,7 @@ export interface SourceTests {
 }
 
 /** A JavaScript token: a name, a punctuator, a string or template literal, a number or a regex. */
-export interface Token {
+interface Token {
   readonly kind: 'name' | 'punct' | 'string' | 'value'
   readonly at: number
   readonly text: string
@@ -45,7 +45,7 @@ export interface Token {
 }
 
 /** Names after which a `/` starts a regex: what comes next is an expression. */
-export const EXPRESSION_KEYWORDS = new Set([
+const EXPRESSION_KEYWORDS = new Set([
   'return',
   'typeof',
   'instanceof',
@@ -64,12 +64,12 @@ export const EXPRESSION_KEYWORDS = new Set([
 /** Names whose parenthesised condition a `/` after the `)` follows as a regex. */
 const CONDITION_KEYWORDS = new Set(['if', 'while', 'for', 'with'])
 /** The calls that declare a describe or a test, and their members that declare neither. */
-export const DESCRIBE_HEADS = new Set(['describe', 'suite', 'context'])
-export const TEST_HEADS = new Set(['test', 'it'])
-export const HEADS = new Set([...DESCRIBE_HEADS, ...TEST_HEADS])
+const DESCRIBE_HEADS = new Set(['describe', 'suite', 'context'])
+const TEST_HEADS = new Set(['test', 'it'])
+const HEADS = new Set([...DESCRIBE_HEADS, ...TEST_HEADS])
 /** The heads any use of which the reader must know, or the file is uncertain. */
-export const WATCHED = new Set(['test', 'it', 'describe', 'suite'])
-export const NOT_DECLARATIONS = new Set([
+const WATCHED = new Set(['test', 'it', 'describe', 'suite'])
+const NOT_DECLARATIONS = new Set([
   'step',
   'use',
   'info',
@@ -135,7 +135,7 @@ const token = (kind: Token['kind'], at: number, text: string, quote = ''): Token
  * regex), or when a string, a comment, a template, a regex or a bracket is never closed, or is
  * closed by another kind.
  */
-export const jsTokens = (code: string) => {
+const jsTokens = (code: string) => {
   const tokens: Token[] = []
   const brackets: Array<{
     readonly char: string
@@ -144,8 +144,6 @@ export const jsTokens = (code: string) => {
   }> = []
   const closer = new Map<number, number>()
   const opener = new Map<number, number>()
-  // Every bracket's closing token, by its opening one's.
-  const ends = new Map<number, number>()
   // The calls holding a comma of their own: a call of two arguments or more.
   const listed = new Set<number>()
   let certain = true
@@ -275,8 +273,7 @@ export const jsTokens = (code: string) => {
       }
       const expected = OPENS.get(char)
       if (open === undefined || open.char !== expected) certain = false
-      else ends.set(open.at, tokens.length)
-      if (open !== undefined && open.char === expected && char === ')') {
+      else if (char === ')') {
         closer.set(open.at, tokens.length)
         opener.set(tokens.length, open.at)
       }
@@ -302,7 +299,7 @@ export const jsTokens = (code: string) => {
     at += 1
   }
   if (template !== null || brackets.length > 0) certain = false
-  return { tokens, closer, ends, listed, certain }
+  return { tokens, closer, listed, certain }
 }
 
 /** A literal title, the first argument of a call whose `(` is at `open`; null when it is not one. */
@@ -319,7 +316,7 @@ const literalTitle = (
 }
 
 /** Whether a statement may start at a token: the file's start, after `;` or a brace, or a line. */
-export const statementStart = (tokens: ReadonlyArray<Token>, from: number): boolean => {
+const statementStart = (tokens: ReadonlyArray<Token>, from: number): boolean => {
   let at = from
   // `await` and `void` before a statement's first token: read over, in a loop.
   while (tokens[at - 1]?.kind === 'name' && ['await', 'void'].includes(tokens[at - 1]?.text ?? ''))
@@ -341,14 +338,14 @@ export const statementStart = (tokens: ReadonlyArray<Token>, from: number): bool
 }
 
 /** A name an import clause binds: the name it has here, the module's, and whether it is a type. */
-export interface ImportName {
+interface ImportName {
   readonly local: string
   readonly imported: string
   readonly type: boolean
 }
 
 /** The names an import clause binds, and the index of the token it ends before. */
-export interface ImportClause {
+interface ImportClause {
   readonly names: ReadonlyArray<ImportName>
   readonly end: number
 }
@@ -357,49 +354,48 @@ export interface ImportClause {
  * The names an import clause binds, from the token after `import` (`a`, `* as b`, `{ c, d as e,
  * type f }`), and the index of the token it ends before; it stops at any other token.
  */
-export const importClause = (tokens: ReadonlyArray<Token>, from: number): ImportClause => {
+const importClause = (tokens: ReadonlyArray<Token>, from: number): ImportClause => {
   const names: ImportName[] = []
   const name = (at: number) => (tokens[at]?.kind === 'name' ? (tokens[at]?.text ?? null) : null)
   let at = from
-  // `import type …`: every name a type.
-  const typed = name(at) === 'type' && tokens[at + 1]?.text !== ',' && name(at + 1) !== 'from'
-  if (typed) at += 1
+  if (name(at) === 'type' && tokens[at + 1]?.text !== ',' && name(at + 1) !== 'from') {
+    return { names, end: at + 1 }
+  }
   const single = name(at)
   if (single !== null && single !== 'from') {
-    names.push({ local: single, imported: single, type: typed })
-    if (tokens[at + 1]?.text !== ',') return { names, end: at + 1 }
-    at += 2
+    names.push({ local: single, imported: single, type: false })
+    at += tokens[at + 1]?.text === ',' ? 2 : 1
   }
   const namespace = name(at + 2)
   if (tokens[at]?.text === '*' && name(at + 1) === 'as' && namespace !== null) {
-    names.push({ local: namespace, imported: namespace, type: typed })
-    return { names, end: at + 3 }
-  }
-  if (tokens[at]?.text !== '{') return { names, end: at }
-  at += 1
-  while (at < tokens.length && tokens[at]?.text !== '}') {
-    if (tokens[at]?.text === ',') {
-      at += 1
-      continue
-    }
-    const type = typed || (name(at) === 'type' && name(at + 1) !== null && name(at + 1) !== 'as')
-    if (type && !typed) at += 1
-    const imported = tokens[at]
-    if (imported?.kind !== 'name' && imported?.kind !== 'string') break
-    const local = name(at + 2)
-    if (name(at + 1) === 'as' && local !== null) {
-      names.push({ local, imported: imported.text, type })
-      at += 3
-    } else {
-      names.push({ local: imported.text, imported: imported.text, type })
-      at += 1
+    names.push({ local: namespace, imported: namespace, type: false })
+    at += 3
+  } else if (tokens[at]?.text === '{') {
+    at += 1
+    while (at < tokens.length && tokens[at]?.text !== '}') {
+      if (tokens[at]?.text === ',') {
+        at += 1
+        continue
+      }
+      const type = name(at) === 'type' && name(at + 1) !== null && name(at + 1) !== 'as'
+      if (type) at += 1
+      const imported = tokens[at]
+      if (imported?.kind !== 'name' && imported?.kind !== 'string') break
+      const local = name(at + 2)
+      if (name(at + 1) === 'as' && local !== null) {
+        names.push({ local, imported: imported.text, type })
+        at += 3
+      } else {
+        names.push({ local: imported.text, imported: imported.text, type })
+        at += 1
+      }
     }
   }
   return { names, end: at + 1 }
 }
 
 /** A declaration's call: whether it is a describe, its `(`, and its title, null when not literal. */
-export interface Declaration {
+interface Declaration {
   readonly describe: boolean
   readonly open: number
   readonly title: SourceTitle | null
@@ -410,7 +406,7 @@ export interface Declaration {
  * nothing for certain (a hook, `test.use(…)`, `{ test }`, a method `test() {`, a `context` that is
  * not called); null for any other shape, which the reader does not know.
  */
-export const declaration = (
+const declaration = (
   tokens: ReadonlyArray<Token>,
   head: number,
   closer: ReadonlyMap<number, number>,
@@ -461,9 +457,10 @@ export const declaration = (
  * `suite(`, `context(`, `test.describe(`) whose call holds it. The reader is certain only of the
  * shapes it knows whole. Any other use of `test`, `it`, `describe` or `suite` makes the file
  * uncertain: a title that is not a literal, a member it does not know (`test.extend`), a type
- * argument (`test<T>(`), a value (`cond ? test : test.skip`), a definition of its own, a member
- * call of two arguments (node's `t.test('x', fn)`). What the rest of the code run while the file
- * is collected may declare is the closed world's (`test-world.ts`).
+ * argument (`test<T>(`), a value (`cond ? test : test.skip`), a definition of its own, an alias
+ * imported under another name, a member call of two arguments (node's `t.test('x', fn)`). What
+ * the rest of the code run while the file is collected declares is not read here: only the
+ * runner's report tells it (`test-reports.ts`).
  */
 export const jsTests = (code: string): SourceTests => {
   const { tokens, closer, listed, certain } = jsTokens(code)
@@ -474,12 +471,17 @@ export const jsTests = (code: string): SourceTests => {
     readonly at: number
     readonly title: SourceTitle
   }> = []
-  // The tokens of the file's import clauses, which declare nothing (`import { test } from …`).
+  // The tokens of its import clauses.
   const clauses = new Set<number>()
   for (const [at, one] of tokens.entries()) {
     if (one.text !== 'import' || one.kind !== 'name' || !statementStart(tokens, at)) continue
+    if (tokens[at + 1]?.kind === 'string') continue
     const clause = importClause(tokens, at + 1)
     for (let index = at + 1; index < clause.end; index += 1) clauses.add(index)
+    for (const name of clause.names) {
+      // `import { test as base }`, `import { x as test }`: a test under a name not its own.
+      if (HEADS.has(name.local) !== HEADS.has(name.imported)) known = false
+    }
   }
   for (const [head, start] of tokens.entries()) {
     if (start.kind !== 'name' || clauses.has(head)) continue

@@ -1,0 +1,64 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 2,
+  "numPassedTests": 1,
+  "numFailedTests": 1,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1792138668677,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "saves",
+          "status": "passed",
+          "title": "saves",
+          "duration": 1.3225690000000014,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "loads",
+          "status": "failed",
+          "title": "loads",
+          "duration": 4.778802999999996,
+          "failureMessages": [
+            "AssertionError: expected 1 to be 2 // Object.is equality\n    at /work/acme/api/forge2.test.ts:6:13\n    at file:///work/acme/api    at file:///work/acme/api    at file:///work/acme/api    at new Promise (<anonymous>)\n    at runWithCancel (file:///work/acme/api    at file:///work/acme/api    at new Promise (<anonymous>)\n    at runWithTimeout (file:///work/acme/api    at file:///work/acme/api"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1792138668777,
+      "endTime": 1792138668782.7788,
+      "status": "failed",
+      "message": "",
+      "name": "/work/acme/api/forge2.test.ts"
+    }
+  ]
+}
