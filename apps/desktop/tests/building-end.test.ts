@@ -74,6 +74,7 @@ import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { NeedOwners, answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { Runs, getRun } from '../src/engine/runs.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { TaskStates, everyTaskHolds } from '../src/engine/permissions/requests.ts'
 import { REGISTRY, noticesOf } from '../src/engine/notifications.ts'
 import {
@@ -1351,6 +1352,86 @@ describe('The findings and their fate', () => {
       expect(seen.toldAfter.join('\n')).toContain('RV1')
       const finding = seen.review?.findings[0]
       expect(finding).toMatchObject({ fate: 'special_task', taskId: 'RV1', contradictsSpec: true })
+    },
+  )
+
+  test(
+    'a special task is numbered per mission: after an earlier Building with RV1 and RV2 the next one gets RV3, and another mission’s numbers do not count',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const database = yield* Database
+            const secrets = yield* Secrets
+            // Rounds do not exist yet: an earlier Building of the mission is seeded in storage, and
+            // so is a Building of another mission holding a higher number.
+            const [own] = yield* database.select().from(missions).where(eq(missions.id, mission.id))
+            if (own === undefined) return yield* Effect.die(new Error('no mission'))
+            const other = { ...own, id: crypto.randomUUID(), keyNumber: own.keyNumber + 100 }
+            yield* database.insert(missions).values({ ...other, idempotencyKey: null })
+            const earlier = (missionId: string, numbers: ReadonlyArray<number>) =>
+              Effect.gen(function* () {
+                const id = crypto.randomUUID()
+                // Earlier than the Building the mission is in, which is the latest one.
+                const at = '2026-01-01T00:00:00.000Z'
+                yield* database.insert(buildings).values({
+                  id,
+                  missionId,
+                  label: 'Building',
+                  round: 1,
+                  workspaceId: null,
+                  bases: '[]',
+                  phase: 'ended',
+                  state: 'ended',
+                  startedAt: at,
+                  endedAt: at,
+                  tasksDoneAt: at,
+                  endCalledAt: at,
+                  reviewCheckpointId: null,
+                  builderTurnedAt: null,
+                  summary: null,
+                })
+                for (const [rank, number] of numbers.entries()) {
+                  yield* database.insert(buildingTasks).values({
+                    buildingId: id,
+                    id: `RV${String(number)}`,
+                    rank,
+                    origin: 'review',
+                    decisionId: null,
+                    title: secrets.mask(`Earlier special task ${String(number)}`),
+                    result: secrets.mask('Done.'),
+                    requirements: '[]',
+                    scenarios: '[]',
+                    targets: secrets.mask('[]'),
+                    dependsOn: '[]',
+                    state: 'done',
+                    replacedBy: '[]',
+                    changes: '[]',
+                  })
+                }
+              })
+            yield* earlier(mission.id, [1, 2])
+            yield* earlier(other.id, [1, 2, 3, 4, 5, 6, 7])
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            yield* reviewed(world, mission.id, 'spec-reviewer')
+            yield* reviewed(world, mission.id, 'code-reviewer', [
+              warning('invoices.ts', 'Say how to export the invoices as Markdown.'),
+            ])
+            yield* specialAvailable(mission.id, 'RV3')
+            const view = yield* buildingNow(mission.id)
+            const review = yield* autoReviewOf(mission.id)
+            return { ids: view.tasks.filter((one) => one.origin === 'review'), review }
+          }),
+        ),
+      )
+      expect(seen.ids.map((one) => one.id)).toEqual(['RV3'])
+      expect(seen.review?.findings[0]).toMatchObject({ fate: 'special_task', taskId: 'RV3' })
     },
   )
 
