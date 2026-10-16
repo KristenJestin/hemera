@@ -11,7 +11,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { DatabaseRefused } from '@hemera/ipc'
 import { Effect, Match, Result, Schema, SubscriptionRef } from 'effect'
@@ -144,7 +144,7 @@ const buildState = (
           new Error(`the fixture's profile was refused: ${database.sentence}`),
         )
       }
-      yield* started.use(group.build({ work, git: fixtureGit() }))
+      yield* started.use(group.build({ work, git: fixtureGit(dirname(work)) }))
     }),
   )
 

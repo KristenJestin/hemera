@@ -6,7 +6,6 @@
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { devNull } from 'node:os'
 import { dirname, join } from 'node:path'
 
 /** Who writes every commit of a fixture: nobody real. */
@@ -45,14 +44,20 @@ export interface FixtureGit {
   readonly remote: (from: string, path: string) => string
 }
 
-/** A Git of its own for one build: its clock starts again at the fixed date. */
-export function fixtureGit(): FixtureGit {
+/**
+ * A Git of its own for one build: its clock starts again at the fixed date. Its global
+ * configuration is an empty file in `folder`, not the null device, which Git cannot read as a
+ * configuration file on Windows.
+ */
+export function fixtureGit(folder: string): FixtureGit {
+  const configuration = join(folder, 'gitconfig')
+  writeFileSync(configuration, '')
   let commits = 0
   const environment = (): NodeJS.ProcessEnv => {
     const at = new Date(FIRST_COMMIT + commits * MINUTE).toISOString()
     return {
       ...process.env,
-      GIT_CONFIG_GLOBAL: devNull,
+      GIT_CONFIG_GLOBAL: configuration,
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_AUTHOR_NAME: FIXTURE_AUTHOR.name,
       GIT_AUTHOR_EMAIL: FIXTURE_AUTHOR.email,
