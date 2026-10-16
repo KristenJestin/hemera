@@ -54,8 +54,8 @@ import {
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import { Effect, Option, Predicate, Result, Semaphore } from 'effect'
-import { lstat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
@@ -81,18 +81,20 @@ import {
   scenarioProofs,
   specProofs,
   specScenarios,
+  workspaces,
   writesBeforeRed,
 } from '../storage/schema.ts'
 import { type Grant, ToolAccess } from '../tools/access.ts'
 import type { WrittenFile } from '../tools/ports.ts'
 import { actionDone, actionFailed, beginAction } from '../tools/actions.ts'
 import { answered, attempt as onDisk, refusal, replaceFile } from '../tools/files.ts'
-import { NotJudged, THROUGH_A_LINK, readJudged } from '../tools/judged.ts'
+import { NotJudged, readJudged } from '../tools/judged.ts'
+import { containedIn, resolvePath } from '../tools/paths.ts'
 import { fingerprintOf } from '../tools/read.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn } from './attempts.ts'
 import { type Loop, lineageIn, runningOf, taskOfFile } from './loop.ts'
-import { fileOf, realFolder } from './place.ts'
+import { fileOf } from './place.ts'
 import { OutsideChanges } from './outside.ts'
 import { type ProofRun, ProofRunner } from './proof-runner.ts'
 import {
@@ -358,6 +360,10 @@ export const proofsRead = (missionId: string) =>
     )
   })
 
+/** Why a proof's file is refused when its path does not lead to a place in its repository. */
+export const LEADS_OUT =
+  'it does not lead with certainty to a file of its repository in the Workspace, and a proof is only read or written there'
+
 export const buildingProofs = (parts: ProofParts) => {
   const { loop, said } = parts
   // One proof of a mission judged at a time: a state is read and moved without another run of
@@ -434,12 +440,39 @@ export const buildingProofs = (parts: ProofParts) => {
   const folderOf = (building: BuildingRow, repository: string) =>
     basesOf(building).find((one) => one.repository === repository)?.folder ?? null
 
+  /** The folder of the Building's Workspace, its agents' place: a folder whose parent no agent reaches. */
+  const rootOf = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const [workspace] =
+        building.workspaceId === null
+          ? []
+          : yield* database
+              .select({ folder: workspaces.folder })
+              .from(workspaces)
+              .where(eq(workspaces.id, building.workspaceId))
+              .pipe(Effect.mapError(refusedWhile('reading the Workspace')))
+      if (workspace === undefined) return yield* Effect.fail('its Workspace is gone')
+      return workspace.folder
+    })
+
   /**
-   * Where a file of a repository of the Workspace is, under the real path of the repository's
-   * folder: the path a judged open proves its handle against (#385), so that a link or a junction
-   * planted on the way is refused rather than followed.
+   * Where a file of a repository of the Workspace really is, judged as `fs_write` judges a path
+   * (#385): followed from the Building's place as it really is, and refused unless it stays inside
+   * the repository's folder as it really is, so that a link planted at the repository's folder or
+   * on the way never leads a proof out of it. A judged open then proves its handle against that
+   * path. Fails with why it is refused.
    */
-  const realPathIn = (folder: string, path: string) => join(realFolder(folder), path)
+  const realPathIn = (building: BuildingRow, folder: string, path: string) =>
+    Effect.gen(function* () {
+      const root = yield* rootOf(building)
+      return yield* onDisk(async () => {
+        const repository = join(await realpath(root), relative(root, folder))
+        const found = await resolvePath(root, folder, path, '')
+        if (!found.certain || !containedIn(repository, found.path)) throw new NotJudged(LEADS_OUT)
+        return found.path
+      })
+    })
 
   /**
    * Whether a proof's test is in the Workspace: always for a command with no test file; else once
@@ -453,7 +486,8 @@ export const buildingProofs = (parts: ProofParts) => {
       if (test === undefined) return true
       const folder = folderOf(building, test.repository)
       if (folder === null) return false
-      const read = yield* onDisk(() => readJudged(realPathIn(folder, test.path))).pipe(
+      const read = yield* realPathIn(building, folder, test.path).pipe(
+        Effect.flatMap((path) => onDisk(() => readJudged(path))),
         Effect.option,
       )
       if (Option.isNone(read)) return false
@@ -627,17 +661,20 @@ export const buildingProofs = (parts: ProofParts) => {
           versions: '',
         } satisfies Placed
       }
-      const path = realPathIn(base.folder, file.path)
-      const current = yield* currentOf(path).pipe(Effect.result)
-      if (Result.isFailure(current)) {
+      const found = yield* realPathIn(building, base.folder, file.path).pipe(
+        Effect.flatMap((path) => Effect.map(currentOf(path), (bytes) => ({ path, bytes }))),
+        Effect.result,
+      )
+      if (Result.isFailure(found)) {
         return {
           kind: 'conflict',
-          said: `${named} was left as it is: ${current.failure}`,
+          said: `${named} was left as it is: ${found.failure}`,
           versions: '',
         } satisfies Placed
       }
-      const before = current.success === null ? null : fingerprintOf(current.success)
-      const ours = current.success === null ? null : current.success.toString('utf8')
+      const { path, bytes } = found.success
+      const before = bytes === null ? null : fingerprintOf(bytes)
+      const ours = bytes === null ? null : bytes.toString('utf8')
       if (file.insertion === 'new_file') {
         const content = file.content ?? ''
         if (ours === null) {
@@ -721,19 +758,13 @@ export const buildingProofs = (parts: ProofParts) => {
    * A file of the Workspace as it is now, read only if it is the regular file at its real path, with
    * a single name (`../tools/judged.ts`, as `fs_write` reads before it writes): never what a link
    * planted there leads to, and never waiting on a pipe. Null when there is none; fails with why it
-   * is refused. A name that is there but leads nowhere is a link to a missing file: refused too,
-   * where the platform's open follows it rather than saying so (Windows).
+   * is refused.
    */
   const currentOf = (path: string) =>
     onDisk(() =>
       readJudged(path, { oneNameFor: 'write' }).catch((cause: Error) => {
-        if (!Predicate.hasProperty(cause, 'code') || cause.code !== 'ENOENT') throw cause
-        return lstat(path).then(
-          () => {
-            throw new NotJudged(THROUGH_A_LINK)
-          },
-          () => null,
-        )
+        if (Predicate.hasProperty(cause, 'code') && cause.code === 'ENOENT') return null
+        throw cause
       }),
     )
 

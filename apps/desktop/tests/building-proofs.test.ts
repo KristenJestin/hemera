@@ -56,6 +56,7 @@ import {
   ACCEPT_RED,
   CANCEL_MISSION,
   END_WITHOUT,
+  LEADS_OUT,
   NOT_REPRODUCIBLE,
   SEND_BACK,
   TRY_AGAIN,
@@ -537,7 +538,7 @@ describe('A proof written only where Hemera judged it (#385)', () => {
     })
     expect(existsSync(join(outside, 'export.test.mjs'))).toBe(false)
     expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
-    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${THROUGH_A_LINK}`)
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
   })
 
   test('a folder of a proof’s path that is a junction leading outside never receives its bytes', async () => {
@@ -547,7 +548,7 @@ describe('A proof written only where Hemera judged it (#385)', () => {
     )
     expect(existsSync(join(outside, 'export.test.mjs'))).toBe(false)
     expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
-    expect(seen.delivered).toContain(THROUGH_A_LINK)
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
   })
 
   test('an addition to a test file with a second name outside is refused, and that other name keeps its bytes', async () => {
@@ -659,10 +660,29 @@ describe('A proof written only where Hemera judged it (#385)', () => {
     })
     expect(existsSync(join(outside, 'tests', 'export.test.mjs'))).toBe(false)
     expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
-    expect(seen.delivered).toContain(
-      `api/${EXPORT_PATH} was left as it is: it leads out of its repository`,
-    )
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
     expect(seen.proofRun).toContain('test is not in place yet')
+  })
+
+  test('a folder of a proof’s path that is a junction into another repository of the Workspace is refused: a proof stays in its own', async () => {
+    let web = ''
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      web = join(api, '..', 'web')
+      symlinkSync(web, join(api, 'tests'), 'junction')
+    })
+    expect(existsSync(join(web, 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
+  })
+
+  test('a link loop at a proof’s path is refused as a path that cannot be followed', async (context) => {
+    if (!linksFiles()) context.skip()
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      mkdirSync(join(api, 'tests'), { recursive: true })
+      symlinkSync(join(api, EXPORT_PATH), join(api, EXPORT_PATH), 'file')
+    })
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
   })
 
   test('a test file with a second name (a checkout made of hard links) is in place, and proof_run runs it', async () => {
