@@ -60,17 +60,19 @@ async function linkedSensitiveFiles(
   const found = new Map<string, string>()
   const lookIn = async (folder: string): Promise<void> => {
     const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
-    for (const entry of entries) {
-      const path = join(folder, entry.name)
-      if (entry.isDirectory()) {
-        if (!NOT_LOOKED_IN.has(entry.name)) await lookIn(path)
-        continue
-      }
-      const place = entry.isFile() ? sensitive(path) : null
-      if (place === null) continue
-      const file = await stat(path, { bigint: true }).catch(() => null)
-      if (file !== null && file.nlink > 1n) found.set(identityOf(file), place)
-    }
+    await Promise.all(
+      entries.map(async (entry) => {
+        const path = join(folder, entry.name)
+        if (entry.isDirectory()) {
+          if (!NOT_LOOKED_IN.has(entry.name)) await lookIn(path)
+          return
+        }
+        const place = entry.isFile() ? sensitive(path) : null
+        if (place === null) return
+        const file = await stat(path, { bigint: true }).catch(() => null)
+        if (file !== null && file.nlink > 1n) found.set(identityOf(file), place)
+      }),
+    )
   }
   await lookIn(root)
   return found

@@ -827,8 +827,8 @@ describe('A large call’s arguments and a large refusal’s diff are masked in 
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
           const began = performance.now()
           yield* callTool(builder.grantId, tool, args)
-          const took = performance.now() - began
-          return { calls: yield* callsOf(builder.sessionId), took }
+          const elapsed = performance.now() - began
+          return { calls: yield* callsOf(builder.sessionId), took: elapsed }
         }),
       ),
     )
