@@ -45,6 +45,7 @@ import {
   RESULT_IS_RIGHT,
   ROOT_REPOSITORY,
   SESSION_STATES,
+  SPECIAL_TASK_PREFIX,
   SPEC_IS_RIGHT,
   specialTaskId,
   specialTaskOf,
@@ -269,7 +270,17 @@ const specialTaskIn = (
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const tasks = yield* tasksIn(transaction, building.id)
-    const number = tasks.filter((one) => one.origin === 'review').length + 1
+    // Per mission (#147): the next number follows the highest of every Building of the mission.
+    const numbered = yield* transaction
+      .select({ id: buildingTasks.id })
+      .from(buildingTasks)
+      .innerJoin(buildings, eq(buildings.id, buildingTasks.buildingId))
+      .where(and(eq(buildings.missionId, building.missionId), eq(buildingTasks.origin, 'review')))
+      .pipe(Effect.mapError(refusedWhile('reading the special tasks')))
+    const highest = numbered.map((one) =>
+      Number.parseInt(one.id.slice(SPECIAL_TASK_PREFIX.length), 10),
+    )
+    const number = Math.max(0, ...highest.filter(Number.isInteger)) + 1
     const id = specialTaskId(number)
     const rank = Math.max(0, ...tasks.map((one) => one.rank)) + 1
     const task = specialTaskOf(finding)
