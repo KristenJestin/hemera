@@ -578,8 +578,8 @@ describe('Inconsistent rules are refused with their reason', () => {
       end: {
         ...base.end,
         cleanup: [
-          ...base.end.cleanup,
           { id: 'prune', kind: 'command', mode: 'auto', commandId: 'lost' },
+          ...base.end.cleanup,
         ],
       },
     }
@@ -700,6 +700,19 @@ describe('Steps are addressed by their id', () => {
     ])
   })
 
+  test('a step id used in two moments of a repository is refused', () => {
+    const rules = withActions(
+      preparedWith(ACME_CHAIN, 'api', {
+        steps: { off: [], changed: [], added: [{ after: null, step: sample('confirm', 'check') }] },
+      }),
+      'tasks',
+      [sample('confirm', 'check')],
+    )
+    expect(
+      validateRules(rules, ACME).map((one) => [one.code, one.repositoryId, one.stepId]),
+    ).toEqual([['duplicate-step-id', 'api', 'check']])
+  })
+
   test('a duplicate step id is refused', () => {
     const base = defaultDeliveryRules()
     const rules: DeliveryRulesDraft = {
@@ -738,8 +751,8 @@ describe('Steps are addressed by their id', () => {
       end: {
         ...base.end,
         cleanup: [
-          ...base.end.cleanup,
           { id: 'stop-services', kind: 'stop-services', mode: 'click' },
+          ...base.end.cleanup,
         ],
       },
     }
@@ -1018,14 +1031,14 @@ const NEEDS: Partial<Record<ActionKind, ReadonlyArray<ActionKind>>> = {
   merge: ['commit-by-hemera', 'push', 'pull-request'],
 }
 
-/** The actions given, in order, first in api's stack of a moment, or last in Cleanup. */
+/** The actions given, in order, first in api's stack of a moment, or first in Cleanup. */
 function withActions(
   rules: DeliveryRulesDraft,
   moment: DeliveryMoment | 'cleanup',
   actions: ReadonlyArray<DeliveryAction>,
 ): DeliveryRulesDraft {
   if (moment === 'cleanup') {
-    return { ...rules, end: { ...rules.end, cleanup: [...rules.end.cleanup, ...actions] } }
+    return { ...rules, end: { ...rules.end, cleanup: [...actions, ...rules.end.cleanup] } }
   }
   const added = actions.map((step, index) => ({ after: actions[index - 1]?.id ?? null, step }))
   const steps = { off: [], changed: [], added }
@@ -1047,6 +1060,15 @@ function withActions(
   }
 }
 
+/** What a moment holds but cannot run, each refused with its reason ("Checks explain", below). */
+const CANNOT_RUN_IN: Partial<Record<DeliveryMoment | 'cleanup', ReadonlyArray<ActionKind>>> = {
+  // Done once per delivery; a bump before Ship, while shared publishes only after Ship.
+  tasks: ['pull-request', 'merge', 'ci', 'bump'],
+  preparation: ['bump'],
+  // Cleanup already ends on removing the Workspace: what follows a removal cannot run.
+  cleanup: ['remove-workspace'],
+}
+
 describe('The moments of a delivery', () => {
   const SHARED_AND_API = only(repository('shared'), repository('api'))
   const CHAIN = rulesWith([
@@ -1065,6 +1087,7 @@ describe('The moments of a delivery', () => {
   test('every catalogue action is accepted in every moment, when its check holds', () => {
     const refused = ACTION_KINDS.flatMap((kind) =>
       (['tasks', 'preparation', 'waves', 'cleanup'] as const).flatMap((moment) => {
+        if (CANNOT_RUN_IN[moment]?.includes(kind)) return []
         const before = (NEEDS[kind] ?? []).map((need) => sample(need, `before-${need}`))
         const rules = withActions(CHAIN, moment, [...before, sample(kind, `added-${kind}`)])
         const document = JSON.stringify(
@@ -1079,17 +1102,17 @@ describe('The moments of a delivery', () => {
   })
 
   test('a refused action stays in its stack: the check explains, nothing is taken away', () => {
-    const rules = withActions(CHAIN, 'tasks', [sample('pull-request', 'early-pull-request')])
+    const rules = withActions(CHAIN, 'tasks', [sample('push', 'early-push')])
     expect(validateRules(rules, SHARED_AND_API)).toEqual([
       {
-        code: 'pull-request-without-push',
+        code: 'push-without-commit',
         repositoryId: 'api',
-        stepId: 'early-pull-request',
-        sentence: 'A pull request needs a push: api has no push step before its pull request step.',
+        stepId: 'early-push',
+        sentence: 'A push needs a commit: api has no commit action before its push.',
       },
     ])
     expect(effectiveOf(rules, SHARED_AND_API, 'api').stacks.tasks).toEqual([
-      sample('pull-request', 'early-pull-request'),
+      sample('push', 'early-push'),
     ])
   })
 })
@@ -1125,6 +1148,42 @@ describe('Committing is an action', () => {
     ])
   })
 
+  test('a commit after the push does not count for it', () => {
+    const rules = preparedWith(ACME_CHAIN, 'api', {
+      steps: {
+        off: ['commit'],
+        changed: [],
+        added: [{ after: 'push', step: sample('commit-by-me', 'late-commit') }],
+      },
+    })
+    expect(validateRules(rules, ACME).map((one) => [one.code, one.stepId])).toEqual([
+      ['push-without-commit', 'push'],
+    ])
+  })
+
+  test('Cleanup is checked in each repository’s order, after its waves', () => {
+    const rules = preparedWith(
+      rulesWith([
+        waves('api', 'application', { steps: { off: ['merge'], changed: [], added: [] } }),
+      ]),
+      'api',
+      { steps: { off: ['commit', 'push', 'pull-request'], changed: [], added: [] } },
+    )
+    expect(
+      validateRules(
+        withActions(rules, 'cleanup', [sample('push', 'cleanup-push')]),
+        only(repository('api')),
+      ),
+    ).toEqual([
+      {
+        code: 'push-without-commit',
+        repositoryId: 'api',
+        stepId: 'cleanup-push',
+        sentence: 'A push needs a commit: api has no commit action before its push.',
+      },
+    ])
+  })
+
   test('a commit after each task is a commit before the push', () => {
     const rules = withActions(
       preparedWith(ACME_CHAIN, 'api', { steps: { off: ['commit'], changed: [], added: [] } }),
@@ -1144,25 +1203,168 @@ describe('Committing is an action', () => {
   })
 })
 
+describe('Checks explain the orders an action cannot run in', () => {
+  const SHARED_AND_API = only(repository('shared'), repository('api'))
+  const CHAIN = rulesWith([
+    waves('shared', 'library'),
+    waves('api', 'library', { deliversAfter: ['shared'] }),
+  ])
+
+  test('a merge before Ship while team approval is required is refused', () => {
+    const rules = preparedWith(CHAIN, 'api', {
+      requireApproval: true,
+      steps: {
+        off: [],
+        changed: [],
+        added: [{ after: 'pull-request', step: sample('merge', 'early-merge') }],
+      },
+    })
+    expect(validateRules(rules, SHARED_AND_API)).toEqual([
+      {
+        code: 'merge-before-approval',
+        repositoryId: 'api',
+        stepId: 'early-merge',
+        sentence:
+          'api requires team approval before Ship, but merges before Ship, before its pull request can be approved.',
+      },
+    ])
+    // Without the approvals, merging in Review is the user's choice.
+    expect(
+      validateRules(
+        { ...rules, preparation: { ...rules.preparation, repositories: [] } },
+        SHARED_AND_API,
+      ),
+    ).toEqual([])
+  })
+
+  test('a bump before Ship is refused when the upstream publishes only after Ship', () => {
+    const rules = withActions(CHAIN, 'preparation', [sample('bump', 'early-bump')])
+    expect(validateRules(rules, SHARED_AND_API)).toEqual([
+      {
+        code: 'bump-before-publisher',
+        repositoryId: 'api',
+        stepId: 'early-bump',
+        sentence:
+          'api bumps its dependencies before Ship, but what it depends on publishes only after Ship.',
+      },
+    ])
+    // shared publishing in its preparation too feeds the bump before Ship.
+    const fed = {
+      ...rules,
+      preparation: {
+        ...rules.preparation,
+        repositories: [
+          ...rules.preparation.repositories,
+          ...preparedWith(CHAIN, 'shared', {
+            steps: {
+              off: [],
+              changed: [],
+              added: [
+                { after: 'pull-request', step: sample('published-version', 'early-publish') },
+              ],
+            },
+          }).preparation.repositories,
+        ],
+      },
+    }
+    expect(validateRules(fed, SHARED_AND_API)).toEqual([])
+  })
+
+  test('a pull request, a merge or CI after each task is refused: each is done once per delivery', () => {
+    const rules = withActions(CHAIN, 'tasks', [
+      sample('commit-by-hemera', 'task-commit'),
+      sample('push', 'task-push'),
+      sample('pull-request', 'task-pull-request'),
+      sample('merge', 'task-merge'),
+      sample('ci', 'task-ci'),
+    ])
+    const once = (stepId: string, sentence: string) => ({
+      code: 'once-per-delivery-after-each-task',
+      repositoryId: 'api',
+      stepId,
+      sentence,
+    })
+    expect(validateRules(rules, SHARED_AND_API)).toEqual([
+      once(
+        'task-pull-request',
+        'api opens a pull request after each task, but a pull request is opened once per delivery.',
+      ),
+      once('task-merge', 'api merges after each task, but a branch is merged once per delivery.'),
+      once(
+        'task-ci',
+        'api waits for CI after each task, but CI checks a delivery once, after it is pushed.',
+      ),
+    ])
+    // A commit and a push after each task are not refused.
+    expect(effectiveOf(rules, SHARED_AND_API, 'api').stacks.tasks).toHaveLength(5)
+  })
+
+  test('a pull request after each task is opened before Ship, for the approvals', () => {
+    const rules = withActions(
+      preparedWith(CHAIN, 'api', {
+        requireApproval: true,
+        steps: { off: ['commit', 'push', 'pull-request'], changed: [], added: [] },
+      }),
+      'tasks',
+      [
+        sample('commit-by-hemera', 'task-commit'),
+        sample('push', 'task-push'),
+        sample('pull-request', 'task-pull-request'),
+      ],
+    )
+    expect(validateRules(rules, SHARED_AND_API).map((one) => one.code)).toEqual([
+      'once-per-delivery-after-each-task',
+    ])
+  })
+
+  test('any action after removing the Workspace in Cleanup is refused', () => {
+    const rules = {
+      ...CHAIN,
+      end: {
+        ...CHAIN.end,
+        cleanup: [...CHAIN.end.cleanup, sample('push', 'late-push'), sample('confirm', 'late-ok')],
+      },
+    }
+    const after = (stepId: string) => ({
+      code: 'step-after-workspace-removed',
+      repositoryId: null,
+      stepId,
+      sentence: `Cleanup runs “${stepId}” after removing the Workspace, but nothing runs once it is gone.`,
+    })
+    expect(validateRules(rules, SHARED_AND_API)).toEqual([after('late-push'), after('late-ok')])
+  })
+})
+
 describe('Each action type declares whether it is safe to run again', () => {
   test('every action type declares retry safety and a post-condition', () => {
     expect(Object.keys(ACTION_RETRIES).toSorted()).toEqual([...ACTION_KINDS].toSorted())
     for (const kind of ACTION_KINDS) {
-      const { safeToRunAgain, postCondition } = ACTION_RETRIES[kind]
-      expect([true, false]).toContain(safeToRunAgain)
+      const { postCondition } = ACTION_RETRIES[kind]
       expect(postCondition === null || postCondition.endsWith('.')).toBe(true)
     }
   })
 
-  test('a push is safe to run again: it is done when the remote head equals the local head', () => {
-    expect(ACTION_RETRIES.push).toEqual({
-      safeToRunAgain: true,
-      postCondition: 'The remote head equals the local head.',
-    })
-  })
-
-  test('a remote action that cannot be checked is not safe to run again', () => {
-    expect(ACTION_RETRIES['remote-action']).toEqual({ safeToRunAgain: false, postCondition: null })
+  const NEW_COMMIT = 'A new commit exists on the branch since the action started.'
+  test.each([
+    ['commit-by-hemera', true, 'The Workspace has no uncommitted change.'],
+    ['commit-by-me', true, NEW_COMMIT],
+    ['commit-by-agent', false, NEW_COMMIT],
+    ['push', true, 'The remote head equals the local head.'],
+    ['pull-request', false, 'A pull request from the branch into the base branch is open.'],
+    ['bump', false, 'The manifests name the versions the upstream repositories published.'],
+    ['merge', false, 'The branch is merged into the base branch.'],
+    ['ci', true, 'The checks of the pushed commit are green.'],
+    ['remote-action', false, null],
+    ['published-version', true, 'The version is seen published.'],
+    ['command', false, null],
+    ['agent', false, null],
+    ['confirm', true, 'The user confirmed it.'],
+    ['pull-main-checkout', true, 'The main checkout’s base branch equals its remote’s.'],
+    ['stop-services', true, 'No service of the mission runs.'],
+    ['remove-worktrees', true, 'The mission’s worktrees are gone.'],
+    ['remove-workspace', true, 'The mission’s Workspace is gone.'],
+  ] as const)('%s: safe to run again %s, done when %s', (kind, safeToRunAgain, postCondition) => {
+    expect(ACTION_RETRIES[kind]).toEqual({ safeToRunAgain, postCondition })
   })
 })
 

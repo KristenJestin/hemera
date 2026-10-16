@@ -248,8 +248,8 @@ describe('The rules are saved on their version', () => {
             end: {
               ...base.end,
               cleanup: [
-                ...base.end.cleanup,
                 { id: 'notes', kind: 'command', mode: 'auto', commandId },
+                ...base.end.cleanup,
               ],
             },
           }

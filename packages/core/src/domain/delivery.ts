@@ -257,6 +257,10 @@ export const mayWriteToNetwork = (step: DeliveryAction): boolean =>
  * is done, null when Hemera cannot check it. On a restart, an action with no outcome is checked
  * against its post-condition; one neither safe to run again nor checkable comes back to the user as
  * a decision, never as a blind retry. Running this is the delivery tickets' work.
+ *
+ * The declaration is per kind, not per variant: a local merge and a squash merge, a bump by command
+ * and one by an agent, declare the same, the most careful of their variants. "A new commit since
+ * the action started" needs the head at the start recorded with the action.
  */
 export interface RetryDeclaration {
   readonly safeToRunAgain: boolean
@@ -931,12 +935,16 @@ export const DELIVERY_PROBLEM_CODES = [
   'push-without-commit',
   'dependency-cycle',
   'bump-without-publisher',
+  'bump-before-publisher',
   'approval-after-ship',
+  'merge-before-approval',
   'forge-step-without-forge',
   'remote-action-not-allowed',
   'unknown-template-variable',
   'unknown-command',
   'local-merge-outside-local',
+  'once-per-delivery-after-each-task',
+  'step-after-workspace-removed',
   'duplicate-step-id',
   'step-placed-after-itself',
   'unknown-repository',
@@ -1020,7 +1028,8 @@ interface SequenceProblems {
 
 /**
  * A merge through a pull request needs one before it, a pull request a push before it, and a push
- * a commit before it, in the order the actions run, wherever they were read from.
+ * a commit before it, in the order the actions run, wherever they were read from. Each check looks
+ * at the first action of its kind: a later one finds what the first one found before it.
  */
 function sequenceProblems(
   repositoryId: string,
@@ -1098,6 +1107,13 @@ function anchorLoops<S extends { readonly id: string }>(
   return loops
 }
 
+/** What is done once per delivery, so never after each task: the kind, what it does, why. */
+const ONCE_PER_DELIVERY = [
+  ['pull-request', 'opens a pull request', 'a pull request is opened once per delivery'],
+  ['merge', 'merges', 'a branch is merged once per delivery'],
+  ['ci', 'waits for CI', 'CI checks a delivery once, after it is pushed'],
+] as const
+
 const PRESET_NAMES: Readonly<Record<DeliveryPreset, string>> = {
   library: 'Library',
   application: 'Application',
@@ -1140,6 +1156,17 @@ export function validateRules(
     facts
       .find((one) => one.repository.id === id)
       ?.own.some((step) => step.kind === 'published-version') ?? false
+  const beforeShipOf = (resolved: EffectiveRepository) => [
+    ...resolved.stacks.tasks,
+    ...resolved.stacks.preparation,
+  ]
+  const publishesBeforeShip = (id: string) => {
+    const resolved = facts.find((one) => one.repository.id === id)?.resolved
+    return (
+      resolved !== undefined &&
+      beforeShipOf(resolved).some((step) => step.kind === 'published-version')
+    )
+  }
   const known = (commandId: string) => project.commandIds.includes(commandId)
 
   const problems: DeliveryProblem[] = []
@@ -1176,11 +1203,24 @@ export function validateRules(
       ),
     )
   }
+  // 4b. A bump before Ship needs an upstream that publishes before Ship: the waves come after.
+  for (const { repository, resolved } of facts) {
+    const bump = beforeShipOf(resolved).find((step) => step.kind === 'bump')
+    if (bump === undefined || !resolved.deliversAfter.some(publishes)) continue
+    if (resolved.deliversAfter.some(publishesBeforeShip)) continue
+    problems.push(
+      problem(
+        'bump-before-publisher',
+        repository.id,
+        bump.id,
+        `${repository.name} bumps its dependencies before Ship, but what it depends on publishes only after Ship.`,
+      ),
+    )
+  }
   // 5. Approvals before Ship need the pull request opened before Ship (CT-56).
   for (const { repository, resolved, all } of facts) {
     if (!resolved.preparation.requireApproval) continue
-    const beforeShip = [...resolved.stacks.tasks, ...resolved.stacks.preparation]
-    if (beforeShip.some((step) => step.kind === 'pull-request')) continue
+    if (beforeShipOf(resolved).some((step) => step.kind === 'pull-request')) continue
     const pullRequest = all.find((step) => step.kind === 'pull-request')
     if (pullRequest === undefined) continue
     problems.push(
@@ -1189,6 +1229,20 @@ export function validateRules(
         repository.id,
         pullRequest.id,
         `${repository.name} requires team approval before Ship, but its pull request is opened after Ship.`,
+      ),
+    )
+  }
+  // 5b. And no merge before Ship: it would merge before the pull request can be approved.
+  for (const { repository, resolved } of facts) {
+    if (!resolved.preparation.requireApproval) continue
+    const merge = beforeShipOf(resolved).find((step) => step.kind === 'merge')
+    if (merge === undefined) continue
+    problems.push(
+      problem(
+        'merge-before-approval',
+        repository.id,
+        merge.id,
+        `${repository.name} requires team approval before Ship, but merges before Ship, before its pull request can be approved.`,
       ),
     )
   }
@@ -1284,6 +1338,33 @@ export function validateRules(
         repository.id,
         local.id,
         `${repository.name} merges locally, but only a repository with the Local preset can.`,
+      ),
+    )
+  }
+  // 10b. After each task runs once per task: what is done once per delivery cannot run there.
+  for (const { repository, resolved } of facts) {
+    for (const step of resolved.stacks.tasks) {
+      const once = ONCE_PER_DELIVERY.find(([kind]) => kind === step.kind)
+      if (once === undefined) continue
+      problems.push(
+        problem(
+          'once-per-delivery-after-each-task',
+          repository.id,
+          step.id,
+          `${repository.name} ${once[1]} after each task, but ${once[2]}.`,
+        ),
+      )
+    }
+  }
+  // 10c. Nothing runs in Cleanup once the Workspace is removed.
+  const removed = cleanup.findIndex((step) => step.kind === 'remove-workspace')
+  for (const step of removed === -1 ? [] : cleanup.slice(removed + 1)) {
+    problems.push(
+      problem(
+        'step-after-workspace-removed',
+        null,
+        step.id,
+        `Cleanup runs “${step.id}” after removing the Workspace, but nothing runs once it is gone.`,
       ),
     )
   }
