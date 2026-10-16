@@ -67,7 +67,9 @@ const RESULT_TYPES =
     : ['violations', 'incomplete', 'passes', 'inapplicable']
 
 const diag = (message: string): void => {
-  console.log(`DIAG ${performance.now().toFixed(0)} ${message}`)
+  console.log(
+    `DIAG ${performance.now().toFixed(0)} ${document.documentElement.classList.contains('dark') ? 'dark' : 'light'} ${message}`,
+  )
 }
 if ('__vitest_browser__' in globalThis) {
   diag(`preview loaded ${document.documentElement.className}`)
@@ -85,6 +87,11 @@ if ('__vitest_browser__' in globalThis) {
     window.requestAnimationFrame(frame)
   }
   window.requestAnimationFrame(frame)
+  new PerformanceObserver((list) => {
+    list.getEntries().forEach((entry) => {
+      if (entry.duration > 400) diag(`long task ${entry.duration.toFixed(0)}ms`)
+    })
+  }).observe({ entryTypes: ['longtask'] })
   window.addEventListener('beforeunload', () => {
     diag('beforeunload')
   })
