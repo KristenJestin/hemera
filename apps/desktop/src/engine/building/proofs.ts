@@ -44,6 +44,7 @@ import {
   type ProofClass,
   type ProofPhase,
   PROOF_PHASES,
+  ROLE_PLACES,
   type ScenarioProofState,
   type ToolArguments,
   addedTestNames,
@@ -53,9 +54,9 @@ import {
 } from '@hemera/core/domain'
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
 import { and, asc, eq, isNull } from 'drizzle-orm'
-import { Effect, Option, Result, Semaphore } from 'effect'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { Effect, Option, Predicate, Result, Semaphore } from 'effect'
+import { realpath } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 
 import { Git } from '../git.ts'
 import type { NewEvent } from '../journal.ts'
@@ -81,12 +82,16 @@ import {
   scenarioProofs,
   specProofs,
   specScenarios,
+  workspaces,
   writesBeforeRed,
 } from '../storage/schema.ts'
 import { type Grant, ToolAccess } from '../tools/access.ts'
-import type { WrittenFile } from '../tools/ports.ts'
-import { actionDone, beginAction } from '../tools/actions.ts'
-import { answered, refusal } from '../tools/files.ts'
+import type { SensitivePlaces, WrittenFile } from '../tools/ports.ts'
+import { actionDone, actionFailed, beginAction } from '../tools/actions.ts'
+import { answered, attempt as onDisk, refusal, replaceFile } from '../tools/files.ts'
+import { NotJudged, readJudged } from '../tools/judged.ts'
+import { Withholding } from '../tools/withholding.ts'
+import { containedIn, resolvePath } from '../tools/paths.ts'
 import { fingerprintOf } from '../tools/read.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn } from './attempts.ts'
@@ -177,6 +182,7 @@ export const PROOF_KINDS = [
 /** The services the proofs' work runs on, which the Builder provides. */
 export type ProofNeeds =
   | Database
+  | SensitivePlaces
   | ToolAccess
   | DomainEvents
   | Secrets
@@ -198,6 +204,7 @@ export interface ProofParts {
   /** Where a suite holds the proofs (`BuilderHold`). */
   readonly hold: (
     at:
+      | 'placed'
       | 'greening'
       | 'handing'
       | 'greens-due'
@@ -356,6 +363,10 @@ export const proofsRead = (missionId: string) =>
     )
   })
 
+/** Why a proof's file is refused when its path does not lead to a place in its repository. */
+export const LEADS_OUT =
+  'it does not lead with certainty to a file of its repository in the Workspace, and a proof is only read or written there'
+
 export const buildingProofs = (parts: ProofParts) => {
   const { loop, said } = parts
   // One proof of a mission judged at a time: a state is read and moved without another run of
@@ -433,32 +444,86 @@ export const buildingProofs = (parts: ProofParts) => {
     basesOf(building).find((one) => one.repository === repository)?.folder ?? null
 
   /**
-   * Whether a proof's test is in the Workspace: always for a command with no test file; for an
-   * addition, once the tests it adds are found in the file (a conflict integrated by hand).
+   * The Building's Workspace, its agents' place (a folder whose parent no agent reaches), and what
+   * its Builder reads there without a verdict (#392): a proof's file is read as the Builder would
+   * read it, since what it holds may be handed to the Builder, so a file in a sensitive place is
+   * withheld.
    */
-  const inPlace = (building: BuildingRow, proof: Proof) => {
-    const test = proof.test
-    if (test === undefined) return true
-    const folder = folderOf(building, test.repository)
-    const path = folder === null ? null : join(folder, test.path)
-    if (path === null || !existsSync(path)) return false
-    if (test.insertion !== 'addition') return true
-    const text = readFileSync(path, 'utf8')
-    const names = addedTestNames({
-      insertion: test.insertion,
-      code: test.code,
-      patch: test.patch ?? null,
+  const placeOfBuilding = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const database = yield* Database
+      const [workspace] =
+        building.workspaceId === null
+          ? []
+          : yield* database
+              .select({ folder: workspaces.folder, projectId: workspaces.projectId })
+              .from(workspaces)
+              .where(eq(workspaces.id, building.workspaceId))
+              .pipe(Effect.mapError(refusedWhile('reading the Workspace')))
+      if (workspace === undefined) return yield* Effect.fail('its Workspace is gone')
+      const withholding = yield* Withholding.of({
+        sessionId: '',
+        role: 'builder',
+        projectId: workspace.projectId,
+        missionId: building.missionId,
+        place: { ...ROLE_PLACES.builder, root: workspace.folder },
+      })
+      return { root: workspace.folder, withholding }
     })
-    const added =
-      names.length > 0
-        ? names
-        : (test.patch ?? '')
-            .split('\n')
-            .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
-            .map((line) => line.slice(1).trim())
-            .filter((line) => line !== '')
-    return added.every((one) => text.includes(one))
-  }
+
+  /**
+   * Where a file of a repository of the Workspace really is, judged as `fs_write` judges a path
+   * (#385): followed from the Building's place as it really is, and refused unless it stays inside
+   * the repository's folder as it really is, so that a link planted at the repository's folder or
+   * on the way never leads a proof out of it. A judged open then proves its handle against that
+   * path, read as the Builder reads it. Fails with why it is refused.
+   */
+  const realPathIn = (building: BuildingRow, folder: string, path: string) =>
+    Effect.gen(function* () {
+      const { root, withholding } = yield* placeOfBuilding(building)
+      const real = yield* onDisk(async () => {
+        const repository = join(await realpath(root), relative(root, folder))
+        const found = await resolvePath(root, folder, path, '')
+        if (!found.certain || !containedIn(repository, found.path)) throw new NotJudged(LEADS_OUT)
+        return found.path
+      })
+      return { path: real, withholding }
+    })
+
+  /**
+   * Whether a proof's test is in the Workspace: always for a command with no test file; else once
+   * its file is the regular file at its path, never what a link planted there leads to nor a pipe
+   * (`../tools/judged.ts`); for an addition, once the tests it adds are found in the file (a
+   * conflict integrated by hand).
+   */
+  const inPlace = (building: BuildingRow, proof: Proof) =>
+    Effect.gen(function* () {
+      const test = proof.test
+      if (test === undefined) return true
+      const folder = folderOf(building, test.repository)
+      if (folder === null) return false
+      const read = yield* realPathIn(building, folder, test.path).pipe(
+        Effect.flatMap(({ path, withholding }) => onDisk(() => readJudged(path, { withholding }))),
+        Effect.option,
+      )
+      if (Option.isNone(read)) return false
+      if (test.insertion !== 'addition') return true
+      const text = read.value.toString('utf8')
+      const names = addedTestNames({
+        insertion: test.insertion,
+        code: test.code,
+        patch: test.patch ?? null,
+      })
+      const added =
+        names.length > 0
+          ? names
+          : (test.patch ?? '')
+              .split('\n')
+              .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+              .map((line) => line.slice(1).trim())
+              .filter((line) => line !== '')
+      return added.every((one) => text.includes(one))
+    })
 
   /**
    * The repositories a scenario's proof is fresh on: its test's (every one for a command with no
@@ -584,6 +649,8 @@ export const buildingProofs = (parts: ProofParts) => {
         readonly kind: 'write'
         readonly path: string
         readonly content: string
+        /** The fingerprint of the file it replaces, or null when there is none. */
+        readonly before: string | null
         readonly status: 'A' | 'M'
       }
     | { readonly kind: 'there' }
@@ -610,11 +677,27 @@ export const buildingProofs = (parts: ProofParts) => {
           versions: '',
         } satisfies Placed
       }
-      const path = join(base.folder, file.path)
-      const ours = existsSync(path) ? readFileSync(path, 'utf8') : null
+      const found = yield* realPathIn(building, base.folder, file.path).pipe(
+        Effect.flatMap(({ path, withholding }) =>
+          Effect.map(currentOf(path, withholding), (bytes) => ({ path, bytes })),
+        ),
+        Effect.result,
+      )
+      if (Result.isFailure(found)) {
+        return {
+          kind: 'conflict',
+          said: `${named} was left as it is: ${found.failure}`,
+          versions: '',
+        } satisfies Placed
+      }
+      const { path, bytes } = found.success
+      const before = bytes === null ? null : fingerprintOf(bytes)
+      const ours = bytes === null ? null : bytes.toString('utf8')
       if (file.insertion === 'new_file') {
         const content = file.content ?? ''
-        if (ours === null) return { kind: 'write', path, content, status: 'A' } satisfies Placed
+        if (ours === null) {
+          return { kind: 'write', path, content, before, status: 'A' } satisfies Placed
+        }
         if (ours === content) return { kind: 'there' } satisfies Placed
         return {
           kind: 'conflict',
@@ -669,7 +752,7 @@ export const buildingProofs = (parts: ProofParts) => {
       }
       return text === ours
         ? ({ kind: 'there' } satisfies Placed)
-        : ({ kind: 'write', path, content: text, status: 'M' } satisfies Placed)
+        : ({ kind: 'write', path, content: text, before, status: 'M' } satisfies Placed)
     })
 
   /** The files a proof inserts, each with what goes into it. */
@@ -689,21 +772,70 @@ export const buildingProofs = (parts: ProofParts) => {
       }
     })
 
-  /** A file written by Hemera: its intent, the write, its outcome, so it is never the user's. */
-  const writeFile = (building: BuildingRow, path: string, content: string) =>
+  /**
+   * A file of the Workspace as it is now, read only if it is the regular file at its real path, with
+   * a single name (`../tools/judged.ts`, as `fs_write` reads before it writes): never what a link
+   * planted there leads to, and never waiting on a pipe. Null when there is none; fails with why it
+   * is refused.
+   */
+  const currentOf = (path: string, withholding: Withholding) =>
+    onDisk(() =>
+      readJudged(path, { oneNameFor: 'write', withholding }).catch((cause: Error) => {
+        if (Predicate.hasProperty(cause, 'code') && cause.code === 'ENOENT') return null
+        throw cause
+      }),
+    )
+
+  /**
+   * A file written by Hemera: its intent, the write, its outcome, so it is never the user's. The
+   * file is replaced in its folder proven on its handle (`replaceFile`, as `fs_write` writes), so
+   * the bytes reach the folder judged or nowhere. Answers why it failed, or null.
+   */
+  const writeFile = (
+    building: BuildingRow,
+    placed: { readonly path: string; readonly content: string; readonly before: string | null },
+  ) =>
     Effect.gen(function* () {
-      const before = existsSync(path) ? fingerprintOf(readFileSync(path)) : null
-      const bytes = Buffer.from(content, 'utf8')
       const id = yield* beginAction(
         'file.write',
         { kind: 'mission', missionId: building.missionId, taskId: null },
-        { path, before, after: fingerprintOf(bytes) },
+        {
+          path: placed.path,
+          before: placed.before,
+          after: fingerprintOf(Buffer.from(placed.content, 'utf8')),
+        },
       )
-      yield* Effect.sync(() => {
-        mkdirSync(dirname(path), { recursive: true })
-        writeFileSync(path, bytes)
-      })
+      const written = yield* onDisk(() => replaceFile(placed.path, placed.content)).pipe(
+        Effect.result,
+      )
+      if (Result.isFailure(written)) {
+        yield* actionFailed(id, written.failure)
+        return written.failure
+      }
       yield* actionDone(id, 'written by Hemera: a proof')
+      return null
+    })
+
+  /**
+   * Writes a scenario's placed files one after the other, adding each to `written`; stops at the
+   * first that fails and answers why, or null once all are written.
+   */
+  const writeAll = (
+    building: BuildingRow,
+    placed: ReadonlyArray<{
+      readonly file: { readonly repository: string; readonly path: string }
+      readonly placed: Placed
+    }>,
+    written: Array<{ repository: string; path: string; status: 'A' | 'M' }>,
+  ) =>
+    Effect.gen(function* () {
+      for (const { file, placed: one } of placed) {
+        if (one.kind !== 'write') continue
+        const failed = yield* writeFile(building, one)
+        if (failed !== null) return `${file.repository}/${file.path} was not written: ${failed}`
+        written.push({ repository: file.repository, path: file.path, status: one.status })
+      }
+      return null
     })
 
   /**
@@ -736,10 +868,11 @@ export const buildingProofs = (parts: ProofParts) => {
           })
           continue
         }
-        for (const { file, placed: one } of placed) {
-          if (one.kind !== 'write') continue
-          yield* writeFile(building, one.path, one.content)
-          written.push({ repository: file.repository, path: file.path, status: one.status })
+        yield* parts.hold('placed')
+        const failed = yield* writeAll(building, placed, written)
+        if (failed !== null) {
+          conflicts.push({ scenario: row.scenario, said: failed, versions: '' })
+          continue
         }
         if (files.length > 0) scenarios.push(row.scenario)
       }
@@ -833,7 +966,7 @@ export const buildingProofs = (parts: ProofParts) => {
         if (modeOf(row) !== 'automated' || stateOf(row) !== 'waiting_red') continue
         if (attempts.some((one) => one.scope === 'proof' && one.subject === row.scenario)) continue
         const proof = yield* proofOf(building.missionId, row.scenario)
-        if (proof === null || inPlace(building, proof)) continue
+        if (proof === null || (yield* inPlace(building, proof))) continue
         for (const file of filesOf(proof)) {
           const placed = yield* placeFile(building, file)
           if (placed.kind !== 'conflict') continue
@@ -1071,7 +1204,7 @@ export const buildingProofs = (parts: ProofParts) => {
       const row = yield* scenarioProofIn(database, building.id, scenario)
       if (row === null || stateOf(row) !== 'waiting_red') return null
       const proof = yield* proofOf(building.missionId, scenario)
-      if (proof === null || !inPlace(building, proof)) return null
+      if (proof === null || !(yield* inPlace(building, proof))) return null
       const run = yield* runOf(building, scenario, 'red', proof)
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
       yield* judgeRed(building, scenario, proof, run)
@@ -1916,7 +2049,7 @@ export const buildingProofs = (parts: ProofParts) => {
           return refusal(`refused: ${grant.helper.label} runs only the proofs of its own task.`)
       }
       const proof = yield* proofOf(building.missionId, args.scenario)
-      if (proof === null || !inPlace(building, proof)) {
+      if (proof === null || !(yield* inPlace(building, proof))) {
         return refusal(
           `refused: ${args.scenario}'s test is not in place yet${proof?.test === undefined ? '.' : `: ${proof.test.repository}/${proof.test.path} is missing, or does not hold the test yet.`}`,
         )

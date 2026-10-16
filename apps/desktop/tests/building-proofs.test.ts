@@ -10,7 +10,19 @@
  * Workspace, and real `node --test` files as the proofs.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import {
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
@@ -44,6 +56,7 @@ import {
   ACCEPT_RED,
   CANCEL_MISSION,
   END_WITHOUT,
+  LEADS_OUT,
   NOT_REPRODUCIBLE,
   SEND_BACK,
   TRY_AGAIN,
@@ -56,7 +69,11 @@ import { NeedOwners, answerNeed, expireNeed, getNeed, retryNeed } from '../src/e
 import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.ts'
 import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
+import { NOT_A_FILE, THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
+import { listActions } from '../src/engine/tools/actions.ts'
+import { fingerprintOf } from '../src/engine/tools/read.ts'
 import { Runs } from '../src/engine/runs.ts'
+import { type SecretsRegistry, secretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { activeBuildingIn, decisionsIn, tasksIn } from '../src/engine/building/tasks.ts'
@@ -103,10 +120,13 @@ const proofsEngine = (
     readonly outside?: Partial<OutsideSettings>
     /** Who answers a command marked "ask before running". */
     readonly askBeforeRunning?: Layer.Layer<AskBeforeRunning>
+    /** The values the engine masks. */
+    readonly secrets?: SecretsRegistry
   } = {},
 ) =>
   sessionsEngine(dataFolder, agents, {
     roles: [HELPER],
+    secrets: more.secrets,
     askBeforeRunning: more.askBeforeRunning,
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     snapshots: more.snapshots ?? ((real) => real),
@@ -447,6 +467,307 @@ describe('The proofs written into the Workspace (CT-37)', () => {
     )
     expect(seen.proof.state).toBe('waiting_red')
     expect(seen.started).toContain('waits for the red of R1.S2')
+  })
+})
+
+/** A folder outside every place of the mission, where a planted link leads. */
+const outsideFolder = () => {
+  const folder = join(scratch, 'outside')
+  mkdirSync(folder, { recursive: true })
+  return folder
+}
+
+/** Whether this machine makes a symbolic link to a file: Windows needs a privilege for it. */
+const linksFiles = () => {
+  try {
+    symlinkSync(join(scratch, 'nowhere'), join(scratch, 'probe'), 'file')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** What the Builder is told when a proof's file could not be written. */
+const HANDED = 'Integrate the test by hand'
+
+/**
+ * The mission launched with these proofs, `plant` run in the Workspace's `api` while the Builder is
+ * held at `at`, then the proofs written: their event, the file writes Hemera recorded and, for a
+ * conflict, what the Builder was told and what proof_run answers it.
+ */
+const writtenAfter = (
+  at: 'proving' | 'placed',
+  proofs: (api: string) => Readonly<Record<string, Schema.JsonObject>>,
+  plant: (api: string) => void,
+) => {
+  const reached = Deferred.makeUnsafe<void>()
+  const go = Deferred.makeUnsafe<void>()
+  const hold: BuilderHold = (point) =>
+    point === at
+      ? Effect.andThen(Deferred.succeed(reached, undefined), Deferred.await(go))
+      : Effect.void
+  return proofsEngine(data, hold).run(({ profile }) =>
+    within(
+      profile,
+      Effect.gen(function* () {
+        const { mission } = yield* launchedWith(proofs)
+        yield* Deferred.await(reached)
+        const api = yield* apiOf(mission.id)
+        plant(api)
+        yield* Deferred.succeed(go, undefined)
+        const written = payloadsOf(mission.id, 'building.proofs_written')
+        yield* until(Effect.map(written, (events) => events.length > 0))
+        const events = yield* written
+        const writes = (yield* listActions()).filter((one) => one.kind === 'file.write')
+        if (events[0]?.conflicts?.length !== 1) {
+          return { api, events, writes, delivered: '', proofRun: '' }
+        }
+        const delivered = yield* deliveredTo(mission.id, HANDED)
+        const { grantId } = yield* builderOf(mission.id)
+        // A conflict's proof is not in place: proof_run says so, whatever stands there.
+        const proofRun = yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+        return { api, events, writes, delivered, proofRun }
+      }),
+    ),
+  )
+}
+
+describe('A proof written only where Hemera judged it (#385)', () => {
+  test('a link planted where a proof’s new file goes, leading outside, never receives its bytes', async (context) => {
+    if (!linksFiles()) context.skip()
+    const outside = outsideFolder()
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      mkdirSync(join(api, 'tests'), { recursive: true })
+      symlinkSync(join(outside, 'export.test.mjs'), join(api, EXPORT_PATH), 'file')
+    })
+    expect(existsSync(join(outside, 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
+  })
+
+  test('a folder of a proof’s path that is a junction leading outside never receives its bytes', async () => {
+    const outside = outsideFolder()
+    const seen = await writtenAfter('proving', exportProof, (api) =>
+      symlinkSync(outside, join(api, 'tests'), 'junction'),
+    )
+    expect(existsSync(join(outside, 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
+  })
+
+  test('an addition to a test file with a second name outside is refused, and that other name keeps its bytes', async () => {
+    const outside = outsideFolder()
+    const twin = join(outside, 'twin.mjs')
+    const seen = await writtenAfter(
+      'proving',
+      (api) => ({ 'R1.S2': withExisting(api) }),
+      (api) => {
+        rmSync(join(api, EXISTING_PATH))
+        writeFileSync(twin, EXISTING)
+        linkSync(twin, join(api, EXISTING_PATH))
+      },
+    )
+    expect(readFileSync(twin, 'utf8')).toBe(EXISTING)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain('it is never written over')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe planted where a proof’s file goes is refused without blocking, and proof_run refuses it too',
+    async () => {
+      const seen = await writtenAfter(
+        'proving',
+        (api) => ({ 'R1.S2': withExisting(api) }),
+        (api) => {
+          rmSync(join(api, EXISTING_PATH))
+          execFileSync('mkfifo', [join(api, EXISTING_PATH)])
+        },
+      )
+      expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+      expect(seen.delivered).toContain(`api/${EXISTING_PATH} was left as it is: ${NOT_A_FILE}`)
+      expect(seen.proofRun).toContain('test is not in place yet')
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe planted where a proof’s new file goes is refused without blocking, and never run',
+    async () => {
+      const seen = await writtenAfter('proving', exportProof, (api) => {
+        mkdirSync(join(api, 'tests'), { recursive: true })
+        execFileSync('mkfifo', [join(api, EXPORT_PATH)])
+      })
+      expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${NOT_A_FILE}`)
+      expect(seen.proofRun).toContain('test is not in place yet')
+    },
+  )
+
+  test('a Workspace reached through a link has its proofs written: the folders are judged by their real paths', async () => {
+    // The data folder holds the Workspaces: reached through a junction, as is the Project.
+    const linkedData = join(scratch, 'data')
+    const linkedWork = join(scratch, 'work')
+    symlinkSync(data, linkedData, 'junction')
+    symlinkSync(work, linkedWork, 'junction')
+    const seen = await proofsEngine(linkedData).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(
+            linkedWork,
+            undefined,
+            undefined,
+            PLAN,
+            undefined,
+            undefined,
+            exportProof,
+          )
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          return {
+            written: readFileSync(join(yield* apiOf(mission.id), EXPORT_PATH), 'utf8'),
+            events: yield* payloadsOf(mission.id, 'building.proofs_written'),
+          }
+        }),
+      ),
+    )
+    expect(seen.events).toEqual([{ scenarios: ['R1.S2'], conflicts: [] }])
+    expect(seen.written).toBe(EXPORT_TEST)
+  })
+
+  test('a link planted between a proof’s read and its write is replaced, never written through', async (context) => {
+    if (!linksFiles()) context.skip()
+    const outside = outsideFolder()
+    const seen = await writtenAfter('placed', exportProof, (api) => {
+      mkdirSync(join(api, 'tests'), { recursive: true })
+      symlinkSync(join(outside, 'export.test.mjs'), join(api, EXPORT_PATH), 'file')
+    })
+    expect(existsSync(join(outside, 'export.test.mjs'))).toBe(false)
+    expect(lstatSync(join(seen.api, EXPORT_PATH)).isFile()).toBe(true)
+    expect(readFileSync(join(seen.api, EXPORT_PATH), 'utf8')).toBe(EXPORT_TEST)
+  })
+
+  test('a folder of a proof’s path made a junction between its read and its write fails the write, never lands outside', async () => {
+    const outside = outsideFolder()
+    const seen = await writtenAfter('placed', exportProof, (api) =>
+      symlinkSync(outside, join(api, 'tests'), 'junction'),
+    )
+    expect(existsSync(join(outside, 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was not written: ${THROUGH_A_LINK}`)
+    // The write Hemera began is recorded as failed, never left for a restart to guess.
+    expect(seen.writes.map((one) => [one.state, one.outcome])).toEqual([['failed', THROUGH_A_LINK]])
+  })
+
+  test('a repository folder swapped for a link leading outside never receives the proof’s bytes, nor is its test read there', async () => {
+    const outside = outsideFolder()
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      renameSync(api, `${api}-moved`)
+      symlinkSync(outside, api, 'junction')
+    })
+    expect(existsSync(join(outside, 'tests', 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
+    expect(seen.proofRun).toContain('test is not in place yet')
+  })
+
+  test('a folder of a proof’s path that is a junction into another repository of the Workspace is refused: a proof stays in its own', async () => {
+    let web = ''
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      web = join(api, '..', 'web')
+      symlinkSync(web, join(api, 'tests'), 'junction')
+    })
+    expect(existsSync(join(web, 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
+  })
+
+  test('a link loop at a proof’s path is refused as a path that cannot be followed', async (context) => {
+    if (!linksFiles()) context.skip()
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      mkdirSync(join(api, 'tests'), { recursive: true })
+      symlinkSync(join(api, EXPORT_PATH), join(api, EXPORT_PATH), 'file')
+    })
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(`api/${EXPORT_PATH} was left as it is: ${LEADS_OUT}`)
+  })
+
+  test('a proof’s file in a sensitive place of the Workspace is read as its Builder would read it: withheld, never handed over', async () => {
+    const secret = 'TOKEN=a value no agent reads\n'
+    const seen = await writtenAfter(
+      'proving',
+      () => ({ 'R1.S2': automated('tests/app.env', EXPORT_TEST) }),
+      (api) => {
+        mkdirSync(join(api, 'tests'), { recursive: true })
+        writeFileSync(join(api, 'tests', 'app.env'), secret)
+      },
+    )
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain('api/tests/app.env was left as it is: content withheld: ')
+    expect(seen.delivered).not.toContain('a value no agent reads')
+    expect(readFileSync(join(seen.api, 'tests', 'app.env'), 'utf8')).toBe(secret)
+  })
+
+  test('a test file with a second name (a checkout made of hard links) is in place, and proof_run runs it', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(exportProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const api = yield* apiOf(mission.id)
+          const store = join(api, 'store')
+          mkdirSync(store)
+          linkSync(join(api, EXPORT_PATH), join(store, 'export.test.mjs'))
+          const { grantId } = yield* builderOf(mission.id)
+          return yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+        }),
+      ),
+    )
+    expect(seen).not.toMatch(/^refused/)
+  })
+
+  test.runIf(process.platform === 'win32')(
+    'a proof’s path whose letters differ in case from the disk’s folder is written into that folder',
+    async () => {
+      const path = 'Tests/export.test.mjs'
+      const seen = await writtenAfter(
+        'proving',
+        () => ({ 'R1.S2': automated(path, EXPORT_TEST) }),
+        (api) => mkdirSync(join(api, 'tests')),
+      )
+      expect(seen.events).toEqual([{ scenarios: ['R1.S2'], conflicts: [] }])
+      expect(readFileSync(join(seen.api, 'tests', 'export.test.mjs'), 'utf8')).toBe(EXPORT_TEST)
+    },
+  )
+
+  test('a second name given to a proof’s file between its read and its write keeps its bytes: the file is replaced', async () => {
+    const outside = outsideFolder()
+    const twin = join(outside, 'twin.mjs')
+    let read = ''
+    const seen = await writtenAfter(
+      'placed',
+      (api) => ({ 'R1.S2': withExisting(api) }),
+      (api) => {
+        const bytes = readFileSync(join(api, EXISTING_PATH))
+        read = fingerprintOf(bytes)
+        writeFileSync(twin, bytes)
+        rmSync(join(api, EXISTING_PATH))
+        linkSync(twin, join(api, EXISTING_PATH))
+      },
+    )
+    expect(readFileSync(twin, 'utf8').replaceAll('\r\n', '\n')).toBe(EXISTING)
+    expect(readFileSync(join(seen.api, EXISTING_PATH), 'utf8').replaceAll('\r\n', '\n')).toBe(
+      WITH_ADDITION,
+    )
+    // The write recorded holds the version it replaced, which a restart compares the file with.
+    expect(seen.writes.map((one) => [one.state, one.details])).toEqual([
+      [
+        'done',
+        {
+          path: join(seen.api, EXISTING_PATH),
+          before: read,
+          after: fingerprintOf(readFileSync(join(seen.api, EXISTING_PATH))),
+        },
+      ],
+    ])
   })
 })
 
@@ -1381,6 +1702,33 @@ describe('A failed green', () => {
     )
     expect(seen.refreshed.proofs).toEqual(['R1.S2'])
     expect(seen.proof.state).toBe('green')
+  })
+
+  test('a proof whose test prints a known value hands its run back through proof_run masked (#392)', async () => {
+    const value = 'violet-heron-5521-quartz'
+    const secrets = secretsRegistry()
+    secrets.register('suite', [value])
+    // The value is put together as the test runs (a proof is kept masked, so a value written in
+    // its code never runs), and printed in the failure's message, which the run's tail holds.
+    const printing = testFile(
+      "  assert.equal(existsSync(new URL('../export.ts', import.meta.url)), true, 'export.ts exports nothing yet; region ' + ['violet-heron', '5521-quartz'].join('-'))",
+    )
+    const seen = await proofsEngine(data, undefined, undefined, undefined, { secrets }).run(
+      ({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launchedWith(() => ({
+              'R1.S2': automated(EXPORT_PATH, printing),
+            }))
+            yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+            const { grantId } = yield* builderOf(mission.id)
+            return yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+          }),
+        ),
+    )
+    expect(seen).toContain('region •••')
+    expect(seen).not.toContain(value)
   })
 
   test('proof_run runs a failed green again and closes its attempt', async () => {

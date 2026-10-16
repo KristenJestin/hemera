@@ -103,6 +103,7 @@ import {
   permissionRequests,
   documenterPasses,
   domainEvents,
+  fileContents,
   needDeliveries,
   needs,
   proofRuns,
@@ -816,6 +817,58 @@ describe('The reviewers', () => {
       expect(seen.read).toContain('at the checkpoint')
       expect(seen.read).not.toContain('later')
       expect(seen.folder).not.toBe(dirname(seen.api))
+    },
+  )
+
+  test(
+    'checkpoint_read of a .envrc a checkpoint kept in clear before it was a sensitive place shows "content withheld" (#392)',
+    SLOW,
+    async () => {
+      const { world, run } = ending()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work, withReadme)
+            const builder = yield* builderOf(mission.id)
+            const api = yield* apiOf(mission.id)
+            writtenInWorkspace(api, '.envrc', 'export ACME_REGION=at-the-checkpoint\n')
+            yield* builtAll(builder.grantId)
+            yield* documented(world, mission.id)
+            const reviewer = yield* agentOf(world, mission.id, 'spec-reviewer')
+            // As a checkpoint taken before #392 kept it: the .envrc's bytes, under no reason.
+            const bytes = Buffer.from('export ACME_REGION=at-the-checkpoint\n')
+            const database = yield* Database
+            const [kept] = yield* database
+              .select({ sha256: checkpointFiles.afterSha256 })
+              .from(checkpointFiles)
+              .where(eq(checkpointFiles.path, '.envrc'))
+            if (kept?.sha256 == null) return yield* Effect.die(new Error('no .envrc kept'))
+            const sha256 = kept.sha256
+            yield* mutate('keeping a .envrc as before #392', (transaction) =>
+              Effect.as(
+                Effect.all([
+                  transaction
+                    .update(checkpointFiles)
+                    .set({ afterWithheld: null })
+                    .where(eq(checkpointFiles.path, '.envrc')),
+                  transaction
+                    .insert(fileContents)
+                    .values({ sha256, bytes, size: bytes.length, masked: false })
+                    .onConflictDoUpdate({ target: fileContents.sha256, set: { bytes } }),
+                ]),
+                { result: undefined, events: [] },
+              ),
+            )
+            return yield* call(reviewer.grantId, 'checkpoint_read', {
+              repository: 'api',
+              path: '.envrc',
+            })
+          }),
+        ),
+      )
+      expect(seen).toContain('content withheld: .envrc')
+      expect(seen).not.toContain('at-the-checkpoint')
     },
   )
 

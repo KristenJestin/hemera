@@ -150,6 +150,20 @@ describe('Sensitive places always ask', () => {
     [LINUX, '/home/me/work/app/.env', '~/work/app/.env'],
     [LINUX, '/home/me/work/app/config/.env.production', '~/work/app/config/.env.production'],
     [LINUX, '/home/me/work/app/.e*', '~/work/app/.e*'],
+    [LINUX, '/home/me/work/app/.envrc', '~/work/app/.envrc'],
+    [LINUX, '/home/me/work/app/.ENV', '~/work/app/.ENV'],
+    [LINUX, '/home/me/work/app/config/.Env.Production', '~/work/app/config/.Env.Production'],
+    [LINUX, '/home/me/work/app/certs/server.pem', '~/work/app/certs/server.pem'],
+    [LINUX, '/home/me/work/app/certs/server.key', '~/work/app/certs/server.key'],
+    [LINUX, '/home/me/work/app/certs/SERVER.PEM', '~/work/app/certs/SERVER.PEM'],
+    [LINUX, '/home/me/work/app/deploy/id_ed25519', '~/work/app/deploy/id_ed25519'],
+    [LINUX, '/home/me/work/app/certs/*.pem', '~/work/app/certs/*.pem'],
+    [LINUX, '/home/me/work/app/deploy/id_*', '~/work/app/deploy/id_*'],
+    [LINUX, '/home/me/work/app/certs/.pem', '~/work/app/certs/.pem'],
+    [LINUX, '/home/me/work/app/certs/.key', '~/work/app/certs/.key'],
+    [LINUX, '/home/me/work/app/deploy/app.env', '~/work/app/deploy/app.env'],
+    [LINUX, '/home/me/work/app/deploy/Secrets.ENV', '~/work/app/deploy/Secrets.ENV'],
+    [LINUX, '/home/me/work/app/deploy/*.env', '~/work/app/deploy/*.env'],
     [MAC, '/Users/me/Library/Keychains/login.keychain-db', '~/Library/Keychains'],
     [MAC, '/Users/me/.SSH/config', '~/.SSH'],
     [WINDOWS, 'C:\\Users\\me\\.ssh\\config', '~\\.ssh'],
@@ -167,10 +181,35 @@ describe('Sensitive places always ask', () => {
     [LINUX, '/home/me/.config/other'],
     [LINUX, '/home/me/work/ssh/config'],
     [LINUX, '/etc/hosts'],
+    [LINUX, '/home/me/work/app/deploy/id_ed25519.pub'],
+    [LINUX, '/home/me/work/app/src/id_utils.ts'],
+    [LINUX, '/home/me/work/app/src/pem.ts'],
+    [LINUX, '/home/me/work/app/src/keys.ts'],
+    [LINUX, '/home/me/work/app/src/*'],
+    [LINUX, '/home/me/work/app/.envrc.ts'],
+    [LINUX, '/home/me/work/app/src/id_utils/index.ts'],
+    [LINUX, '/home/me/work/app/vendor/server.pem/README.md'],
+    [LINUX, '/home/me/work/app/vendor/api.key/README.md'],
+    [LINUX, '/home/me/work/app/deploy.env/README.md'],
+    [LINUX, '/home/me/work/app/.venv/bin/python'],
     [WINDOWS, 'C:\\work\\app\\src\\env.ts'],
   ] as const)('%# %s is not a sensitive place', (context, path) => {
     expect(sensitivePlace(path, context)).toBeNull()
   })
+
+  test('dist.env, which may be a build’s real environment, is no template', () => {
+    const path = '/home/me/work/app/deploy/dist.env'
+    expect(sensitivePlace(path, LINUX, { reading: true })).toBe('~/work/app/deploy/dist.env')
+  })
+
+  test.each(['example.env', 'app.sample.env', '.env.example'])(
+    'the template %s is read freely, and still asks to be written',
+    (name) => {
+      const path = `/home/me/work/app/deploy/${name}`
+      expect(sensitivePlace(path, LINUX, { reading: true })).toBeNull()
+      expect(sensitivePlace(path, LINUX)).toBe(`~/work/app/deploy/${name}`)
+    },
+  )
 })
 
 describe('A concern says why the call asked', () => {

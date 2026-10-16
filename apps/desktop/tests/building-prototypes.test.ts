@@ -15,12 +15,14 @@ import { linkSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { join } from 'node:path'
 
 import { TOOLS, toolsOf } from '@hemera/core/domain'
+import { AgentAuthor } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { helperRowsOf } from '../src/engine/building/helper-store.ts'
+import { putEvidence } from '../src/engine/memory/evidence.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { judgePrototype } from '../src/engine/planning/prototypes.ts'
 import { sessionsOfLineage } from '../src/engine/sessions/store.ts'
@@ -88,6 +90,10 @@ const helperNumbered = (missionId: string, number: number) =>
   })
 
 const QUESTION = 'Does the invoice list read in two columns on a narrow window?'
+
+/** A value no shape of a credential recognises, in a `.env` a Prototyper left in its folder. */
+const REGION = 'quartz-violet-4471'
+const DOTENV = `ACME_REGION=${REGION}\n`
 
 const RESULT = (file: string) => ({
   tried: 'A two-column invoice list in plain HTML.',
@@ -411,6 +417,79 @@ describe('The Builder reads a frozen prototype’s files, never writes them', ()
     )
     const secret = createHash('sha256').update('not-a-real-key').digest('hex')
     expect(seen.kept.map((row) => row.sha256)).not.toContain(secret)
+  })
+
+  test('a Prototyper that keeps a .env is refused, and nothing of it reaches the evidence', async () => {
+    const { run } = prototyping(1)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          let refused = ''
+          yield* launched(
+            work,
+            () => Effect.void,
+            'The impact.',
+            undefined,
+            undefined,
+            (mission, planner) =>
+              Effect.gen(function* () {
+                yield* call(planner, 'helper_launch', { helper: 'prototyper', brief: QUESTION })
+                const prototyper = yield* helperNumbered(mission.id, 1)
+                writeFileSync(join(prototyper.row.folder ?? '', '.env'), DOTENV)
+                refused = yield* call(prototyper.grantId, 'helper_result', RESULT('.env'))
+                yield* callTool(prototyper.grantId, 'fs_write', {
+                  path: 'list-1.html',
+                  content: '<ul class="prototype-1"></ul>\n',
+                })
+                yield* call(prototyper.grantId, 'helper_result', RESULT('list-1.html'))
+                yield* until(
+                  Effect.map(helperRowsOf(mission.id), (rows) => rows[0]?.state === 'done'),
+                )
+              }),
+          )
+          const database = yield* Database
+          return { refused, kept: yield* database.select().from(memoryEvidence) }
+        }),
+      ),
+    )
+    expect(seen.refused).toMatch(
+      /^refused: \.env is not kept: content withheld: sensitive place: .*\.env$/,
+    )
+    expect(seen.refused).not.toContain(REGION)
+    const secret = createHash('sha256').update(DOTENV).digest('hex')
+    expect(seen.kept.map((row) => row.sha256)).not.toContain(secret)
+    expect(seen.kept.map((row) => row.name)).not.toContain('H1/.env')
+  })
+
+  test('a .env kept by a prototype frozen before the rule is withheld from prototype_read, and none of its lines is printed', async () => {
+    const { run } = prototyping(1)
+    const answer = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* frozenWith(['validated'])
+          const builder = yield* builderOf(mission.id)
+          const [row] = yield* helperRowsOf(mission.id)
+          writeFileSync(join(row?.folder ?? '', '.env'), DOTENV)
+          // Kept as a version before this rule kept it: by its name, beside the prototype's file.
+          yield* putEvidence({
+            missionId: mission.id,
+            content: { text: 'kept before the rule' },
+            name: 'H1/.env',
+            about: 'helper H1',
+            author: AgentAuthor.make({ role: 'prototyper', sessionId: crypto.randomUUID() }),
+          })
+          return yield* callTool(builder.grantId, 'prototype_read', {
+            prototype: 'H1',
+            path: '.env',
+          })
+        }),
+      ),
+    )
+    expect(answer).toMatchObject({ ok: false, refused: true })
+    expect(answer.text).toMatch(/content withheld: sensitive place: .*\.env/)
+    expect(answer.text).not.toContain(REGION)
   })
 
   test('a kept file that has a second name is read, as any read', async () => {

@@ -15,6 +15,7 @@ import { missions } from '../storage/schema.ts'
 import type { Grant } from '../tools/access.ts'
 import { type ToolAnswer, answered, failure, refusal } from '../tools/files.ts'
 import { readJudged } from '../tools/judged.ts'
+import { Withholding } from '../tools/withholding.ts'
 import {
   Evidence,
   Memory,
@@ -167,13 +168,14 @@ export const evidenceAdd = (
   return settled(
     Effect.gen(function* () {
       yield* Memory.use((memory) => Effect.andThen(memory.ready, memory.checkEpoch(caller)))
+      const withholding = yield* Withholding.of(grant)
       const content =
         path === null
           ? { text: args.content ?? '' }
           : {
               bytes: new Uint8Array(
                 yield* Effect.tryPromise({
-                  try: () => readJudged(path, { oneNameFor: 'evidence' }),
+                  try: () => readJudged(path, { oneNameFor: 'evidence', withholding }),
                   catch: (cause) =>
                     new EvidenceRefused({
                       reason: `could not read ${args.path ?? path}: ${cause instanceof Error ? cause.message : String(cause)}`,
