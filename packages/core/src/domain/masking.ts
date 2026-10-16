@@ -252,8 +252,8 @@ const bareEnd = (text: string, at: number, throughEscapes: boolean): number => {
 }
 
 /**
- * Where the value at `at` ends, or -1 when none begins there: between double quotes, between
- * single quotes, or bare, which a quote or a line end cannot begin.
+ * Where the value at `at`, past the spaces after a header's name, ends, or -1 when none begins
+ * there: between double quotes, between single quotes, or bare, which a quote cannot begin.
  */
 const valueEnd = (text: string, at: number, throughEscapes: boolean): number => {
   const first = text.charAt(at)
@@ -262,7 +262,7 @@ const valueEnd = (text: string, at: number, throughEscapes: boolean): number => 
     const closing = text.indexOf("'", at + 1)
     return closing === -1 ? -1 : closing + 1
   }
-  if (first === '' || first === '\r' || first === '\n') return -1
+  if (first === '') return -1
   return bareEnd(text, at, throughEscapes)
 }
 
