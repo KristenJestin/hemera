@@ -302,6 +302,8 @@ const cutForRecord = (secrets: SecretsRegistry, record: Schema.JsonObject) => {
       return Effect.succeed(one)
     }
     if (depth >= NESTING_LIMIT) return Effect.succeed(MASK)
+    // A list or a record costs its brackets: an empty one is walked too.
+    left -= 2
     return isJsonList(one) ? list(one, depth + 1) : fields(one, depth + 1)
   }
   const list = (items: Schema.JsonArray, depth: number) =>

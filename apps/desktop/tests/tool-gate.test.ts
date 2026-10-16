@@ -872,6 +872,26 @@ describe('A large call’s arguments and a large refusal’s diff are masked in 
     expect(took).toBeLessThan(RECORDED_WITHIN)
   })
 
+  test('a call made of 2,000,000 empty records is kept cut, never masked whole', async () => {
+    const { kept, watch } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: Array.from({ length: 2_000_000 }, () => ({})),
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('a call made of 3,000,000 empty lists is kept cut, never masked whole', async () => {
+    const { kept, watch } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: Array.from({ length: 3_000_000 }, () => []),
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
   test('an fs_edit whose new text is a megabyte is kept cut, its head masked in slices', async () => {
     const { kept, watch } = await keptOf('fs_edit', {
       path: 'a.txt',
