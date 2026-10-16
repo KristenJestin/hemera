@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -13,26 +14,15 @@ import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconAlertTriangle,
   IconArrowBackUp,
-  IconArrowUp,
-  IconBolt,
-  IconBrandBitbucket,
-  IconBrandGithub,
   IconCheck,
-  IconChecklist,
   IconChevronRight,
-  IconDeviceDesktop,
   IconGitMerge,
-  IconGitPullRequest,
   IconHandStop,
-  IconListCheck,
   IconLock,
   IconPackage,
   IconPencil,
-  IconPlayerPlay,
   IconPlus,
   IconRefresh,
-  IconTag,
-  IconTerminal,
   IconTrash,
   IconWorld,
 } from '../../icons.ts'
@@ -53,11 +43,21 @@ import {
   STEP_WORDS,
   type StepConfig,
   type StepKind,
-  FORGE_CLI,
   FORGE_WORDS,
   detailOf,
   writesToNetwork,
 } from './delivery-model.ts'
+import { forgeIcon, stepIcon } from './delivery-icons.tsx'
+import {
+  changesOf,
+  changesWords,
+  cliTroubled,
+  cliWords,
+  COMMITS_WORDS,
+  pushWords,
+  reviewersWords,
+  stepWords,
+} from './delivery-words.ts'
 import { Section, SectionRefusal } from './parts.tsx'
 import { FixCommand } from './provider-forms.tsx'
 
@@ -92,63 +92,6 @@ export type DeliveryTarget =
   | { readonly kind: 'cleanup'; readonly id: string }
   | { readonly kind: 'add-cleanup' }
 
-/** The glyph of a step's kind. */
-export function stepIcon(kind: StepKind): ReactNode {
-  switch (kind) {
-    case 'push':
-      return <IconArrowUp size="sm" />
-    case 'pull-request':
-      return <IconGitPullRequest size="sm" />
-    case 'bump':
-      return <IconPackage size="sm" />
-    case 'merge':
-    case 'local-merge':
-      return <IconGitMerge size="sm" />
-    case 'ci':
-      return <IconChecklist size="sm" />
-    case 'remote-action':
-      return <IconPlayerPlay size="sm" />
-    case 'published':
-      return <IconTag size="sm" />
-    case 'command':
-      return <IconTerminal size="sm" />
-    case 'agent':
-      return <IconBolt size="sm" />
-    case 'confirm':
-      return <IconListCheck size="sm" />
-  }
-}
-
-/** The glyph of a forge. */
-export function forgeIcon(forge: Pick<ForgeView, 'kind'>): ReactNode {
-  if (forge.kind === 'github') return <IconBrandGithub size="sm" />
-  if (forge.kind === 'none') return <IconDeviceDesktop size="sm" />
-  return <IconBrandBitbucket size="sm" />
-}
-
-/** Where a forge's command line stands, in a few words. */
-export function cliWords(forge: ForgeView): string {
-  if (forge.kind === 'none') return 'No forge: everything stays on this machine'
-  const cli = FORGE_CLI[forge.kind]
-  switch (forge.cli) {
-    case null:
-      return `Checking ${cli}`
-    case 'ready':
-      return `${cli} is ready`
-    case 'missing':
-      return `${cli} is not installed`
-    case 'signed-out':
-      return `${cli} is signed out of ${forge.host}`
-    case 'unreachable':
-      return `${forge.host} cannot be reached`
-  }
-}
-
-/** Whether a forge's command line keeps the forge's steps waiting. */
-export function cliTroubled(forge: ForgeView): boolean {
-  return forge.kind !== 'none' && forge.cli !== null && forge.cli !== 'ready'
-}
-
 const CLI_TONE: Record<CliState, string> = {
   ready: 'text-success',
   missing: 'text-warning',
@@ -180,17 +123,6 @@ export function CliGlyph({
       {plain ? glyph : <Legend label={cliWords(forge)}>{glyph}</Legend>}
     </span>
   )
-}
-
-/** How many things a repository changes of its preset. */
-export function changesOf(repository: Pick<DeliveryRepository, 'steps'>): number {
-  return repository.steps.filter((one) => one.origin !== 'preset').length
-}
-
-/** What a repository's line says of its changes. */
-function changesWords(count: number): string {
-  if (count === 0) return 'as the preset'
-  return count === 1 ? '1 change' : `${String(count)} changes`
 }
 
 /** The repositories a repository waits for, accepted dependencies only. */
@@ -302,27 +234,6 @@ function Refused({
   )
 }
 
-/** Where the push and the pull requests stand, in words. */
-export function pushWords(rules: Pick<PullRequestRules, 'placement' | 'start'>): string {
-  const when = rules.placement === 'review' ? 'When Review starts' : 'After Ship, in each wave'
-  return `${when} · ${rules.start === 'auto' ? 'on its own' : 'waits for your click'}`
-}
-
-/** Who commits, in words. */
-export const COMMITS_WORDS: Record<PullRequestRules['commits'], string> = {
-  task: 'Hemera, after each verified task',
-  agent: 'The agent, as it works',
-  push: 'Hemera, once, at the push',
-}
-
-/** The reviewers, in words: the first two, and how many more. */
-export function reviewersWords(rules: Pick<PullRequestRules, 'reviewers'>): string {
-  const names = rules.reviewers.map((one) => one.name ?? one.handle)
-  if (names.length === 0) return 'Nobody'
-  if (names.length <= 2) return names.join(', ')
-  return `${names.slice(0, 2).join(', ')} and ${String(names.length - 2)} more`
-}
-
 /** The first line of a template, and how many lines follow it. */
 function firstLine(template: string): string {
   const lines = template.split('\n')
@@ -404,25 +315,6 @@ function PullRequests({
       </ul>
     </Frame>
   )
-}
-
-/** The words of a step for a screen reader: everything its line shows. */
-export function stepWords(
-  recipe: RecipeStep,
-  repository: Pick<DeliveryRepository, 'remote' | 'base'>,
-): string {
-  const { step, origin } = recipe
-  return [
-    STEP_WORDS[step.config.kind],
-    detailOf(step.config, repository),
-    origin === 'changed' ? 'changed here' : null,
-    origin === 'added' ? 'added here' : null,
-    origin === 'omitted' ? 'left out here' : null,
-    step.start === 'click' ? 'waits for your click' : null,
-    writesToNetwork(step.config) ? 'may write to the network' : null,
-  ]
-    .filter((part) => part !== null)
-    .join(', ')
 }
 
 function StepRow({
@@ -644,7 +536,8 @@ export function RepositoryRow({
   const changes = changesOf(repository)
   const early = (kind: StepKind): boolean => kind === 'push' || kind === 'pull-request'
   const review = inReview ? repository.steps.filter((one) => early(one.step.config.kind)) : []
-  const waves = repository.steps.filter((one) => !review.includes(one))
+  const inReviewSteps = new Set(review)
+  const waves = repository.steps.filter((one) => !inReviewSteps.has(one))
   const row = (one: RecipeStep): ReactNode => (
     <StepRow
       key={one.step.id}
@@ -874,6 +767,8 @@ function Waves({
 }): ReactNode {
   const folding = useTransition(fold)
   const byPath = new Map(rules.repositories.map((one) => [one.path, one]))
+  const opened = new Set(initiallyOpen)
+  const busy = new Set(checking)
   // A cycle leaves no order: the repositories stand in one list, under the refusal that says why.
   const waves = refusals.dependencies === undefined ? rules.waves : null
   const groups =
@@ -906,8 +801,8 @@ function Waves({
                   repository={repository}
                   after={upstreamOf(path, rules.dependencies)}
                   inReview={rules.pullRequests.placement === 'review'}
-                  initiallyOpen={initiallyOpen.includes(path)}
-                  checking={checking.includes(path)}
+                  initiallyOpen={opened.has(path)}
+                  checking={busy.has(path)}
                   onOpen={onOpen}
                   onPreset={(preset) => onPreset(path, preset)}
                   onPutBack={(id) => onPutBack(path, id)}
