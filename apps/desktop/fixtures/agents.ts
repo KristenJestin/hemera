@@ -37,21 +37,23 @@ export const READS_COLD: FakeScript = {
   steps: [says('Read.')],
 }
 
-/** The fake agents, the one listed as the suite's, each playing its script in the start order. */
+/** The script of each role a group's agents play; every other one is quiet. */
+export type RoleScripts = Readonly<Partial<Record<string, FakeScript>>>
+
+/**
+ * The fake agents, the one listed as the suite's, each playing the script of its session's role:
+ * `roleOf` reads it, once the engine has recorded the session it starts the agent for.
+ */
 export function scriptedAgents(
   fakes: SuiteAgent,
-  scriptOf: (index: number) => FakeScript,
+  scripts: RoleScripts,
+  roleOf: (sessionId: string) => Effect.Effect<string | null>,
 ): SuiteAgent['sessions'] {
-  let started = 0
   return {
     discovery: fakes.sessions.discovery,
     starter: Layer.succeed(AgentStarter, {
-      start: () =>
-        Effect.sync(() => {
-          const script = scriptOf(started)
-          started += 1
-          return fakeAgent(script).process
-        }),
+      start: (_resolved, _environment, sessionId) =>
+        Effect.map(roleOf(sessionId), (role) => fakeAgent(scripts[role ?? ''] ?? QUIET).process),
     }),
   }
 }
@@ -71,13 +73,17 @@ const testLine = (path: string) => `node --test --test-reporter=tap ${path}`
 
 /** R1.S1's proof: red until `src/export.js` writes one line per invoice. */
 export const EXPORT_TEST_PATH = 'tests/export.test.js'
-const EXPORT_TEST = `import { test } from 'node:test'
+/** How long R1.S1's slow green runs: long enough to close Hemera while it does. */
+export const SLOW_GREEN_SECONDS = 90
+
+/** R1.S1's test; a slow one waits before its assertions, once there is a toCsv to judge. */
+const exportTest = (slow: boolean) => `import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 test('the invoices of a month export as one line each', async () => {
   const exported = await import('../src/export.js').catch(() => ({}))
   assert.equal(typeof exported.toCsv, 'function', 'src/export.js has no toCsv yet')
-  assert.equal(exported.toCsv([{ number: 'A1', lines: [] }]).split('\\n').length, 2)
+${slow ? `  // A long export of a year of invoices.\n  await new Promise((done) => setTimeout(done, ${String(SLOW_GREEN_SECONDS * 1000)}))\n` : ''}  assert.equal(exported.toCsv([{ number: 'A1', lines: [] }]).split('\\n').length, 2)
 })
 `
 
@@ -99,7 +105,7 @@ test('an amount printed as 21.00 reads back as 2100 cents', () => {
  * sections, one requirement with two scenarios, each with an automated proof red at the base, one
  * task per scenario, a model for Building) and declares it complete, as a real Planner does over its first turn.
  */
-export const PLANS_THE_EXPORT: FakeScript = {
+export const plansTheExport = (slowGreen: boolean): FakeScript => ({
   turns: [
     [
       ...SPEC_SECTIONS.map((section) =>
@@ -135,7 +141,7 @@ export const PLANS_THE_EXPORT: FakeScript = {
           test: {
             repository: 'api',
             path: EXPORT_TEST_PATH,
-            code: EXPORT_TEST,
+            code: exportTest(slowGreen),
             insertion: 'new_file',
             command: testLine(EXPORT_TEST_PATH),
           },
@@ -192,7 +198,9 @@ export const PLANS_THE_EXPORT: FakeScript = {
     ],
   ],
   steps: [says('Noted.')],
-}
+})
+
+export const PLANS_THE_EXPORT = plansTheExport(false)
 
 /** What stays readable around the key in each place it is put: the tests find each one. */
 export const MASKING_PLACES = [
@@ -252,4 +260,54 @@ export const LEAKS_THE_KEY: FakeScript = {
     ],
   ],
   steps: [says('Noted.')],
+}
+
+/** The documenter's pass: nothing the export changes is described to the README's readers. */
+export const DOCUMENTS: FakeScript = {
+  turns: [
+    [
+      uses('toolu_docs', 'docs_report', {
+        changed: [],
+        no_change_reason:
+          'The README says how to run the tests; the export changes nothing it says.',
+      }),
+      says('Nothing to document.'),
+    ],
+  ],
+  steps: [says('Nothing more to document.')],
+}
+
+/** The spec reviewer's pass: the result does what the Spec says. */
+export const REVIEWS_THE_SPEC: FakeScript = {
+  turns: [[uses('toolu_review', 'review_report', { findings: [] }), says('Reviewed.')]],
+  steps: [says('Reviewed.')],
+}
+
+/** The two findings of the code reviewer, each the Spec's way: they become RV1 and RV2. */
+export const CODE_FINDINGS = [
+  {
+    severity: 'warning',
+    repository: 'api',
+    path: 'src/export.js',
+    line: 5,
+    text: 'An invoice number holding a comma breaks its line: quote the number.',
+    contradicts_spec: false,
+    evidence: 'src/export.js writes the number as it is, between commas.',
+  },
+  {
+    severity: 'suggestion',
+    repository: 'api',
+    path: 'src/invoices.js',
+    text: 'toCents reads "abc" as NaN without a word: refuse what is not an amount.',
+    contradicts_spec: false,
+    evidence: 'src/invoices.js returns Math.round(Number(printed) * 100) for any text.',
+  },
+]
+
+/** The code reviewer's pass: two findings. */
+export const REVIEWS_THE_CODE: FakeScript = {
+  turns: [
+    [uses('toolu_review', 'review_report', { findings: CODE_FINDINGS }), says('Two findings.')],
+  ],
+  steps: [says('Reviewed.')],
 }

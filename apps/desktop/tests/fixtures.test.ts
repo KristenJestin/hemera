@@ -9,11 +9,13 @@ import { join } from 'node:path'
 import { Effect, Predicate, Result } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
-import { MASKING_PLACES } from '../fixtures/agents.ts'
+import { EXPORT_TEST_PATH, MASKING_PLACES } from '../fixtures/agents.ts'
 import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
+import { reached } from '../fixtures/missions.ts'
 import { FAKE_PAYMENTS_KEY } from '../fixtures/larkspur.ts'
 import { chatsOf, transcriptOf } from '../src/engine/chat/store.ts'
 import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
+import { buildingOf } from '../src/engine/building/builder.ts'
 import { proofsRead } from '../src/engine/building/proofs.ts'
 import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
 import { freezeReadiness } from '../src/engine/planning/freeze.ts'
@@ -23,6 +25,7 @@ import { listMissions } from '../src/engine/missions.ts'
 import { listNeeds } from '../src/engine/needs.ts'
 import { listProjects } from '../src/engine/projects.ts'
 import { listRuns, runOutput } from '../src/engine/runs.ts'
+import { listWorkspaces } from '../src/engine/workspaces.ts'
 import { listVariables, revealVariable } from '../src/engine/variables.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { git } from './repositories.ts'
@@ -296,6 +299,76 @@ describe('The mission groups reach their state through the engine, with scripted
       expect(shown.split('•••').length - 1).toBeGreaterThanOrEqual(MASKING_PLACES.length)
     }
   }, 120_000)
+
+  test('review-findings: Review with findings RV1, RV2 and a special task', async () => {
+    const { root } = places()
+    const fixture = await built('review-findings', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        return { mission, building: yield* buildingOf(mission.id) }
+      }),
+    )
+    expect(seen.mission.stage).toBe('review')
+    const special = (seen.building?.tasks ?? []).filter((task) => task.id.startsWith('RV'))
+    expect(special.map((task) => [task.id, task.state])).toEqual([
+      ['RV1', 'done'],
+      ['RV2', 'done'],
+    ])
+  }, 180_000)
+
+  test('exit-during-run: a proof run going on when the application closes, to test the exit and the restart', async () => {
+    const { root } = places()
+    const fixture = await built('exit-during-run', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        const [workspace] = yield* listWorkspaces(mission.projectId)
+        return {
+          mission,
+          proofs: yield* proofsRead(mission.id),
+          runs: yield* listRuns(mission.projectId, workspace?.id ?? null),
+        }
+      }),
+    )
+    expect(seen.mission.stage).toBe('building')
+    // The green of R1.S1 was going when the engine closed: cut, and not recorded.
+    const s1 = seen.proofs?.scenarios.find((one) => one.scenario === 'R1.S1')
+    expect(s1?.state).toBe('red_recorded')
+    expect(s1?.runs.map((run) => run.phase)).toEqual(['red'])
+    const cut = seen.runs.filter(
+      (run) => run.line.includes(EXPORT_TEST_PATH) && run.state !== 'failed',
+    )
+    expect(cut.map((run) => run.state)).toEqual([expect.stringMatching(/^(stopped|interrupted)$/)])
+    // Opened again, the engine runs that green again at its start.
+    const again = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        const [workspace] = yield* listWorkspaces(mission.projectId)
+        const running = Effect.map(listRuns(mission.projectId, workspace?.id ?? null), (runs) =>
+          runs.filter((run) => run.line.includes(EXPORT_TEST_PATH) && run.state === 'running'),
+        )
+        yield* reached(
+          'the green running again',
+          Effect.map(running, (runs) => runs.length > 0),
+        )
+        return yield* running
+      }),
+    )
+    expect(again).toHaveLength(1)
+  }, 120_000)
+
+  test('ended: listed with its state, and refused while no service reaches Done', async () => {
+    const { root } = places()
+    const ended = FIXTURE_GROUPS.find((group) => group.name === 'ended')
+    expect(ended?.notYet).toMatch(/Done/)
+    expect(fixtureList()).toContain(`not built yet: ${ended?.notYet ?? ''}`)
+    await expect(built('ended', root)).rejects.toThrow(/ended cannot be built yet/)
+    expect(existsSync(root)).toBe(false)
+  })
 
   test('cancelled: a planned mission the user cancelled', async () => {
     const { root } = places()

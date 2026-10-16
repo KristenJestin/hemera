@@ -19,9 +19,10 @@ import { Effect, Match, Result, Schema, SubscriptionRef } from 'effect'
 import { suiteAgent } from '../src/engine/agents/suite-agent.ts'
 import { startProfile } from '../src/engine/profile.ts'
 import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from '../src/engine/registries.ts'
+import { getSession } from '../src/engine/sessions/store.ts'
 import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
 import { fakeForge, ghSignedOut } from '../tests/fake-forge.ts'
-import { QUIET, scriptedAgents } from './agents.ts'
+import { scriptedAgents } from './agents.ts'
 import { fixtureGit } from './git.ts'
 import { FIXTURE_GROUPS, type FixtureGroup } from './groups.ts'
 
@@ -53,7 +54,10 @@ export function machineProfiles(): ReadonlyArray<string> {
 
 /** The list `pnpm fixtures --list` prints: each group, and what to test once it is open. */
 export const fixtureList = (): string =>
-  FIXTURE_GROUPS.map((group) => `${group.name}\n  ${group.look}\n`).join('\n')
+  FIXTURE_GROUPS.map(
+    (group) =>
+      `${group.name}\n  ${group.look}\n${group.notYet === undefined ? '' : `  (not built yet: ${group.notYet})\n`}`,
+  ).join('\n')
 
 export interface BuiltFixture {
   /** The fixture's folder, which carries the marker. */
@@ -108,6 +112,8 @@ const buildState = (
   Effect.scoped(
     Effect.gen(function* () {
       const fakes = yield* suiteAgent
+      // The role of the session an agent is started for, read once the Profile is open.
+      let roleOf = (_sessionId: string): Effect.Effect<string | null> => Effect.succeed(null)
       const started = yield* startProfile(
         { dataFolder: profile, version: VERSION, migrations: MIGRATIONS },
         {
@@ -116,7 +122,7 @@ const buildState = (
           gh: { path: env['PATH'] ?? '', env },
           forge: { env },
           sessions: {
-            ...scriptedAgents(fakes, group.agents ?? (() => QUIET)),
+            ...scriptedAgents(fakes, group.scripts ?? {}, (sessionId) => roleOf(sessionId)),
             // A new mission starts its Planner on its own, as in the application.
             plannerStarts: true,
           },
@@ -124,6 +130,11 @@ const buildState = (
         },
         log,
       )
+      roleOf = (sessionId) =>
+        started.use(getSession(sessionId)).pipe(
+          Effect.map((session) => session.role),
+          Effect.orElseSucceed(() => null),
+        )
       const database = yield* SubscriptionRef.get(started.database)
       if (Schema.is(DatabaseRefused)(database)) {
         return yield* Effect.die(
@@ -140,6 +151,9 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
     throw new Error(
       `There is no fixture group named ${asked.group}: pnpm fixtures --list names them.`,
     )
+  }
+  if (group.notYet !== undefined) {
+    throw new Error(`${group.name} cannot be built yet: ${group.notYet}`)
   }
   const normalProfiles = asked.normalProfiles ?? machineProfiles()
   const folder = join(asked.root, group.name)
