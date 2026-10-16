@@ -29,7 +29,6 @@ import { join } from 'node:path'
 import {
   MASK,
   HELPER_DEPTH,
-  type Masked,
   ROLE_NAMES,
   ROLE_PLACES,
   ROOT_REPOSITORY,
@@ -57,7 +56,7 @@ import type { DomainEvents } from '../domain-events.ts'
 import { getProject } from '../projects.ts'
 import { evidenceRead, reviewHeld } from '../review/gate.ts'
 import type { RunServices } from '../runs.ts'
-import { Secrets, type SecretsRegistry } from '../secrets.ts'
+import { Secrets, type SecretsRegistry, maskedHead } from '../secrets.ts'
 import { refusedWhile } from '../storage/database.ts'
 import type { Database } from '../storage/database.ts'
 import { toolCalls } from '../storage/schema.ts'
@@ -245,6 +244,7 @@ const REASON_KEPT = 500
 const ARGUMENTS_KEPT = 2000
 
 const readArgumentFields = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
+const readArgumentList = Schema.decodeUnknownOption(Schema.Array(Schema.Json))
 const readProposedChanges = Schema.decodeUnknownOption(
   Schema.Struct({ changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)) }),
 )
@@ -270,21 +270,47 @@ const withoutProposedValues = (tool: string, args: Schema.Json): Schema.Json =>
         }),
       })
 
-/** A call's arguments as its record keeps them: masked whole, then cut. */
-const argumentsKept = (
-  secrets: SecretsRegistry,
-  tool: string,
-  given: Schema.Json,
-): Masked<string> => {
-  const args = withoutProposedValues(tool, given)
-  const masked = Option.match(readArgumentFields(args), {
-    onNone: () => secrets.mask(agentText(args)),
-    onSome: (fields) => maskedJson(secrets.maskArguments(fields)),
-  })
-  return masked.length > ARGUMENTS_KEPT
-    ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
-    : masked
+/** A value of a call's arguments with each string longer than a record keeps as its masked head. */
+const headsOf = (secrets: SecretsRegistry, value: Schema.Json): Effect.Effect<Schema.Json> => {
+  if (Predicate.isString(value)) {
+    return value.length <= ARGUMENTS_KEPT
+      ? Effect.succeed(value)
+      : maskedHead(secrets, value, ARGUMENTS_KEPT)
+  }
+  const list = readArgumentList(value)
+  if (Option.isSome(list)) return Effect.forEach(list.value, (item) => headsOf(secrets, item))
+  const record = readArgumentFields(value)
+  return Option.isSome(record) ? headsIn(secrets, record.value) : Effect.succeed(value)
 }
+
+/** The fields of a record, each as `headsOf` keeps it. */
+const headsIn = (
+  secrets: SecretsRegistry,
+  record: Schema.JsonObject,
+): Effect.Effect<Schema.JsonObject> =>
+  Effect.map(
+    Effect.forEach(Object.entries(record), ([name, value]) =>
+      Effect.map(headsOf(secrets, value), (head): [string, Schema.Json] => [name, head]),
+    ),
+    (fields) => Object.fromEntries(fields),
+  )
+
+/**
+ * A call's arguments as its record keeps them: masked, then cut. A string longer than what is kept
+ * is masked by its head only (`maskedHead`), in slices: a request of 16 MiB is never masked whole,
+ * at once, for the 2,000 characters a record holds of it (#392).
+ */
+const argumentsKept = (secrets: SecretsRegistry, tool: string, given: Schema.Json) =>
+  Effect.gen(function* () {
+    const args = withoutProposedValues(tool, given)
+    const fields = readArgumentFields(args)
+    const masked = Option.isNone(fields)
+      ? yield* maskedHead(secrets, agentText(args), ARGUMENTS_KEPT + 1)
+      : maskedJson(secrets.maskArguments(yield* headsIn(secrets, fields.value)))
+    return masked.length > ARGUMENTS_KEPT
+      ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
+      : masked
+  })
 
 /** A call decoded, its tool and its arguments read by that tool's schema. */
 type Decoded = {
@@ -575,6 +601,7 @@ export const toolGateLayer = (settings: GateSettings) =>
         Effect.gen(function* () {
           const secrets = yield* Secrets
           const outcome = answer.ok ? 'done' : answer.refused ? 'refused' : 'failed'
+          const kept = args === null ? null : yield* argumentsKept(secrets, tool, args)
           yield* mutate('recording a tool call', (transaction) =>
             transaction
               .insert(toolCalls)
@@ -590,7 +617,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                 verdictBy: noted.verdictBy,
                 outcome,
                 reason: answer.ok ? null : secrets.mask(answer.text.slice(0, REASON_KEPT)),
-                arguments: args === null ? null : argumentsKept(secrets, tool, args),
+                arguments: kept,
                 callKey,
                 durationMs: Math.round(performance.now() - began),
                 calledAt: new Date().toISOString(),

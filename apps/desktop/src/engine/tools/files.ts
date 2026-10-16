@@ -27,7 +27,7 @@ import {
 import { and, eq } from 'drizzle-orm'
 import { Effect, Predicate, Result } from 'effect'
 
-import { Secrets } from '../secrets.ts'
+import { Secrets, type SecretsRegistry, maskedHead } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { sessionFiles } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
@@ -69,6 +69,9 @@ const KEPT_PER_SESSION = 32
 
 /** How many lines a diff in a refusal shows. */
 const DIFF_LINES = 20
+
+/** How much of one line a diff in a refusal shows: a minified line can be the whole file. */
+const DIFF_LINE_CHARS = 400
 
 /**
  * The versions a session read, kept in memory only to show what changed when a write is refused:
@@ -388,8 +391,12 @@ export async function replaceFile(path: string, content: string): Promise<void> 
   }
 }
 
-/** The lines that differ between two versions, at most `DIFF_LINES`, masked. */
-const diffOf = (before: string, after: string, mask: (text: string) => string): string => {
+/**
+ * The lines that differ between two versions, at most `DIFF_LINES` of at most `DIFF_LINE_CHARS`
+ * each, masked in slices: a longer line is cut to its masked head (`maskedHead`), never masked
+ * whole, and the lines are masked again together, where a credential may span them.
+ */
+const diffOf = (before: string, after: string, secrets: SecretsRegistry) => {
   const old = before.split('\n')
   const now = after.split('\n')
   let start = 0
@@ -414,7 +421,14 @@ const diffOf = (before: string, after: string, mask: (text: string) => string): 
           `… ${String(lines.length - DIFF_LINES - 1)} more line(s)`,
         ]
       : lines
-  return mask(shownLines.join('\n'))
+  return Effect.gen(function* () {
+    const heads = yield* Effect.forEach(shownLines, (line) =>
+      line.length <= DIFF_LINE_CHARS
+        ? Effect.succeed(line)
+        : Effect.map(maskedHead(secrets, line, DIFF_LINE_CHARS), (head) => `${head}…`),
+    )
+    return yield* secrets.maskPaced(heads.join('\n'))
+  })
 }
 
 /**
@@ -445,7 +459,7 @@ const versionRefusal = (
     const change =
       before === undefined || current.text === null
         ? 'The version it read is no longer kept, so what changed cannot be shown.'
-        : `What changed:\n${diffOf(before, current.text, secrets.mask)}`
+        : `What changed:\n${yield* diffOf(before, current.text, secrets)}`
     return refusal(
       `refused: ${call.named} changed since this session read it; read it again before writing. ${change}`,
     )

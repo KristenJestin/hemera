@@ -36,6 +36,7 @@ import { ToolAccess } from '../src/engine/tools/index.ts'
 import { SensitivePlaces, Verdicts } from '../src/engine/tools/ports.ts'
 import { commandsEngine, nodeLine, script } from './commands-engine.ts'
 import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
+import { watchedSecrets } from './paced-masking.ts'
 import { acmeIn, sessionsEngine, until, within } from './sessions-world.ts'
 import { endChild, holdFile, removeFolders, temporaryFolder } from './storage.ts'
 import {
@@ -781,6 +782,62 @@ describe('A call’s arguments are kept masked as JSON (#397)', () => {
     )
     expect(calls).toHaveLength(1)
     expectMaskedJson(calls[0]?.arguments)
+  })
+})
+
+describe('A large call’s arguments and a large refusal’s diff are masked in slices (#392)', () => {
+  /** A value no shape of a credential recognises, kept by the user as a secret. */
+  const VALUE = 'violet-heron-5521-quartz'
+
+  test('a call whose arguments are a megabyte is kept cut and masked in slices, with nothing of a known value, even one the cut falls in', async () => {
+    const { secrets, watch } = watchedSecrets((real) => real.register('suite', [VALUE]))
+    const verdicts = verdictsSaying(() => ALLOW)
+    // The value straddles where the record cuts the arguments, and again far past it.
+    const content = `${'x'.repeat(1985)}${VALUE}${'y'.repeat(1024 * 1024)}${VALUE}`
+    const calls = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', { path: 'big.txt', content })
+            return yield* callsOf(builder.sessionId)
+          }),
+        ),
+    )
+    const kept = calls[0]?.arguments ?? ''
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('xxxx')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('a write refused because the file changed shows the head of a megabyte-long changed line, masked in slices, and not the rest of it', async () => {
+    const { secrets, watch } = watchedSecrets((real) => real.register('suite', [VALUE]))
+    const verdicts = verdictsSaying(() => ALLOW)
+    const minified = `${'a'.repeat(100)}${VALUE}${'b'.repeat(1024 * 1024)}`
+    const refused = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', { path: 'bundle.js', content: 'one\n' })
+            // A build rewrites the file beside the session: one line of a megabyte.
+            writeFileSync(join(main, 'bundle.js'), `${minified}\n`)
+            return yield* callTool(builder.grantId, 'fs_write', {
+              path: 'bundle.js',
+              content: 'two\n',
+            })
+          }),
+        ),
+    )
+    expect(refused).toMatchObject({ ok: false, refused: true })
+    expect(refused.text).toContain('What changed:')
+    expect(refused.text).toContain(`+ ${'a'.repeat(100)}•••bbb`)
+    expect(refused.text).not.toContain(VALUE.slice(0, 6))
+    expect(refused.text.length).toBeLessThan(10_000)
+    expect(watch.syncOnLarge).toBe(0)
   })
 })
 

@@ -42,11 +42,22 @@ export function watchedSecrets(register: (secrets: SecretsRegistry) => void) {
             watch.pacedTurns.push(turns.count)
             return masked
           })
+  /** A record as large as a large text is masked whole at once, as a large text is. */
+  const large = (record: Parameters<SecretsRegistry['maskRecord']>[0]) =>
+    JSON.stringify(record).length >= LARGE_TEXT
   const secrets: SecretsRegistry = {
     ...real,
     mask: (text) => {
       if (text.length >= LARGE_TEXT) watch.syncOnLarge += 1
       return real.mask(text)
+    },
+    maskRecord: (record) => {
+      if (large(record)) watch.syncOnLarge += 1
+      return real.maskRecord(record)
+    },
+    maskArguments: (record) => {
+      if (large(record)) watch.syncOnLarge += 1
+      return real.maskArguments(record)
     },
     maskPaced: paced(real.maskPaced),
     maskPrinted: paced(real.maskPrinted),

@@ -20,7 +20,7 @@ import { createMission } from '../src/engine/missions.ts'
 import { getNeed, requestFromAgent } from '../src/engine/needs.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { awaitRun, runOutput, startRun } from '../src/engine/runs.ts'
-import { secretWorthy, secretsRegistry } from '../src/engine/secrets.ts'
+import { maskedHead, secretWorthy, secretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { commandRuns, needs } from '../src/engine/storage/schema.ts'
 import { removeVariable, setVariable } from '../src/engine/variables.ts'
@@ -98,6 +98,31 @@ describe('The registry masks what is registered, and only while it is', () => {
     secrets.register('project-variables:acme', ['first-value'])
     secrets.register('project-variables:acme', ['second-value'])
     expect(secrets.values()).toEqual(['second-value'])
+  })
+})
+
+describe('The head of a long text is masked without masking the whole of it (#392)', () => {
+  const VALUE = 'violet-heron-5521-quartz'
+
+  test('a value the cut splits in two is never kept in clear, even when the values masked before it shorten the head', async () => {
+    const secrets = secretsRegistry()
+    secrets.register('suite', [VALUE])
+    // Each value masked shortens the head, so what the cut split moves within what is kept.
+    const text = `${VALUE} `.repeat(100_000)
+    const head = await Effect.runPromise(maskedHead(secrets, text, 2000))
+    expect(head).not.toContain('violet')
+    expect(head.length).toBeLessThanOrEqual(2000)
+  })
+
+  test('a short text is masked whole, and a long one keeps the head it asked for, masked', async () => {
+    const secrets = secretsRegistry()
+    secrets.register('suite', [VALUE])
+    const short = await Effect.runPromise(maskedHead(secrets, `key ${VALUE}`, 2000))
+    expect(short).toBe(`key ${MASK}`)
+    const long = await Effect.runPromise(
+      maskedHead(secrets, `key ${VALUE} ${'x'.repeat(1024 * 1024)}`, 100),
+    )
+    expect(long).toBe(`key ${MASK} ${'x'.repeat(100 - `key ${MASK} `.length)}`)
   })
 })
 
