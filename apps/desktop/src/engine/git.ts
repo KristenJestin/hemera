@@ -20,7 +20,17 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -28,6 +38,7 @@ import { type DirtyStatus, type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
 import { Context, Effect, Layer, Option } from 'effect'
 
+import { readRegular } from './tools/judged.ts'
 import { outsideTransaction } from './transaction.ts'
 
 /** A read (status, rev-parse, remote, the fetch of one branch, log), or work on the tree. */
@@ -232,6 +243,16 @@ export interface WorktreeChange {
   readonly status: 'new' | 'modified' | 'deleted'
 }
 
+/**
+ * A worktree a repository made, by the folders Git keeps it in: its administrative folder in the
+ * repository (`<common>/worktrees/<id>`) and its work tree, both real paths. A command given both
+ * explicitly never reads the worktree's `.git`, which whoever works in it can rewrite.
+ */
+export interface OwnWorktree {
+  readonly gitDir: string
+  readonly workTree: string
+}
+
 /** A file of a checkout that differs from its HEAD, with how (#92, CT-23). */
 export interface DirtyFile {
   readonly path: string
@@ -306,7 +327,27 @@ export interface GitService {
   readonly worktreeChanges: (
     folder: string,
     commit: string,
+    own?: OwnWorktree,
   ) => Effect.Effect<ReadonlyArray<WorktreeChange>, GitRefusal>
+  /**
+   * The worktree at `worktree` as `source` made it, or null when it is no longer one: its `.git`
+   * must be a file leading to an administrative folder of `source`'s, which leads back to it.
+   */
+  readonly worktreeOwn: (
+    source: string,
+    worktree: string,
+  ) => Effect.Effect<OwnWorktree | null, GitRefusal>
+  /**
+   * The patch of one file of a worktree against a commit, its new side the bytes given (what was
+   * read of it through a proven handle) rather than whatever the worktree holds by then: Git runs
+   * on the worktree's own folders, over a scratch work tree holding only those bytes.
+   */
+  readonly patchOf: (
+    own: OwnWorktree,
+    commit: string,
+    path: string,
+    after: { readonly bytes: Uint8Array; readonly executable: boolean },
+  ) => Effect.Effect<string, GitRefusal>
   /**
    * Each file that differs between two commits of a repository, renames as a removal and an
    * addition: its path, Git's status letter, and the lines added and removed (null for a binary
@@ -654,11 +695,12 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
       run(folder, ['worktree', 'remove', '--force', '--force', path], 'work').pipe(Effect.asVoid),
     branchDeleteAt: (folder, branch, commit) =>
       run(folder, ['update-ref', '-d', `refs/heads/${branch}`, commit], 'work').pipe(Effect.asVoid),
-    worktreeChanges: (folder, commit) =>
+    worktreeChanges: (folder, commit, own) =>
       Effect.all([
         run(
-          folder,
+          own?.workTree ?? folder,
           [
+            ...explicitly(own),
             '--no-optional-locks',
             'diff',
             '--name-status',
@@ -671,11 +713,54 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
           'read',
         ),
         run(
-          folder,
-          ['--no-optional-locks', 'ls-files', '--others', '--exclude-standard', '-z'],
+          own?.workTree ?? folder,
+          [
+            ...explicitly(own),
+            '--no-optional-locks',
+            'ls-files',
+            '--others',
+            '--exclude-standard',
+            '-z',
+          ],
           'read',
         ),
       ]).pipe(Effect.map(([diffed, untracked]) => worktreeChangesOf(diffed, untracked))),
+    worktreeOwn: (source, worktree) =>
+      run(source, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read').pipe(
+        Effect.flatMap((printed) =>
+          Effect.promise(() => ownWorktree(printed.trim(), worktree).catch(() => null)),
+        ),
+      ),
+    patchOf: (own, commit, path, after) =>
+      withScratch((scratch) =>
+        Effect.suspend(() => {
+          const file = join(scratch, path)
+          mkdirSync(dirname(file), { recursive: true })
+          writeFileSync(file, after.bytes)
+          if (after.executable) chmodSync(file, 0o755)
+          return run(
+            scratch,
+            [
+              '--git-dir',
+              own.gitDir,
+              '--work-tree',
+              scratch,
+              '--no-optional-locks',
+              'diff',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--src-prefix=a/',
+              '--dst-prefix=b/',
+              '--end-of-options',
+              commit,
+              '--',
+              path,
+            ],
+            'read',
+          )
+        }),
+      ),
     changesBetween: (folder, from, to) =>
       Effect.all([
         run(
@@ -970,6 +1055,58 @@ function withEndingsOf(ours: string, merged: string): string {
   })
   return `${ended.join('')}${last}`
 }
+
+/** The folders of a worktree given to Git explicitly, when they are known. */
+const explicitly = (own: OwnWorktree | undefined): ReadonlyArray<string> =>
+  own === undefined ? [] : ['--git-dir', own.gitDir, '--work-tree', own.workTree]
+
+/** A real path, or null when there is nothing there. */
+const realOrNull = (path: string): string | null => {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The path a file of Git's names, resolved from the folder holding it: a worktree's `.git` says
+ * `gitdir: <path>`, its administrative folder's `gitdir` the path alone. Only a regular file is
+ * read, opened without waiting.
+ */
+const pathIn = async (file: string, prefix: string): Promise<string | null> => {
+  const stat = lstatSync(file, { throwIfNoEntry: false })
+  if (stat?.isFile() !== true) return null
+  const said = (await readRegular(file)).toString('utf8').replace(/\r?\n$/, '')
+  if (!said.startsWith(prefix) || said.length === prefix.length) return null
+  return resolve(dirname(file), said.slice(prefix.length))
+}
+
+/**
+ * The worktree at `worktree` as the repository whose common folder is `common` made it: its
+ * `.git` leads to an administrative folder under `<common>/worktrees/`, whose own `gitdir` leads
+ * back to that `.git`. Anything else (a `.git` leading to another repository, a `.git` folder, a
+ * link) is no longer that worktree.
+ */
+async function ownWorktree(common: string, worktree: string): Promise<OwnWorktree | null> {
+  const workTree = realOrNull(worktree)
+  const admins = realOrNull(join(common, 'worktrees'))
+  if (workTree === null || admins === null) return null
+  const named = await pathIn(join(worktree, '.git'), 'gitdir: ')
+  const gitDir = named === null ? null : realOrNull(named)
+  if (gitDir === null || dirname(gitDir) !== admins) return null
+  const back = await pathIn(join(gitDir, 'gitdir'), '')
+  const backTree = back === null ? null : realOrNull(dirname(back))
+  return backTree === workTree ? { gitDir, workTree } : null
+}
+
+/** A scratch folder for the time of a use, then removed. */
+const withScratch = <A, E>(use: (scratch: string) => Effect.Effect<A, E>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => mkdtempSync(join(tmpdir(), 'hemera-scratch-'))),
+    use,
+    (scratch) => Effect.sync(() => rmSync(scratch, { recursive: true, force: true })),
+  )
 
 /** A patch written to a scratch file for the time of a use, then removed. */
 const withPatchFile = <A, E>(patch: string, use: (file: string) => Effect.Effect<A, E>) =>

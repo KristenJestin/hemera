@@ -30,7 +30,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { type BigIntStats, existsSync, lstatSync, readdirSync, readlinkSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readlinkSync, rmSync } from 'node:fs'
 import { type FileHandle, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -68,7 +68,7 @@ import { AgentRuntime } from '../agents/runtime.ts'
 import { spendBudgetIn } from '../budget.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
-import { Git } from '../git.ts'
+import { Git, type OwnWorktree } from '../git.ts'
 import { Memory } from '../memory/index.ts'
 import { writeNow } from '../memory/now.ts'
 import { prepareWorkspace, resumeWorkspace } from '../preparation.ts'
@@ -93,11 +93,12 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
-import { NotJudged, openJudged } from '../tools/judged.ts'
+import { NotJudged, keyedHashJudged, openJudged } from '../tools/judged.ts'
 import type { SensitivePlaces } from '../tools/ports.ts'
 import { CONTENT_WITHHELD, Withholding } from '../tools/withholding.ts'
 import { type Mutation, mutate } from '../transaction.ts'
 import { type WorkspaceServices, createWorkspace, getWorkspace, worktreeOf } from '../workspaces.ts'
+import { captureKey } from './capture-key.ts'
 import { ProbeCleanup, ProbeDesk, ProbeWipeFailed, type ProbeWork } from './probe-desk.ts'
 import { ProbeSteps, type SteppedProbe } from './probe-steps.ts'
 import {
@@ -125,9 +126,13 @@ export interface ProbesSettings {
    * Runs at a point a suite needs to reach: `checked`, once a launch found its mission in Planning
    * and before it takes a slot; `recorded`, between a Probe's record and the start of
    * its background work, where a Cancel or a Freeze may fall; `sweeping`, as the start begins to
-   * wipe the folders no Probe knows, where a launch may fall.
+   * wipe the folders no Probe knows, where a launch may fall; `listing`, once a report's capture
+   * found the Probe's worktrees its own and before Git lists what they hold; `patching`, once a
+   * file of the capture is read and before its patch is made.
    */
-  readonly hold?: ((at: 'checked' | 'recorded' | 'sweeping') => Effect.Effect<void>) | undefined
+  readonly hold?:
+    | ((at: 'checked' | 'recorded' | 'sweeping' | 'listing' | 'patching') => Effect.Effect<void>)
+    | undefined
 }
 
 /** What a Probe that ended a turn without its report is told, once. */
@@ -303,8 +308,20 @@ const PAST_THE_LIMITS = 'content withheld: past the capture’s limit (200 files
 interface Found {
   readonly sha256: string
   readonly bytes: Buffer | null
+  /** Whether its owner may run it, as the opened file says. */
+  readonly executable: boolean
   readonly withheld: string | null
 }
+
+/**
+ * What stands for the hash of a file the capture cannot prove where it was listed (a pipe, a link
+ * put on its way, a nested repository, a file it cannot read): no content is its, and the mark is
+ * no sha256, so no content ever hashes as it.
+ */
+const UNOPENED = 'unopened'
+
+/** A file of which nothing is read: its hash a mark until said otherwise. */
+const NOTHING_READ = { sha256: UNOPENED, bytes: null, executable: false } as const
 
 const hashOf = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
 
@@ -316,13 +333,24 @@ const hashOfFile = async (handle: FileHandle): Promise<string> => {
 }
 
 /**
- * What stands for the hash of a file whose content is never opened (a hard link, a sensitive
- * place, a pipe): its last change on the disk (`ctime`, which every write, new name and rename
- * moves), never a byte of it, so a file the Probe changed after its preparation is still told from
- * one it left as it was.
+ * What stands for the hash of a file whose content is withheld (a hard link, a sensitive place): a
+ * keyed hash of its content (`captureKey`), marked apart from a sha256, so a change to it is seen
+ * whatever its times say, and what is stored cannot be brute-forced back into its content.
  */
-const unopenedHash = (stat: BigIntStats): string =>
-  hashOf(Buffer.from(`unopened\0${String(stat.ctimeNs)}`))
+const keyedOf = (path: string, key: Uint8Array): Promise<string> =>
+  keyedHashJudged(path, key).then(
+    (keyed) => `keyed:${keyed}`,
+    (cause: Error) => {
+      if (cause instanceof NotJudged) return UNOPENED
+      throw cause
+    },
+  )
+
+/** How a capture reads a file: what withholds its content, and the key of what is withheld. */
+export interface CaptureReading {
+  readonly withholding: Withholding
+  readonly key: Uint8Array
+}
 
 const gone = (cause: Error): boolean =>
   Predicate.hasProperty(cause, 'code') && (cause.code === 'ENOENT' || cause.code === 'ENOTDIR')
@@ -331,48 +359,53 @@ const gone = (cause: Error): boolean =>
  * Reads one file a worktree changed, never failing: null when it is gone since Git listed it. A
  * link is kept as where it leads, never followed out of the worktree; a folder (Git lists a
  * repository inside the worktree as one entry), a file larger than `room` and a file that cannot
- * be read are withheld, a folder's and an unreadable file's hash that of nothing.
+ * be read are withheld.
  *
  * `path` is a real path, its folder's links resolved: the file is opened through the judged open
  * (#373, #425), by handle, as `evidence_add` opens what it keeps. A folder link put on its way, a
- * pipe, a file with a second name (a hard link) and a file `withholding` withholds are never
- * opened; each is listed with its reason, its hash that of its identity (`unopenedHash`).
+ * pipe, a file with a second name (a hard link) and a file the withholding withholds are never
+ * read for their content; each is listed with its reason, its hash keyed (`keyedOf`) or a mark
+ * (`UNOPENED`).
  */
 export const readFound = (
   path: string,
   room: number,
-  withholding: Withholding,
+  reading: CaptureReading,
 ): Effect.Effect<Found | null> =>
   Effect.tryPromise({
     try: async (): Promise<Found | null> => {
-      const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false })
+      const stat = lstatSync(path, { throwIfNoEntry: false })
       if (stat === undefined) return null
       if (stat.isSymbolicLink()) {
         const target = Buffer.from(readlinkSync(path))
-        return { sha256: hashOf(target), bytes: null, withheld: 'content withheld: a link' }
+        return { ...NOTHING_READ, sha256: hashOf(target), withheld: 'content withheld: a link' }
       }
       if (stat.isDirectory()) {
-        const withheld = 'content withheld: a nested repository'
-        return { sha256: hashOf(Buffer.alloc(0)), bytes: null, withheld }
+        return { ...NOTHING_READ, withheld: 'content withheld: a nested repository' }
       }
-      const handle = await openJudged(path, { oneNameFor: 'capture', withholding }).catch(
-        (cause: Error) => {
-          if (cause instanceof NotJudged) return cause
-          throw cause
-        },
-      )
+      const handle = await openJudged(path, {
+        oneNameFor: 'capture',
+        withholding: reading.withholding,
+      }).catch((cause: Error) => {
+        if (cause instanceof NotJudged) return cause
+        throw cause
+      })
       if (handle instanceof NotJudged) {
         const reason = handle.message
         const withheld = reason.startsWith(CONTENT_WITHHELD)
           ? reason
           : `${CONTENT_WITHHELD}${reason}`
-        return { sha256: unopenedHash(stat), bytes: null, withheld }
+        return { ...NOTHING_READ, sha256: await keyedOf(path, reading.key), withheld }
       }
       try {
-        if ((await handle.stat()).size > room)
-          return { sha256: await hashOfFile(handle), bytes: null, withheld: PAST_THE_LIMITS }
+        const opened = await handle.stat()
+        const executable = (opened.mode & 0o100) !== 0
+        if (opened.size > room) {
+          const sha256 = await hashOfFile(handle)
+          return { sha256, bytes: null, executable, withheld: PAST_THE_LIMITS }
+        }
         const bytes = await handle.readFile()
-        return { sha256: hashOf(bytes), bytes, withheld: null }
+        return { sha256: hashOf(bytes), bytes, executable, withheld: null }
       } finally {
         await handle.close()
       }
@@ -381,26 +414,42 @@ export const readFound = (
   }).pipe(
     Effect.catch((cause) =>
       Effect.succeed(
-        gone(cause)
-          ? null
-          : {
-              sha256: hashOf(Buffer.alloc(0)),
-              bytes: null,
-              withheld: 'content withheld: unreadable',
-            },
+        gone(cause) ? null : { ...NOTHING_READ, withheld: 'content withheld: unreadable' },
       ),
     ),
   )
 
+/** A Probe's worktree as its capture reads it: its base, and its folders as Git made them. */
+interface WorktreeRead {
+  readonly base: ProbeBaseKept
+  readonly own: OwnWorktree
+}
+
+/** Why a Probe's worktrees cannot be read: one is no longer the one Hemera made. */
+const notItsOwn = (repository: string) =>
+  `refused: your worktree of ${repository} no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again`
+
 /**
- * How a Probe's capture reads its worktrees: under its folder's real path, so a link put in the
- * folder is never on the way of a read proven there, and withholding what a file tool withholds
- * from the Probe itself (#392), judged on its place. No session of it may be open yet (its
- * preparation): the lineage its sessions share stands for them.
+ * How a Probe's capture reads its worktrees, or why it cannot: each worktree by the folders Git
+ * made it with (`--git-dir` and `--work-tree`, never its `.git`), under the real path of the
+ * Probe's folder, so a link put in that folder is never on the way of a read proven there; what is
+ * withheld from the Probe itself (#392), judged on its place; and the profile's capture key. No
+ * session of it may be open yet (its preparation): the lineage its sessions share stands for them.
  */
-const captureReading = (row: ProbeRow, projectId: string) =>
+const captureReading = (row: ProbeRow, projectId: string, dataFolder: string) =>
   Effect.gen(function* () {
+    const git = yield* Git
+    const project = yield* getProject(projectId)
     const folder = yield* Effect.promise(() => realpath(row.folder).catch(() => row.folder))
+    const worktrees: WorktreeRead[] = []
+    for (const base of basesOf(row)) {
+      const source = join(project.mainCheckout, base.repository)
+      const own = yield* git.worktreeOwn(source, worktreeOf(row.folder, base.repository))
+      if (own === null || own.workTree !== worktreeOf(folder, base.repository)) {
+        return { kind: 'refused' as const, sentence: notItsOwn(base.repository) }
+      }
+      worktrees.push({ base, own })
+    }
     const withholding = yield* Withholding.of({
       sessionId: row.lineage,
       role: 'probe',
@@ -408,32 +457,33 @@ const captureReading = (row: ProbeRow, projectId: string) =>
       missionId: row.missionId,
       place: { kind: 'own-worktree', readOnly: false, root: row.folder },
     })
-    return { folder, withholding }
+    const key = yield* captureKey(dataFolder)
+    const reading: CaptureReading = { withholding, key }
+    return { kind: 'read' as const, worktrees, reading }
   })
 
 /**
  * What a Probe's worktrees hold against their commits once prepared, by hash: what its
  * preparation left, which its capture leaves out unless the Probe changed it.
  */
-const preparedIn = (row: ProbeRow, projectId: string) =>
+const preparedIn = (row: ProbeRow, projectId: string, dataFolder: string) =>
   Effect.gen(function* () {
     const git = yield* Git
-    const reading = yield* captureReading(row, projectId)
+    const read = yield* captureReading(row, projectId, dataFolder)
+    if (read.kind === 'refused') return read
     const prepared: ProbePreparedFile[] = []
-    for (const base of basesOf(row)) {
-      const worktree = worktreeOf(row.folder, base.repository)
-      const real = worktreeOf(reading.folder, base.repository)
-      for (const change of yield* git.worktreeChanges(worktree, base.commit)) {
+    for (const { base, own } of read.worktrees) {
+      for (const change of yield* git.worktreeChanges(own.workTree, base.commit, own)) {
         const found =
           change.status === 'deleted'
             ? { sha256: DELETED }
-            : yield* readFound(join(real, change.path), 0, reading.withholding)
+            : yield* readFound(join(own.workTree, change.path), 0, read.reading)
         if (found !== null) {
           prepared.push({ repository: base.repository, path: change.path, sha256: found.sha256 })
         }
       }
     }
-    return prepared
+    return { kind: 'prepared' as const, prepared }
   })
 
 const comparable = (path: string): string => {
@@ -759,7 +809,12 @@ export const probesLayer = (settings: ProbesSettings) =>
           const parent = yield* parentOf(row)
           // What the preparation left, taken once before the Probe first runs: a relaunch keeps it.
           const now = (yield* probeRow(probeId)) ?? row
-          const left = now.prepared ?? writePrepared(yield* preparedIn(now, facts.projectId))
+          let left = now.prepared
+          if (left === null) {
+            const taken = yield* preparedIn(now, facts.projectId, dataFolder)
+            if (taken.kind === 'refused') return yield* fail(probeId, taken.sentence)
+            left = writePrepared(taken.prepared)
+          }
           // Running from now on, so its first report is taken; then its session opens.
           const running = yield* locked(
             probeId,
@@ -987,7 +1042,9 @@ export const probesLayer = (settings: ProbesSettings) =>
       const capture = (row: ProbeRow, projectId: string) =>
         Effect.gen(function* () {
           const git = yield* Git
-          const reading = yield* captureReading(row, projectId)
+          const reading = yield* captureReading(row, projectId, dataFolder)
+          if (reading.kind === 'refused') return reading
+          if (settings.hold !== undefined) yield* settings.hold('listing')
           const place = { home: homedir(), platform: process.platform }
           const files: Array<{
             repository: string
@@ -1002,16 +1059,14 @@ export const probesLayer = (settings: ProbesSettings) =>
             preparedOf(row).map((one) => [`${one.repository}\0${one.path}`, one.sha256]),
           )
           const kept = { files: 0, bytes: 0 }
-          for (const base of basesOf(row)) {
-            const worktree = worktreeOf(row.folder, base.repository)
-            const real = worktreeOf(reading.folder, base.repository)
-            for (const change of yield* git.worktreeChanges(worktree, base.commit)) {
+          for (const { base, own } of reading.worktrees) {
+            for (const change of yield* git.worktreeChanges(own.workTree, base.commit, own)) {
               const room =
                 kept.files < CAPTURE_LIMITS.files ? CAPTURE_LIMITS.bytes - kept.bytes : -1
               const found =
                 change.status === 'deleted'
-                  ? { sha256: DELETED, bytes: null, withheld: 'deleted by the Probe' }
-                  : yield* readFound(join(real, change.path), room, reading.withholding)
+                  ? { ...NOTHING_READ, sha256: DELETED, withheld: 'deleted by the Probe' }
+                  : yield* readFound(join(own.workTree, change.path), room, reading.reading)
               // Gone since Git listed it: nothing left to keep.
               if (found === null) continue
               // Left by the preparation, and unchanged since.
@@ -1029,10 +1084,15 @@ export const probesLayer = (settings: ProbesSettings) =>
                 kept.files += 1
                 kept.bytes += bytes.length
               }
-              const patch =
-                change.status === 'modified' && content !== null
-                  ? yield* git.fileDiff(worktree, base.commit, change.path)
-                  : null
+              const patching = change.status === 'modified' && bytes !== null && content !== null
+              if (patching && settings.hold !== undefined) yield* settings.hold('patching')
+              // From the bytes read through the proven handle, never from the worktree again.
+              const patch = patching
+                ? yield* git.patchOf(own, base.commit, change.path, {
+                    bytes,
+                    executable: found.executable,
+                  })
+                : null
               files.push({
                 repository: base.repository,
                 path: change.path,
@@ -1044,7 +1104,7 @@ export const probesLayer = (settings: ProbesSettings) =>
               })
             }
           }
-          return files
+          return { kind: 'captured' as const, files }
         }).pipe(run)
 
       /** The test a report names, inside the Probe's worktree of its repository, or why not. */
@@ -1078,7 +1138,9 @@ export const probesLayer = (settings: ProbesSettings) =>
               }
               const refused = probeReportRefusal(args) ?? testRefusal(row, args)
               if (refused !== null) return { answer: refusal(refused) }
-              const captured = yield* capture(row, grant.projectId)
+              const capturing = yield* capture(row, grant.projectId)
+              if (capturing.kind === 'refused') return { answer: refusal(capturing.sentence) }
+              const captured = capturing.files
               // Masked in slices of time before the transaction opens, so the engine answers while
               // a large file is masked and the database is not held meanwhile (#402). What is
               // written below is only ever what is masked here.

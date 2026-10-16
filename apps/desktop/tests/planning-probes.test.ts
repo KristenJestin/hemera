@@ -15,14 +15,16 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
   linkSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -346,6 +348,9 @@ const keptContents = Effect.gen(function* () {
   return rows.map((row) => row.content)
 })
 
+/** The key of a capture's keyed hashes, in the suite's reads of one file. */
+const SUITE_KEY = randomBytes(32)
+
 /** A capture's read of one file, for a Probe whose place holds no sensitive file. */
 const found = (path: string) =>
   Effect.runPromise(
@@ -357,7 +362,7 @@ const found = (path: string) =>
       place: { kind: 'workspace', readOnly: false, root: work },
     }).pipe(
       Effect.provideService(SensitivePlaces, { sensitive: () => Effect.succeed(null) }),
-      Effect.flatMap((withholding) => readFound(path, 1024, withholding)),
+      Effect.flatMap((withholding) => readFound(path, 1024, { withholding, key: SUITE_KEY })),
     ),
   )
 
@@ -1124,7 +1129,7 @@ describe('probe_report ends the Probe', () => {
       content: null,
       withheld: 'content withheld: a sensitive place',
     })
-    expect(files.get('.env')?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(files.get('.env')?.sha256).toMatch(/^keyed:[0-9a-f]{64}$/)
   })
 
   test('a sensitive file the Probe rewrote to the same size and times is still told changed', async () => {
@@ -1145,6 +1150,188 @@ utimesSync('.env', 1000000000, 1000000000)
       content: null,
       withheld: 'content withheld: a sensitive place',
     })
+  })
+
+  test('a withheld file is told by a keyed hash of its content, its key kept outside the database', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      writeFileSync(join(tree, '.env'), 'DATABASE_PASSWORD=changed-by-the-probe\n')
+    })
+    const key = readFileSync(join(data, 'capture.key'))
+    expect(key).toHaveLength(32)
+    const keyed = createHmac('sha256', key)
+      .update('DATABASE_PASSWORD=changed-by-the-probe\n')
+      .digest('hex')
+    expect(seen.detail.files.find((file) => file.path === '.env')?.sha256).toBe(`keyed:${keyed}`)
+    // Nothing of the profile but the key's own file holds the key, the database least of all.
+    const holding = readdirSync(data, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name !== 'capture.key')
+      .map((entry) => join(entry.parentPath, entry.name))
+      .filter((path) => {
+        const bytes = readFileSync(path)
+        return bytes.includes(key) || bytes.includes(Buffer.from(key.toString('hex')))
+      })
+    expect(holding).toEqual([])
+  })
+
+  test('a withheld file only touched or given another mode is not told changed', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      const env = join(tree, '.env')
+      utimesSync(env, 2000000000, 2000000000)
+      if (process.platform !== 'win32') chmodSync(env, 0o600)
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+    })
+    expect(seen.detail.files.map((file) => file.path)).toEqual(['fixture.csv'])
+  })
+
+  test('what the preparation wrote is not captured when the data folder is reached through a link', async () => {
+    const linked = join(work, 'data-link')
+    symlinkSync(data, linked, process.platform === 'win32' ? 'junction' : 'dir')
+    data = linked
+    const seen = await reportedAfter([{ line: nodeLine(marks) }], (tree) => {
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+    })
+    expect(seen.detail.files.map((file) => file.path)).toEqual(['fixture.csv'])
+  })
+
+  test('a file of exactly the room left is kept whole', async () => {
+    const whole = 'x'.repeat(5 * 1024 * 1024)
+    const seen = await reportedAfter([], (tree) => writeFileSync(join(tree, 'whole.txt'), whole))
+    const file = seen.detail.files.find((one) => one.path === 'whole.txt')
+    expect(file?.withheld).toBeNull()
+    expect(file?.content?.length).toBe(whole.length)
+  })
+
+  test('a .git that leads to another repository refuses the report, and nothing of the other work tree is kept', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      const out = (...args: string[]) => git(tree, ...args)
+      const commit = out('rev-parse', 'HEAD')
+      const common = out('rev-parse', '--path-format=absolute', '--git-common-dir')
+      const other = join(work, 'other.git')
+      const elsewhere = join(work, 'elsewhere')
+      mkdirSync(elsewhere)
+      git(work, 'init', '-q', '--bare', other)
+      writeFileSync(join(other, 'objects', 'info', 'alternates'), `${join(common, 'objects')}\n`)
+      git(work, '--git-dir', other, 'config', 'core.bare', 'false')
+      git(work, '--git-dir', other, 'config', 'core.worktree', elsewhere)
+      git(work, '--git-dir', other, '--work-tree', elsewhere, 'read-tree', commit)
+      writeFileSync(join(elsewhere, 'importer.ts'), `${IMPORTER}not the Probe’s to keep\n`)
+      writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+      // Even leading back to the worktree, as an administrative folder of Git's does.
+      writeFileSync(join(other, 'gitdir'), `${join(tree, '.git')}\n`)
+      writeFileSync(join(tree, '.git'), `gitdir: ${other}\n`)
+    })
+    expect(seen.answer.text).toBe(
+      'refused: your worktree of api no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again',
+    )
+    expect(seen.detail.state).toBe('running')
+    expect(JSON.stringify(seen.detail)).not.toContain('not the Probe’s to keep')
+    expect(seen.kept.join('\n')).not.toContain('not the Probe’s to keep')
+  })
+
+  /** The refusal of a report whose worktree of `api` is no longer the one Hemera made. */
+  const NOT_ITS_OWN =
+    'refused: your worktree of api no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again'
+
+  test('a .git that leads to another worktree of the same repository refuses the report', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      const other = join(work, 'other-tree')
+      git(tree, 'worktree', 'add', '-q', '--detach', other, 'HEAD')
+      const admin = git(other, 'rev-parse', '--path-format=absolute', '--git-dir')
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+      writeFileSync(join(tree, '.git'), `gitdir: ${admin}\n`)
+    })
+    expect(seen.answer.text).toBe(NOT_ITS_OWN)
+    expect(seen.detail.state).toBe('running')
+  })
+
+  test('a worktree moved aside and put back as a link refuses the report', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      renameSync(tree, `${tree}-moved`)
+      symlinkSync(`${tree}-moved`, tree, process.platform === 'win32' ? 'junction' : 'dir')
+    })
+    expect(seen.answer.text).toBe(NOT_ITS_OWN)
+  })
+
+  test('a .git changed once the worktree was found its own does not choose what is listed', async () => {
+    let worktree = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        worktree = tree
+        writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+      },
+      {
+        probes: {
+          hold: (at) =>
+            at === 'listing'
+              ? Effect.sync(() => {
+                  const other = join(work, 'other.git')
+                  const elsewhere = join(work, 'elsewhere')
+                  mkdirSync(elsewhere)
+                  git(work, 'init', '-q', '--bare', other)
+                  git(work, '--git-dir', other, 'config', 'core.bare', 'false')
+                  git(work, '--git-dir', other, 'config', 'core.worktree', elsewhere)
+                  writeFileSync(join(worktree, '.git'), `gitdir: ${other}\n`)
+                })
+              : Effect.void,
+        },
+      },
+    )
+    expect(seen.detail.files.map((file) => file.path)).toEqual(['fixture.csv'])
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'the patch of a file the Probe made executable says so, as Git says it',
+    async () => {
+      let expected = ''
+      const seen = await reportedAfter([], (tree) => {
+        writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+        chmodSync(join(tree, 'importer.ts'), 0o755)
+        expected = git(
+          tree,
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          'HEAD',
+          '--',
+          'importer.ts',
+        )
+      })
+      expect(expected).toContain('new mode 100755')
+      expect(seen.detail.files.find((file) => file.path === 'importer.ts')?.patch?.trim()).toBe(
+        expected,
+      )
+    },
+  )
+
+  test('a hard link swapped in between the read and the patch never reaches the patch', async () => {
+    const secret = join(work, 'outside.txt')
+    writeFileSync(secret, `${IMPORTER}not the Probe’s to keep\n`)
+    let worktree = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        worktree = tree
+        writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+      },
+      {
+        probes: {
+          hold: (at) =>
+            at === 'patching'
+              ? Effect.sync(() => {
+                  rmSync(join(worktree, 'importer.ts'))
+                  linkSync(secret, join(worktree, 'importer.ts'))
+                })
+              : Effect.void,
+        },
+      },
+    )
+    const importer = seen.detail.files.find((file) => file.path === 'importer.ts')
+    expect(importer).toMatchObject({ content: `${IMPORTER}// probed\n`, withheld: null })
+    expect(importer?.patch).toContain('+// probed')
+    expect(JSON.stringify(seen.detail)).not.toContain('not the Probe’s to keep')
   })
 
   test('the capture keeps at most 200 files and 5 MiB of content; the rest is listed, withheld', async () => {
@@ -1307,8 +1494,11 @@ utimesSync('.env', 1000000000, 1000000000)
     // Git listed `notes/notes.txt` while `notes` was a folder; it is a link out when it is read.
     symlinkSync(outside, join(tree, 'notes'), process.platform === 'win32' ? 'junction' : 'dir')
     const read = await found(join(tree, 'notes', 'notes.txt'))
-    expect(read).toMatchObject({ bytes: null, withheld: `content withheld: ${THROUGH_A_LINK}` })
-    expect(read?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(read).toMatchObject({
+      sha256: 'unopened',
+      bytes: null,
+      withheld: `content withheld: ${THROUGH_A_LINK}`,
+    })
   })
 
   test.skipIf(process.platform === 'win32')(
@@ -1318,6 +1508,7 @@ utimesSync('.env', 1000000000, 1000000000)
       execFileSync('mkfifo', [pipe])
       expect(await found(pipe)).toMatchObject({
         bytes: null,
+        sha256: 'unopened',
         withheld: 'content withheld: it is not a regular file (a pipe, a device or a folder)',
       })
     },
