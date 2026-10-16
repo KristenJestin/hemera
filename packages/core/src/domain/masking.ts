@@ -1196,6 +1196,21 @@ const CHARACTERS_A_STEP = 4096
 
 const QUOTED_MASK = JSON.stringify(MASK)
 
+/**
+ * What a string must hold for JSON written in it to hold a string or a container: without a quote
+ * or an opener, it holds no field and nothing to read again, and masked as text it is masked the
+ * same, at the cost of text.
+ */
+const STRUCTURED = /["[{]/
+
+/**
+ * How many JSON strings deep JSON written in a JSON string is read as JSON (`{"body":"{\"a\":…}"}`
+ * is one). Each level reads again what the one above it read, so the levels cost as many times
+ * the text; a string read at the last level that holds a quote, and so another string, is masked
+ * whole.
+ */
+export const STRING_NESTING_LIMIT = 4
+
 /** A JSON container open while its values are read. */
 interface Open {
   readonly closing: string
@@ -1238,11 +1253,20 @@ export const maskPrintedPaced = (
     maskedString,
   )
 
-function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
+/**
+ * `maskPrinted` of a text read from `depth` JSON strings (0 for what was printed), with the
+ * stretches `hiddenAbove` hidden on top: those the masking of the text it was read from hid in it.
+ */
+function* printedMasked(
+  text: string,
+  known: ReadonlyArray<string>,
+  depth = 0,
+  hiddenAbove: ReadonlyArray<Span> = [],
+): Steps<string> {
   const allJson = yield* jsonRead(text)
   const { lines, mixed } = allJson ? { lines: [], mixed: false } : yield* jsonLines(text)
   const values: ReadonlyArray<Span> = allJson ? [[0, text.length]] : yield* writtenJson(text, lines)
-  const shapes = yield* hiddenSpans(text, known)
+  const shapes = yield* union(yield* hiddenSpans(text, known), hiddenAbove)
   const hidden = allJson ? shapes : yield* union(shapes, yield* readAsStrings(text, values, known))
   const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
   const edits: Edit[] = []
@@ -1259,7 +1283,8 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
   }
   /**
    * A string masked: whole where a hidden stretch runs past its quotes or covers all it holds;
-   * otherwise read, the characters the hidden stretches write masked, then masked as text.
+   * otherwise read, and what it reads masked as printed, the characters the hidden stretches
+   * write hidden on top: JSON written in it is masked as JSON, and stays JSON (#409, #431).
    */
   function* maskString(start: number, end: number): Steps<void> {
     const spans = touching(start, end)
@@ -1269,19 +1294,17 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
       edits.push({ start, end, by: QUOTED_MASK })
       return
     }
-    if (spans.length === 0) {
-      // Nothing of the whole text's masking here: the string masked as text once read. Written
-      // with no escape, it reads as printed, and masking it finds nothing the whole text's
-      // masking did not find in it: a shape that would stop at its quotes stops there in the text
-      // too, and one that runs past them touches it.
-      const plain = text.slice(start + 1, end - 1)
-      if (!plain.includes('\\')) return
-      const { read } = yield* readString(text, start, end)
-      const masked = yield* textMasked(read, known)
-      if (masked !== read) edits.push({ start, end, by: JSON.stringify(masked) })
+    // Nothing of the whole text's masking here, and written with no escape: it reads as printed,
+    // and masking it finds nothing the whole text's masking did not find in it. A shape that would
+    // stop at its quotes stops there in the text too, one that runs past them touches it, and with
+    // no quote in it, it holds no string and no field.
+    if (spans.length === 0 && !text.slice(start + 1, end - 1).includes('\\')) return
+    const { read, from } = yield* readString(text, start, end)
+    // At the last level read, a string that holds another is not read: it is masked whole.
+    if (depth >= STRING_NESTING_LIMIT && read.includes('"')) {
+      edits.push({ start, end, by: QUOTED_MASK })
       return
     }
-    const { read, from } = yield* readString(text, start, end)
     // The characters the spans write, as spans of what the string reads, those that touch made one.
     const marked: Span[] = []
     let markFrom = -1
@@ -1299,11 +1322,11 @@ function* printedMasked(text: string, known: ReadonlyArray<string>): Steps<strin
       if (at % CHARACTERS_A_STEP === 0) yield
     }
     if (markFrom !== -1) marked.push([markFrom, read.length])
-    const spansOfRead = yield* union(marked, yield* hiddenSpans(read, known))
-    const masked = yield* applied(
-      read,
-      spansOfRead.map(([first, after]) => ({ start: first, end: after, by: MASK })),
-    )
+    const masked = yield* STRUCTURED.test(read)
+      ? printedMasked(read, known, depth + 1, marked)
+      : marked.length === 0
+        ? textMasked(read, known)
+        : maskedOver(read, yield* union(marked, yield* hiddenSpans(read, known)))
     if (masked !== read) edits.push({ start, end, by: JSON.stringify(masked) })
   }
   /** The name of the field whose key is at `at`, the key masked unless quiet. */

@@ -28,6 +28,7 @@ import {
   NeedFields,
   NESTING_LIMIT,
   PermissionFields,
+  STRING_NESTING_LIMIT,
 } from '../src/domain/index.ts'
 import * as inTurn from './oracle/masking-in-turn.ts'
 
@@ -1753,6 +1754,239 @@ describe('JSON made of every generated secret, written inside prose, keeps no ma
   )
 })
 
+/** A text read as JSON, when it is JSON. */
+const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+/** A value written as JSON in a JSON string `depth` times: JSON in a string in a string… */
+const heldIn = (value: Schema.Json, depth: number): string => {
+  let text = JSON.stringify(value)
+  for (let level = 0; level < depth; level += 1) text = JSON.stringify(text)
+  return text
+}
+
+/** `Array.isArray` does not narrow a read-only array out of a union: this does. */
+const isList = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+/** A JSON value that holds no other. */
+const isScalar = (value: Schema.Json): value is string | number | boolean | null =>
+  value === null ||
+  Predicate.isString(value) ||
+  Predicate.isNumber(value) ||
+  Predicate.isBoolean(value)
+
+/**
+ * Whether what was JSON in the input is still JSON in the masked output: the two read side by
+ * side, each string of the input that holds JSON (whole, or after a sentence) holds JSON in the
+ * output too, or is masked whole, as any value may be.
+ */
+const staysJson = (input: Schema.Json, output: Schema.Json): boolean => {
+  // A field named as a credential is masked whole, whatever it held.
+  if (output === MASK) return true
+  if (Predicate.isString(input)) {
+    if (!Predicate.isString(output)) return false
+    const at = /[[{]/.exec(input)?.index ?? -1
+    if (at === -1) return true
+    const inner = readJson(input.slice(at))
+    if (Option.isNone(inner)) return true
+    if (!output.startsWith(input.slice(0, at))) return false
+    const masked = readJson(output.slice(at))
+    return Option.isSome(masked) && staysJson(inner.value, masked.value)
+  }
+  if (isScalar(input)) return true
+  if (isList(input)) {
+    return (
+      isList(output) &&
+      output.length === input.length &&
+      input.every((item, index) => staysJson(item, output[index] ?? null))
+    )
+  }
+  if (isScalar(output) || isList(output)) return false
+  const items = Object.values(input)
+  const masked = Object.values(output)
+  return (
+    items.length === masked.length &&
+    items.every((item, index) => staysJson(item, masked[index] ?? null))
+  )
+}
+
+describe('JSON written in a JSON string is masked as that JSON, and stays JSON (#409, #431)', () => {
+  // A string's content was masked as text: JSON written in it was never read as JSON, so a string
+  // inside it (`\"password=\\\"a b\\\"\"`) was not read again, a field named as a credential was
+  // not masked whole, and a quoted value masked as text took the `\"}` after it with it.
+  const readBody = Schema.decodeUnknownOption(
+    Schema.fromJsonString(Schema.Struct({ body: Schema.String })),
+  )
+  const ISSUE = '{"body": "config: {\\"user\\": \\"ana\\", \\"password\\": \\"hunter2-Sx1Zq\\"}"}'
+
+  test('a credential in JSON written in a JSON string is masked as in that JSON (#409)', async () => {
+    for (const masked of await printedForms([ISSUE], [])) {
+      expect(readBody(masked)).toEqual(
+        Option.some({ body: 'config: {"user": "ana", "password": "•••"}' }),
+      )
+    }
+    await hidesAtLeastTheOracle(ISSUE, [])
+  })
+
+  test('the same, nested one more level: JSON in a string in a string (#409)', async () => {
+    const text = JSON.stringify({ body: `config: ${JSON.stringify(JSON.parse(ISSUE))}` })
+    for (const masked of await printedForms([text], [])) {
+      expect(masked).not.toContain('hunter2')
+      expect(markersOf(masked).size).toBe(0)
+      expect(Option.isSome(readJson(masked))).toBe(true)
+    }
+    await hidesAtLeastTheOracle(text, [])
+  })
+
+  // The smallest inputs that left a secret, and the review of #408's (its low 4).
+  const leaks: ReadonlyArray<readonly [what: string, text: string]> = [
+    [
+      'a quoted value in a string of JSON in a JSON string',
+      '"[\\"password=\\\\\\"a Sx1Zq\\\\\\"\\"]"',
+    ],
+    [
+      'a field named as a credential in JSON in a string in a string',
+      heldIn({ a: JSON.stringify({ password: 'Sx1Zq' }) }, 1),
+    ],
+    [
+      'a doubly encoded body after a sentence',
+      '{"body":"see {\\"a\\":\\"password=\\\\\\"a Sx1Zq\\\\\\"\\"} here"}',
+    ],
+  ]
+  for (const [what, text] of leaks) {
+    test(`${what}: nothing of the secret is left, and it stays JSON (#409)`, async () => {
+      for (const masked of await printedForms([text], [])) {
+        expect(masked, text).not.toContain('Sx1Zq')
+        expect(staysJson(JSON.parse(text), JSON.parse(masked)), masked).toBe(true)
+      }
+      await hidesAtLeastTheOracle(text, [])
+    })
+  }
+
+  test('the minimal input of #431 stays valid JSON and hides abc', async () => {
+    const text = '{"r":"{\\"token\\":\\"abc\\"}"}'
+    for (const masked of await printedForms([text], [])) {
+      expect(masked).toBe('{"r":"{\\"token\\":\\"•••\\"}"}')
+    }
+  })
+
+  /** The same value written in JSON strings, from one level deep to the limit. */
+  const atEveryDepth = (value: Schema.Json): ReadonlyArray<string> =>
+    Array.from({ length: STRING_NESTING_LIMIT }, (_, below) =>
+      JSON.stringify({ r: heldIn(value, below) }),
+    )
+
+  test('a credential field stays JSON and hidden at every depth JSON is read to (#431)', async () => {
+    const texts = atEveryDepth({ token: 'abc', note: 'ok' })
+    const masked = await printedForms(texts, [])
+    texts.forEach((text, index) => {
+      const one = masked[index] ?? ''
+      expect(one, text).not.toContain('abc')
+      expect(one, text).toContain('ok')
+      expect(staysJson(JSON.parse(text), JSON.parse(one)), one).toBe(true)
+    })
+  })
+
+  test('a known value and a shape-only secret stay JSON and hidden in JSON in a string (#431)', async () => {
+    const known = 'kn"own-Sx2Zq'
+    const texts = atEveryDepth({
+      note: `x ${known} y`,
+      auth: 'Bearer Sx3Zq',
+      said: 'password="a Sx4Zq"',
+    })
+    const masked = await printedForms(texts, [known])
+    texts.forEach((text, index) => {
+      const one = masked[index] ?? ''
+      expect(markersOf(one).size, one).toBe(0)
+      expect(staysJson(JSON.parse(text), JSON.parse(one)), one).toBe(true)
+    })
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [known])))
+  })
+
+  test('deeper than the limit, a string that would hold another is masked whole (#409)', async () => {
+    // At the limit, JSON is still read: its fields named as credentials are masked whole.
+    const atLimit = heldIn(
+      { r: heldIn({ password: 'Sx1Zq', note: 'ok' }, STRING_NESTING_LIMIT - 1) },
+      0,
+    )
+    for (const masked of await printedForms([atLimit], [])) {
+      expect(masked).not.toContain('Sx1Zq')
+      expect(masked).toContain('ok')
+    }
+    // One more, the string read at the limit holds a string: it is masked whole, never read as text.
+    const beyond = heldIn(
+      { r: heldIn({ note: 'password=Sx1Zq', a: 'ok' }, STRING_NESTING_LIMIT) },
+      0,
+    )
+    for (const masked of await printedForms([beyond], [])) {
+      expect(masked).not.toContain('Sx1Zq')
+      expect(masked).not.toContain('ok')
+      expect(Option.isSome(readJson(masked))).toBe(true)
+    }
+  })
+
+  /** A JSON value whose strings may hold JSON, secrets only where masking JSON hides them. */
+  const document = fc.letrec<{
+    value: Schema.Json
+    leaf: Schema.Json
+    object: Schema.JsonObject
+    list: Schema.JsonArray
+    held: string
+  }>((tie) => ({
+    value: fc.oneof(
+      { depthSize: 'small', withCrossShrink: true },
+      tie('leaf'),
+      tie('object'),
+      tie('list'),
+      tie('held'),
+    ),
+    leaf: fc.oneof(
+      fc.constantFrom(
+        'plain words',
+        'a\\b',
+        'line\nbreak',
+        'quote " here',
+        'kn"own-Sx9Zq',
+        7,
+        true,
+        null,
+      ),
+      fc.nat({ max: 99 }).map((n) => `password=Sx${String(n)}Zq`),
+      fc.nat({ max: 99 }).map((n) => `token: "a Sx${String(n)}Zq"`),
+      fc.nat({ max: 99 }).map((n) => `Bearer Sx${String(n)}Zq`),
+    ),
+    object: fc
+      .array(
+        fc.tuple(fc.constantFrom('a', 'note', 'body', 'password', 'api_key', 'user'), tie('value')),
+        { maxLength: 4 },
+      )
+      .map((entries) => Object.fromEntries(entries)),
+    list: fc.array(tie('value'), { maxLength: 4 }),
+    // Only containers are written in a string: a string written in a string is one string.
+    held: fc
+      .tuple(fc.constantFrom('', 'config: '), fc.oneof(tie('object'), tie('list')), fc.boolean())
+      .map(([before, inner, pretty]) => `${before}${JSON.stringify(inner, null, pretty ? 2 : 0)}`),
+  }))
+
+  test(
+    'JSON documents holding JSON strings: the output parses, still JSON where the input was, and no secret is left',
+    { timeout: 600_000 },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(document.value, fc.boolean(), async (value, pretty) => {
+          const text = JSON.stringify(value, null, pretty ? 2 : 0)
+          const [masked = ''] = await printedForms([text], ['kn"own-Sx9Zq'])
+          const output = readJson(masked)
+          expect(Option.isSome(output), masked).toBe(true)
+          if (Option.isSome(output)) expect(staysJson(value, output.value), masked).toBe(true)
+          expect([...markersOf(masked)], masked).toEqual([])
+          await hidesAtLeastTheOracle(text, ['kn"own-Sx9Zq'])
+        }),
+        { numRuns: 2_000 },
+      )
+    },
+  )
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => void, times: number): number => {
   const start = performance.now()
@@ -1891,6 +2125,21 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
           null,
           2,
         )}`,
+      printed,
+      4_000,
+    ],
+    [
+      'JSON written in a JSON string, string in string to the limit (#409)',
+      (size) => heldIn({ body: 'password="a b" x '.repeat(size / 17) }, STRING_NESTING_LIMIT - 1),
+      printed,
+      4_000,
+    ],
+    [
+      'JSON strings that each hold JSON (#409)',
+      (size) =>
+        JSON.stringify(
+          Array.from({ length: size / 60 }, () => '{"password":"x","note":"token=\\"a b\\""}'),
+        ),
       printed,
       4_000,
     ],
