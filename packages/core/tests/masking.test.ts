@@ -1852,6 +1852,10 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
       '{"a":"say \\"password=\\\\\\"a Sx1Zq\\\\\\"\\" ok"}',
     ],
     [
+      'an unclosed string literal in the prose of a JSON string',
+      '{"a":"say \\"password=\\\\\\"a Sx1Zq\\\\\\" ok"}',
+    ],
+    [
       'a doubly encoded body after a sentence',
       '{"body":"see {\\"a\\":\\"password=\\\\\\"a Sx1Zq\\\\\\"\\"} here"}',
     ],
@@ -1908,14 +1912,20 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
 
   test('deeper than the limit, a string that would hold another is masked whole (#409)', async () => {
     // At the limit, JSON is still read: its fields named as credentials are masked whole, and a
-    // string that holds an escape but no quote is read as text.
+    // string that holds an escape but no quote, a bracket or not, is read.
     const atLimit = heldIn(
-      { r: heldIn({ password: 'Sx1Zq', note: 'ok\nthen' }, STRING_NESTING_LIMIT - 1) },
+      {
+        r: heldIn(
+          { password: 'Sx1Zq', note: 'ok\nthen', list: 'kept [1] {x}\nthen' },
+          STRING_NESTING_LIMIT - 1,
+        ),
+      },
       0,
     )
     for (const masked of await printedForms([atLimit], [])) {
       expect(masked).not.toContain('Sx1Zq')
       expect(masked).toContain('ok')
+      expect(masked).toContain('kept [1] {x}')
     }
     // One more, the string read at the limit holds a string: it is masked whole, never read as text.
     const beyond = heldIn(
@@ -1927,6 +1937,25 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
       expect(masked).not.toContain('ok')
       expect(Option.isSome(readJson(masked))).toBe(true)
     }
+  })
+
+  test('JSON is read four strings deep, and a string a fifth string deep is masked whole (#409)', async () => {
+    // The depths are written out, not read from the limit: the limit bounds the cost to five
+    // readings of the text, and changing it is a decision, not a refactoring.
+    const fourth = JSON.stringify({ r: heldIn({ password: 'Sx1Zq', note: 'ok' }, 3) })
+    const fifth = JSON.stringify({ r: heldIn({ note: 'ok' }, 4) })
+    const [atFourth = '', atFifth = ''] = await printedForms([fourth, fifth], [])
+    expect(atFourth).not.toContain('Sx1Zq')
+    expect(atFourth).toContain('ok')
+    expect(atFifth).not.toContain('ok')
+    expect(Option.isSome(readJson(atFifth))).toBe(true)
+  })
+
+  test('a string that reads no quote and no bracket is masked as text, as before (#409)', async () => {
+    // Read as printed, the number it reads would be masked as a JSON value, `"•••"` quoted once
+    // more: as text it is masked to the same `•••` a string gets, at the cost of text.
+    const masked = await printedForms(['{"a":"12\\u00334"}'], ['1234'])
+    expect(masked).toEqual(['{"a":"•••"}'])
   })
 
   /** A JSON value whose strings may hold JSON, secrets only where masking JSON hides them. */
