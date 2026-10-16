@@ -73,6 +73,21 @@ const RESULT_TYPES =
  */
 if ('__vitest_browser__' in globalThis) await import('axe-core')
 
+/**
+ * The faces of the theme are fetched when the first text that wears them is laid out, and a story
+ * does not wait for them: its play starts on the fallback font. A play that measures text
+ * (`List › Loading To Filled`) and has the face arrive in the middle of it reads two different
+ * widths for one text, and fails on the Windows runner, where a request can wait tens of seconds
+ * in the browser's queue and then land anywhere. Loaded here, in the page's setup, every story
+ * starts with the face it will end with.
+ */
+if ('__vitest_browser__' in globalThis) {
+  await Promise.all([
+    document.fonts.load('1em "Inter Variable"'),
+    document.fonts.load('1em "Fira Code Variable"'),
+  ])
+}
+
 const preview: Preview = {
   decorators: [withTooltips, withMotion, withTheme],
   /**
