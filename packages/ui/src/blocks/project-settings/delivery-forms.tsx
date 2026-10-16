@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 // react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
-import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { IconButton } from '../../components/button/button.tsx'
 import { Input, Textarea } from '../../components/field/field.tsx'
@@ -14,6 +14,9 @@ import {
   FORGE_WORDS,
   MERGE_WORDS,
   type MergeMethod,
+  MOMENT_WORDS,
+  MOMENTS,
+  type Moment,
   type PublishedBy,
   type PushPlacement,
   type Reviewer,
@@ -22,14 +25,13 @@ import {
   type StepKind,
   type StepStart,
   TEMPLATE_VARIABLES,
-  type WhoCommits,
   writesToNetwork,
 } from './delivery-model.ts'
-import { COMMITS, START_ITEMS, newStep } from './delivery-form-options.ts'
+import { START_ITEMS, newStep } from './delivery-form-options.ts'
 
 /**
  * The dialogs of the delivery rules: where the push and the pull requests stand, a template, the
- * reviewers, who commits, a repository's remote, base and forge, and a step. Each is the body of
+ * reviewers, a repository's remote, base and forge, and a step. Each is the body of
  * the settings' dialog; its foot is the section's `FormFoot`.
  */
 
@@ -258,97 +260,6 @@ export function ReviewersForm({
   )
 }
 
-const CHOICE =
-  'flex w-full min-w-0 items-start gap-3 rounded-md border border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-checked:border-primary aria-checked:bg-primary-muted'
-
-const RADIO =
-  'mt-0.5 flex size-icon-sm shrink-0 items-center justify-center rounded-full border border-input'
-
-const DOT = 'size-1.5 rounded-full bg-primary'
-
-/**
- * Who commits during Building, as three choices, each with what it does, and under them what the
- * history of a repository reads after an example mission: the visible effect of the choice.
- * Whatever is chosen, every attempt is kept by Hemera, and the commits carry the user's own Git
- * identity.
- */
-export function CommitsForm({
-  value,
-  histories,
-  onChange,
-}: {
-  value: WhoCommits
-  /** What the history reads after ACME-12, for each value. */
-  histories: Readonly<Record<WhoCommits, readonly string[]>>
-  onChange: (value: WhoCommits) => void
-}): ReactNode {
-  const refs = useRef<(HTMLButtonElement | null)[]>([])
-  const choose = (index: number): void => {
-    const next = COMMITS[(index + COMMITS.length) % COMMITS.length]
-    if (next === undefined) return
-    onChange(next.value)
-    refs.current[COMMITS.indexOf(next)]?.focus()
-  }
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      event.preventDefault()
-      choose(index + 1)
-    }
-    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      event.preventDefault()
-      choose(index - 1)
-    }
-  }
-  const history = histories[value]
-  return (
-    <>
-      <div role="radiogroup" aria-label="Who commits" className="flex flex-col gap-2">
-        {COMMITS.map((one, index) => {
-          const chosen = one.value === value
-          return (
-            <button
-              key={one.value}
-              ref={(element) => {
-                refs.current[index] = element
-              }}
-              type="button"
-              role="radio"
-              aria-checked={chosen}
-              tabIndex={chosen ? 0 : -1}
-              className={CHOICE}
-              onClick={() => onChange(one.value)}
-              onKeyDown={(event) => onKeyDown(event, index)}
-            >
-              <span className={RADIO} aria-hidden="true">
-                {chosen && <span className={DOT} />}
-              </span>
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="font-medium">{one.label}</span>
-                <span className="text-xs text-muted-foreground">{one.effect}</span>
-              </span>
-            </button>
-          )
-        })}
-      </div>
-      <div className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">
-          After ACME-12, the history of api reads
-        </span>
-        <ol
-          aria-label="History of api after ACME-12"
-          className="flex flex-col rounded-md border border-border bg-surface-rim px-3 py-2 font-mono text-xs"
-        >
-          {history.map((line) => (
-            <li key={line} className="truncate">
-              {line}
-            </li>
-          ))}
-        </ol>
-      </div>
-    </>
-  )
-}
-
 export interface RepositoryDraft {
   remote: string
   base: string
@@ -428,16 +339,28 @@ export function RepositoryForm({
 export interface StepDraft {
   start: StepStart
   config: StepConfig
-  /** For a new step: the step it comes after, by id. */
-  after?: string | undefined
+  /** For a new step of a recipe: the moment it runs in. */
+  moment?: Moment | undefined
+  /** For a new step: the step it comes after, by id; null for first in its moment. */
+  after?: string | null | undefined
+}
+
+/** A step a new one may come after, and the moment it stands in. */
+export interface StepAnchor {
+  id: string
+  label: string
+  moment?: Moment | undefined
 }
 
 export interface StepFormProps {
   draft: StepDraft
   onChange: (draft: StepDraft) => void
-  /** For a new step: the kinds offered, and the steps it may come after. */
+  /**
+   * For a new step: the kinds offered, the steps it may come after, and whether it chooses its
+   * moment (a recipe's step does; the cleanup has one moment).
+   */
   adding?:
-    | { kinds: readonly StepKind[]; after: readonly { id: string; label: string }[] }
+    | { kinds: readonly StepKind[]; after: readonly StepAnchor[]; moments?: boolean | undefined }
     | undefined
   /** The catalogue commands a Bump or a Command may run. */
   commands: readonly string[]
@@ -596,12 +519,55 @@ function KindFields({
           onValueChange={(what) => set({ ...config, what })}
         />
       )
-    case 'push':
-    case 'pull-request':
-    case 'ci':
-    case 'local-merge':
+    // The commits, the push, the pull request, CI, the local merge and the cleanup's own steps
+    // have nothing to write but how they start.
+    default:
       return null
   }
+}
+
+/** The value of First in the After select: no step id holds a colon. */
+const FIRST = ':first'
+
+/** Where a new step goes: its moment when it has one to choose, and the step it follows there. */
+function PlaceFields({
+  draft,
+  adding,
+  onChange,
+}: {
+  draft: StepDraft
+  adding: NonNullable<StepFormProps['adding']>
+  onChange: (draft: StepDraft) => void
+}): ReactNode {
+  const moment = draft.moment ?? 'waves'
+  const anchors =
+    adding.moments === true
+      ? adding.after.filter((one) => (one.moment ?? 'waves') === moment)
+      : adding.after
+  const after = draft.after === undefined ? (anchors.at(-1)?.id ?? FIRST) : (draft.after ?? FIRST)
+  return (
+    <div className="flex items-start gap-3">
+      {adding.moments === true && (
+        <Labelled<Moment>
+          label="When"
+          value={moment}
+          onChange={(next) => onChange({ ...draft, moment: next, after: undefined })}
+          items={MOMENTS.map((one) => ({ value: one, label: MOMENT_WORDS[one] }))}
+        />
+      )}
+      {(adding.moments === true || anchors.length > 0) && (
+        <Labelled<string>
+          label="After"
+          value={after}
+          onChange={(next) => onChange({ ...draft, after: next === FIRST ? null : next })}
+          items={[
+            ...(adding.moments === true ? [{ value: FIRST, label: 'First' }] : []),
+            ...anchors.map((one) => ({ value: one.id, label: one.label })),
+          ]}
+        />
+      )}
+    </div>
+  )
 }
 
 /** A step: its kind when it is new, where it goes, how it starts, and the fields of its kind. */
@@ -612,22 +578,15 @@ export function StepForm({ draft, onChange, adding, commands, refused }: StepFor
   return (
     <>
       {adding !== undefined && (
-        <div className="flex items-start gap-3">
+        <>
           <Labelled<StepKind>
             label="Kind"
             value={config.kind}
             onChange={(kind) => set(newStep(kind))}
             items={adding.kinds.map((kind) => ({ value: kind, label: STEP_WORDS[kind] }))}
           />
-          {adding.after.length > 0 && (
-            <Labelled<string>
-              label="After"
-              value={draft.after ?? adding.after.at(-1)?.id ?? ''}
-              onChange={(after) => onChange({ ...draft, after })}
-              items={adding.after.map((one) => ({ value: one.id, label: one.label }))}
-            />
-          )}
-        </div>
+          <PlaceFields draft={draft} adding={adding} onChange={onChange} />
+        </>
       )}
       <KindFields config={config} set={set} commandItems={commandItems} refused={refused} />
       {writesToNetwork(config) && (

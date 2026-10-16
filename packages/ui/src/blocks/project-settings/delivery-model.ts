@@ -29,8 +29,28 @@ export const MERGE_WORDS: Record<MergeMethod, string> = {
 /** How a published version is found: a tag, the version on a registry, or the user's word. */
 export type PublishedBy = 'tag' | 'registry' | 'confirm'
 
+/**
+ * When a step runs: after each task during Building, when Review starts, or after Ship in the
+ * repository's wave. Every step of the catalogue may stand in any of them.
+ */
+export type Moment = 'tasks' | 'review' | 'waves'
+
+export const MOMENTS: readonly Moment[] = ['tasks', 'review', 'waves']
+
+export const MOMENT_WORDS: Record<Moment, string> = {
+  tasks: 'After each task',
+  review: 'When Review starts',
+  waves: 'After Ship',
+}
+
 /** What a step does, with what it needs. */
 export type StepConfig =
+  /** Hemera commits what the Workspace holds, with the commit template. */
+  | { readonly kind: 'commit-by-hemera' }
+  /** Hemera waits for your click, then checks that a new commit is on the branch. */
+  | { readonly kind: 'commit-by-me' }
+  /** An agent allowed to run `git commit` in the Workspace, under the permission rules. */
+  | { readonly kind: 'commit-by-agent' }
   | { readonly kind: 'push' }
   | { readonly kind: 'pull-request' }
   /** The dependencies moved to the versions their upstream just published, pushed on the PR. */
@@ -49,6 +69,10 @@ export type StepConfig =
   | { readonly kind: 'confirm'; readonly what: string }
   /** The Local preset's merge of the mission's branch into the base branch, on this machine. */
   | { readonly kind: 'local-merge' }
+  | { readonly kind: 'pull-main-checkout' }
+  | { readonly kind: 'stop-services' }
+  | { readonly kind: 'remove-worktrees' }
+  | { readonly kind: 'remove-workspace' }
 
 export type StepKind = StepConfig['kind']
 
@@ -65,6 +89,7 @@ export type StepOrigin = 'preset' | 'changed' | 'added' | 'omitted'
 export interface RecipeStep {
   readonly step: DeliveryStep
   readonly origin: StepOrigin
+  readonly moment: Moment
   /** Why the rules refuse this step, in words, at its place. */
   readonly refused?: string | undefined
 }
@@ -111,7 +136,7 @@ export interface DeliveryRepository {
   readonly remotes: readonly string[]
   readonly base: string
   readonly forge: ForgeView
-  /** The effective recipe, in order, left-out steps in their place. */
+  /** The effective recipe, every moment in order, left-out steps in their place. */
   readonly steps: readonly RecipeStep[]
 }
 
@@ -125,9 +150,6 @@ export interface Dependency {
 
 /** Where the step that pushes and opens the pull requests stands. */
 export type PushPlacement = 'review' | 'waves'
-
-/** Who commits during Building, and when. Hemera commits what is left at the push. */
-export type WhoCommits = 'task' | 'agent' | 'push'
 
 export interface Reviewer {
   /** `@acme/web`, or a person's handle on the forge. */
@@ -145,7 +167,6 @@ export interface PullRequestRules {
   readonly reviewers: readonly Reviewer[]
   readonly requireApproval: boolean
   readonly reviewDrafts: boolean
-  readonly commits: WhoCommits
 }
 
 /** A step of the End's cleanup: built in, or a command, an agent or a confirmation of the Project's. */
@@ -175,6 +196,9 @@ export interface DeliveryRefusals {
 
 /** What a step is called on its line. */
 export const STEP_WORDS: Record<StepKind, string> = {
+  'commit-by-hemera': 'Hemera commits',
+  'commit-by-me': 'I commit myself',
+  'commit-by-agent': 'An agent commits',
   push: 'Push',
   'pull-request': 'Pull request',
   bump: 'Bump',
@@ -186,18 +210,32 @@ export const STEP_WORDS: Record<StepKind, string> = {
   agent: 'Agent',
   confirm: 'Confirm',
   'local-merge': 'Merge locally',
+  'pull-main-checkout': 'Pull the main checkout',
+  'stop-services': 'Stop the mission’s services',
+  'remove-worktrees': 'Remove the worktrees',
+  'remove-workspace': 'Remove the Workspace',
 }
 
-/** The kinds a user adds to a recipe; push, pull request and the local merge come from presets. */
-export const ADDABLE: readonly StepKind[] = [
+/** The catalogue: every kind of step, which any moment accepts, the End's Cleanup included. */
+export const CATALOGUE: readonly StepKind[] = [
+  'commit-by-hemera',
+  'commit-by-me',
+  'commit-by-agent',
+  'push',
+  'pull-request',
   'bump',
   'merge',
+  'local-merge',
   'ci',
   'remote-action',
   'published',
   'command',
   'agent',
   'confirm',
+  'pull-main-checkout',
+  'stop-services',
+  'remove-worktrees',
+  'remove-workspace',
 ]
 
 /** What a step acts on, as its line says it after its name. */
@@ -206,6 +244,12 @@ export function detailOf(
   repository?: Pick<DeliveryRepository, 'remote' | 'base'>,
 ): string {
   switch (config.kind) {
+    case 'commit-by-hemera':
+      return 'with the commit template'
+    case 'commit-by-me':
+      return 'waits for your commit'
+    case 'commit-by-agent':
+      return 'under the permission rules'
     case 'push':
       return repository === undefined ? 'the branch' : repository.remote
     case 'pull-request':
@@ -229,12 +273,19 @@ export function detailOf(
       return config.what
     case 'local-merge':
       return repository === undefined ? 'into the base' : `into ${repository.base}`
+    case 'pull-main-checkout':
+      return repository === undefined ? 'the base branch' : repository.base
+    case 'stop-services':
+    case 'remove-worktrees':
+      return 'of the mission'
+    case 'remove-workspace':
+      return 'once its work is merged'
   }
 }
 
 /** Whether a step may write to the network on the Project's say: a command, an agent. */
 export function writesToNetwork(config: StepConfig): boolean {
-  return config.kind === 'command' || config.kind === 'agent'
+  return config.kind === 'command' || config.kind === 'agent' || config.kind === 'commit-by-agent'
 }
 
 /** The names a template may hold, and what Hemera fills each with. */

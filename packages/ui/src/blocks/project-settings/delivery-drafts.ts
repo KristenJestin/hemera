@@ -1,13 +1,12 @@
 import { newStep } from './delivery-form-options.ts'
 import type { PushDraft, RepositoryDraft, StepDraft } from './delivery-forms.tsx'
-import type { DeliveryRules, Reviewer, WhoCommits } from './delivery-model.ts'
+import type { DeliveryRules, Reviewer } from './delivery-model.ts'
 import type { DeliveryTarget } from './delivery-rules.tsx'
 
 export interface Drafts {
   template: string
   push: PushDraft
   reviewers: Reviewer[]
-  commits: WhoCommits
   repository: RepositoryDraft
   step: StepDraft
 }
@@ -19,7 +18,6 @@ export function seed(target: DeliveryTarget | null, rules: DeliveryRules | null)
     template: '',
     push: { placement: pr?.placement ?? 'review', start: pr?.start ?? 'auto' },
     reviewers: [...(pr?.reviewers ?? [])],
-    commits: pr?.commits ?? 'task',
     repository: { remote: 'origin', base: '', forced: null, host: '' },
     step: { start: 'auto', config: newStep('command') },
   }

@@ -10,12 +10,7 @@ import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
 import { dialogFor } from './delivery-dialogs.tsx'
 import { type Drafts, seed } from './delivery-drafts.ts'
 import { withAccepted, withoutCleanup, withPreset, withPutBack } from './delivery-edits.ts'
-import type {
-  DeliveryRefusals,
-  DeliveryRules,
-  PullRequestRules,
-  WhoCommits,
-} from './delivery-model.ts'
+import type { DeliveryRefusals, DeliveryRules, PullRequestRules } from './delivery-model.ts'
 import { DeliveryRulesSection, type DeliveryTarget } from './delivery-rules.tsx'
 import { FormFoot, type FormFootProps } from './parts.tsx'
 
@@ -33,8 +28,6 @@ export interface DeliveryPageProps {
   form?: DeliveryTarget | undefined
   /** Why every save is refused, in words, as one meeting a newer version is. */
   refused?: string | undefined
-  /** Who commits: the dialog's history, per value. */
-  histories?: Readonly<Record<WhoCommits, readonly string[]>> | undefined
   onSave: (what: string) => void
   onCopy: (line: string) => void
   onCheckAgain: (repository: string) => void
@@ -88,12 +81,10 @@ export function DeliveryPage(props: DeliveryPageProps): ReactNode {
       ? dialogFor(form, {
           rules,
           drafts,
-          histories: props.histories,
           foot,
           onTemplate: draft('template'),
           onPush: draft('push'),
           onReviewers: draft('reviewers'),
-          onCommits: draft('commits'),
           onRepository: draft('repository'),
           onStep: draft('step'),
           onClose: close,
