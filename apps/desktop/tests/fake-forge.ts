@@ -105,14 +105,24 @@ export interface FakeForge {
   readonly install: (cli: FakeCli) => void
 }
 
-/** The fakes, for the CLIs named (both unless told): a CLI not named is missing from the `PATH`. */
+/**
+ * The fakes, for the CLIs named (both unless told): a CLI not named is missing from the `PATH`.
+ * They live in temporary folders of their own, or under `at` when given: a fixture's (#420).
+ */
 export function fakeForge(
   rules: ReadonlyArray<FakeRule>,
   clis: ReadonlyArray<FakeCli> = ['gh', 'bkt'],
+  at?: string,
 ): FakeForge {
-  const folder = join(temporaryFolder('fake forge'), 'cli bin')
-  const userConfig = temporaryFolder('user config')
-  const scripts = temporaryFolder('fake-forge-scripts')
+  const under = (name: string) => {
+    if (at === undefined) return temporaryFolder(name)
+    const folder = join(at, name)
+    mkdirSync(folder, { recursive: true })
+    return folder
+  }
+  const folder = join(under('fake forge'), 'cli bin')
+  const userConfig = under('user config')
+  const scripts = under('fake-forge-scripts')
   const fake = join(scripts, 'fake.cjs')
   const rulesFile = join(scripts, 'rules.json')
   const log = join(scripts, 'calls.jsonl')

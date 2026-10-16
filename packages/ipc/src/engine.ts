@@ -67,6 +67,11 @@ export const EngineStart = Schema.Struct({
   version: Schema.String,
   /** The folder of the migrations this build carries. */
   migrations: Schema.String,
+  /**
+   * The data folder is a fixture's (#420), opened by a development build only: every agent is the
+   * scripted fake, never one of this machine's.
+   */
+  fixture: Schema.optional(Schema.Boolean),
 })
 export type EngineStart = typeof EngineStart.Type
 
