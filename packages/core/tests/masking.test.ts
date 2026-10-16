@@ -2079,6 +2079,23 @@ describe("A header's value is read by a scan, whatever its length (#412)", () =>
       `Cookie:${MASK}"a\\\nb" x`,
     ],
     ['quoted, cut by an escaped line separator', 'Cookie: "a\\ b" c', `Cookie:${MASK}"a\\ b" c`],
+    [
+      'quoted, an escaped backslash before its closing quote',
+      'Cookie: "a\\\\" b"',
+      `Cookie: ${MASK}"`,
+    ],
+    ['quoted, an escaped backslash before a line end', 'Cookie: "a\\\\\nb" c', `Cookie: ${MASK}`],
+    [
+      'quoted, an escaped backslash then an escaped quote',
+      'Cookie: "a\\\\\\"b" c',
+      `Cookie: ${MASK}`,
+    ],
+    ['bare, an escaped backslash before a quote', 'Cookie: a\\\\"b', `Cookie: ${MASK}"b`],
+    [
+      'bare, an escaped backslash then an escaped quote',
+      'Cookie: x\\\\\\"y\'z',
+      `Cookie: ${MASK}'z`,
+    ],
     ['quoted and never closed, after two spaces', 'Cookie:  "unclosed', `Cookie: ${MASK}"unclosed`],
     ['quoted and never closed, after no space', 'Cookie:"unclosed', 'Cookie:"unclosed'],
     ['quoted, then quoted again', 'Cookie: "a" "b"', `Cookie: ${MASK}"b"`],

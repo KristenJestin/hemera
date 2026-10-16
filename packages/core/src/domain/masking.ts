@@ -212,42 +212,40 @@ const matched =
     }
   }
 
-/** A run of what a value between double quotes holds as it is: no quote, no backslash. */
-const IN_DOUBLE_QUOTES = /[^"\\]*/y
+/** What may end a value between double quotes: its closing quote, or a line end after a backslash. */
+const IN_DOUBLE_QUOTES_STOPS = /["\n\r\u2028\u2029]/g
 
-/** What `.` does not take, and so no backslash takes in a value between double quotes. */
-const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
+/** What ends a bare value: a quote or a line end. */
+const BARE_STOPS = /["'\r\n]/g
 
 /**
  * Where the value between double quotes whose quote is at `at` ends, after its closing quote, or
- * -1 when it does not close: a backslash takes the character after it, but a line end.
+ * -1 when it does not close: a backslash takes the character after it, but a line end (as `.`
+ * takes none). Read from one quote or line end to the next, never one escape at a time.
  */
 const doubleQuotedEnd = (text: string, at: number): number => {
-  let next = at + 1
-  for (;;) {
-    next += matchFrom(IN_DOUBLE_QUOTES, text, next)?.[0].length ?? 0
-    if (text.charAt(next) === '"') return next + 1
-    if (next + 1 >= text.length || LINE_TERMINATOR.test(text.charAt(next + 1))) return -1
-    next += 2
+  for (let from = at + 1; ;) {
+    const stop = matchFrom(IN_DOUBLE_QUOTES_STOPS, text, from)?.index ?? -1
+    if (stop === -1) return -1
+    const taken = escapedAt(text, at + 1, stop)
+    if (text.charAt(stop) === '"' && !taken) return stop + 1
+    // A line end a backslash would take: that backslash takes nothing, and the value cannot go on.
+    if (text.charAt(stop) !== '"' && taken) return -1
+    from = stop + 1
   }
 }
 
-/** A run of what a bare value holds, through escapes (to the next backslash) or not. */
-const BARE_TO_AN_ESCAPE = /[^"'\\\r\n]*/y
-const BARE_TO_A_QUOTE = /[^"'\r\n]*/y
-
 /**
  * Where the bare value at `at` ends: at a quote or a line end. Read through escapes, a backslash
- * takes the character after it but a line end, so an escaped quote (`\"`) does not end it.
+ * takes the character after it but a line end, so an escaped quote (`\"`) does not end it. Read
+ * from one quote or line end to the next, never one escape at a time.
  */
 const bareEnd = (text: string, at: number, throughEscapes: boolean): number => {
-  if (!throughEscapes) return at + (matchFrom(BARE_TO_A_QUOTE, text, at)?.[0].length ?? 0)
-  let next = at
-  for (;;) {
-    next += matchFrom(BARE_TO_AN_ESCAPE, text, next)?.[0].length ?? 0
-    if (text.charAt(next) !== '\\') return next
-    next += 1
-    if (next < text.length && !'\r\n'.includes(text.charAt(next))) next += 1
+  for (let from = at; ;) {
+    const stop = matchFrom(BARE_STOPS, text, from)?.index ?? text.length
+    const quote = text.charAt(stop) === '"' || text.charAt(stop) === "'"
+    if (!throughEscapes || !quote || !escapedAt(text, at, stop)) return stop
+    from = stop + 1
   }
 }
 
@@ -903,7 +901,10 @@ const BACKSLASHES = /\\/g
 /** What ends what a JSON string may hold: a quote, or a line end. */
 const DELIMITERS = /["\r\n]/g
 
-/** Whether the quote at `at` is escaped: an odd run of backslashes before it, back to `floor`. */
+/**
+ * Whether the quote (or any character) at `at` is escaped: an odd run of backslashes before it,
+ * back to `floor`. Each backslash takes the character after it, so only that run's length counts.
+ */
 const escapedAt = (text: string, floor: number, at: number): boolean => {
   let before = at
   while (before > floor && text.charAt(before - 1) === '\\') before -= 1
