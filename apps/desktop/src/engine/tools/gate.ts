@@ -29,7 +29,6 @@ import { join } from 'node:path'
 import {
   MASK,
   HELPER_DEPTH,
-  type Masked,
   ROLE_NAMES,
   ROLE_PLACES,
   ROOT_REPOSITORY,
@@ -57,7 +56,7 @@ import type { DomainEvents } from '../domain-events.ts'
 import { getProject } from '../projects.ts'
 import { evidenceRead, reviewHeld } from '../review/gate.ts'
 import type { RunServices } from '../runs.ts'
-import { Secrets, type SecretsRegistry } from '../secrets.ts'
+import { Secrets, type SecretsRegistry, maskedHead } from '../secrets.ts'
 import { refusedWhile } from '../storage/database.ts'
 import type { Database } from '../storage/database.ts'
 import { toolCalls } from '../storage/schema.ts'
@@ -152,6 +151,7 @@ import {
   type JudgedCall,
   type JudgedPath,
   PermissionRequests,
+  SensitiveLinks,
   SensitivePlaces,
   SessionNotes,
   SetupDesk,
@@ -159,6 +159,7 @@ import {
   WriteAttribution,
   outsideReason,
 } from './ports.ts'
+import { Withholding } from './withholding.ts'
 
 export type { ToolAnswer }
 
@@ -269,21 +270,86 @@ const withoutProposedValues = (tool: string, args: Schema.Json): Schema.Json =>
         }),
       })
 
-/** A call's arguments as its record keeps them: masked whole, then cut. */
-const argumentsKept = (
-  secrets: SecretsRegistry,
-  tool: string,
-  given: Schema.Json,
-): Masked<string> => {
-  const args = withoutProposedValues(tool, given)
-  const masked = Option.match(readArgumentFields(args), {
-    onNone: () => secrets.mask(agentText(args)),
-    onSome: (fields) => maskedJson(secrets.maskArguments(fields)),
-  })
-  return masked.length > ARGUMENTS_KEPT
-    ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
-    : masked
+/**
+ * How much of a call's arguments is walked before the rest is `•••`: twice what a record keeps,
+ * so what is cut at `ARGUMENTS_KEPT` is never short of what was walked.
+ */
+const ARGUMENTS_WALKED = 2 * ARGUMENTS_KEPT
+
+/** `Array.isArray` does not narrow a read-only array out of a union: this does. */
+const isJsonList = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+/**
+ * A call's arguments cut to what a record keeps of them, before they are masked (#392): a string
+ * longer than a record keeps becomes its masked head (`maskedHead`, in slices), what lies past
+ * `NESTING_LIMIT` levels is `•••` as the masking makes it, and once `ARGUMENTS_WALKED` characters
+ * were walked, the values left are dropped for one `•••`. So the masking of the record walks a few
+ * thousand characters, however large or deep the arguments the agent sent.
+ */
+const cutForRecord = (secrets: SecretsRegistry, record: Schema.JsonObject) => {
+  let left = ARGUMENTS_WALKED
+  const text = (one: string) =>
+    Effect.map(
+      one.length <= ARGUMENTS_KEPT ? Effect.succeed(one) : maskedHead(secrets, one, ARGUMENTS_KEPT),
+      (kept) => {
+        left -= kept.length + 3
+        return kept
+      },
+    )
+  const value = (one: Schema.Json, depth: number): Effect.Effect<Schema.Json> => {
+    if (Predicate.isString(one)) return text(one)
+    if (one === null || Predicate.isNumber(one) || Predicate.isBoolean(one)) {
+      left -= 8
+      return Effect.succeed(one)
+    }
+    if (depth >= NESTING_LIMIT) return Effect.succeed(MASK)
+    // A list or a record costs its brackets: an empty one is walked too.
+    left -= 2
+    return isJsonList(one) ? list(one, depth + 1) : fields(one, depth + 1)
+  }
+  const list = (items: Schema.JsonArray, depth: number) =>
+    Effect.gen(function* () {
+      const kept: Schema.Json[] = []
+      for (const item of items) {
+        if (left <= 0) {
+          kept.push(MASK)
+          break
+        }
+        kept.push(yield* value(item, depth))
+      }
+      return kept
+    })
+  const fields = (named: Schema.JsonObject, depth: number): Effect.Effect<Schema.JsonObject> =>
+    Effect.gen(function* () {
+      const kept: Array<[string, Schema.Json]> = []
+      for (const [name, item] of Object.entries(named)) {
+        if (left <= 0) {
+          kept.push([MASK, MASK])
+          break
+        }
+        kept.push([yield* text(name), yield* value(item, depth)])
+      }
+      return Object.fromEntries(kept)
+    })
+  return fields(record, 1)
 }
+
+/**
+ * A call's arguments as its record keeps them: cut (`cutForRecord`), masked, then cut again at
+ * what a record holds. A request of 16 MiB is never masked whole, at once, for the 2,000
+ * characters a record holds of it (#392).
+ */
+const argumentsKept = (secrets: SecretsRegistry, tool: string, given: Schema.Json) =>
+  Effect.gen(function* () {
+    const args = withoutProposedValues(tool, given)
+    const fields = readArgumentFields(args)
+    const masked = Option.isNone(fields)
+      ? yield* maskedHead(secrets, agentText(args), ARGUMENTS_KEPT + 1)
+      : maskedJson(secrets.maskArguments(yield* cutForRecord(secrets, fields.value)))
+    return masked.length > ARGUMENTS_KEPT
+      ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
+      : masked
+  })
 
 /** A call decoded, its tool and its arguments read by that tool's schema. */
 type Decoded = {
@@ -574,6 +640,7 @@ export const toolGateLayer = (settings: GateSettings) =>
         Effect.gen(function* () {
           const secrets = yield* Secrets
           const outcome = answer.ok ? 'done' : answer.refused ? 'refused' : 'failed'
+          const kept = args === null ? null : yield* argumentsKept(secrets, tool, args)
           yield* mutate('recording a tool call', (transaction) =>
             transaction
               .insert(toolCalls)
@@ -589,7 +656,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                 verdictBy: noted.verdictBy,
                 outcome,
                 reason: answer.ok ? null : secrets.mask(answer.text.slice(0, REASON_KEPT)),
-                arguments: args === null ? null : argumentsKept(secrets, tool, args),
+                arguments: kept,
                 callKey,
                 durationMs: Math.round(performance.now() - began),
                 calledAt: new Date().toISOString(),
@@ -730,6 +797,7 @@ export const toolGateLayer = (settings: GateSettings) =>
                   tool: name,
                   gate: entry.gate,
                   path,
+                  links: new SensitiveLinks(),
                   command:
                     command === null
                       ? null
@@ -797,28 +865,47 @@ export const toolGateLayer = (settings: GateSettings) =>
       const execute = (grant: Grant, prepared: Prepared) =>
         Effect.gen(function* () {
           const { call, path } = prepared
-          const fileCall = (resolved: JudgedPath): FileCall => ({
-            sessionId: grant.sessionId,
-            owner: ownerOf(grant),
-            path: resolved.resolved,
-            named: resolved.named,
-            versions,
-          })
+          /**
+           * A file tool's call; it reads the file of the call the verdict judged, when one did
+           * (`./withholding.ts`).
+           */
+          const fileCall = (resolved: JudgedPath, judged: JudgedCall | null) =>
+            Effect.map(
+              judged === null
+                ? Withholding.of(prepared.session, prepared.judged?.links)
+                : Withholding.asked(judged),
+              (withholding): FileCall => ({
+                sessionId: grant.sessionId,
+                owner: ownerOf(grant),
+                path: resolved.resolved,
+                named: resolved.named,
+                versions,
+                withholding,
+              }),
+            )
           const pathOf = (): JudgedPath =>
             path ?? { named: '.', resolved: grant.place.root, inside: true, certain: true }
           switch (call.tool) {
             case 'fs_read': {
-              const read = yield* fsRead(fileCall(pathOf()), call.args)
+              const read = yield* fsRead(yield* fileCall(pathOf(), prepared.judged), call.args)
               return yield* uncommittedNoted(grant, pathOf().resolved, read)
             }
             case 'fs_list':
-              return yield* fsList(fileCall(pathOf()), call.args)
+              return yield* fsList(yield* fileCall(pathOf(), null), call.args)
             case 'search':
-              return yield* search(fileCall(pathOf()), call.args)
+              return yield* search(yield* fileCall(pathOf(), null), call.args)
             case 'fs_write':
-              return yield* held(grant, pathOf(), fsWrite(fileCall(pathOf()), call.args))
+              return yield* held(
+                grant,
+                pathOf(),
+                fsWrite(yield* fileCall(pathOf(), prepared.judged), call.args),
+              )
             case 'fs_edit':
-              return yield* held(grant, pathOf(), fsEdit(fileCall(pathOf()), call.args))
+              return yield* held(
+                grant,
+                pathOf(),
+                fsEdit(yield* fileCall(pathOf(), prepared.judged), call.args),
+              )
             case 'commands_list':
               return yield* commandsList(grant)
             case 'commands_run':

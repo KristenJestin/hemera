@@ -90,6 +90,9 @@ import {
 } from '../storage/schema.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
 import { NotJudged, readJudged } from '../tools/judged.ts'
+import type { Grant } from '../tools/access.ts'
+import type { SensitivePlaces } from '../tools/ports.ts'
+import { Withholding } from '../tools/withholding.ts'
 import { containedIn } from '../tools/paths.ts'
 import { mutate } from '../transaction.ts'
 import { HelperDesk, type HelperWork } from './helper-desk.ts'
@@ -165,6 +168,7 @@ type Needs =
   | Memory
   | HelperDesk
   | ProbeSteps
+  | SensitivePlaces
 
 /** Hemera's own words: nothing in them to mask. */
 const MISSION_CANCELLED = MaskedText.make('the mission was cancelled')
@@ -627,9 +631,15 @@ export const helpersLayer = (settings: HelpersSettings) =>
         )
 
       /** The Prototyper's files copied into the mission's evidence, or the refusal naming one. */
-      const keepFiles = (row: HelperRow, session: RoleSession, files: ReadonlyArray<string>) =>
+      const keepFiles = (
+        grant: Grant,
+        row: HelperRow,
+        session: RoleSession,
+        files: ReadonlyArray<string>,
+      ) =>
         Effect.gen(function* () {
           const label = helperLabel(row.number)
+          const withholding = yield* Withholding.of(grant)
           const kept: string[] = []
           // Real paths on both sides: a link it made to a file outside its folder is not its own,
           // nor a path on another drive (#145).
@@ -641,9 +651,9 @@ export const helpersLayer = (settings: HelpersSettings) =>
               return Result.fail(`${named} is not a file of your folder`)
             }
             // Read from the file judged only, as the file tools read (#373): never through a link
-            // planted since, nor a file with a second name, nor a pipe.
+            // planted since, nor a file with a second name, nor a pipe, nor a sensitive one (#392).
             const bytes = yield* Effect.tryPromise(() =>
-              readJudged(real, { oneNameFor: 'evidence' }),
+              readJudged(real, { oneNameFor: 'evidence', withholding }),
             ).pipe(Effect.result)
             if (Result.isFailure(bytes)) {
               const cause = bytes.failure.cause
@@ -693,7 +703,7 @@ export const helpersLayer = (settings: HelpersSettings) =>
           let events: NewEvent[]
           if ('tried' in decoded.success) {
             const prototype: PrototyperResult = decoded.success
-            const kept = yield* keepFiles(row, session, prototype.files)
+            const kept = yield* keepFiles(grant, row, session, prototype.files)
             if (Result.isFailure(kept)) return refusal(`refused: ${kept.failure}`)
             text = prototyperResultText(prototype, kept.success.join(', '))
             events = [

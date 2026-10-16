@@ -60,7 +60,13 @@ import { getProject } from '../projects.ts'
 import { mutate } from '../transaction.ts'
 import { changedBy } from '../resources/declarations.ts'
 import { containedIn, resolvePath, shownPath } from '../tools/paths.ts'
-import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
+import {
+  type JudgedCall,
+  SensitiveLinks,
+  SensitivePlaces,
+  type Verdict,
+  Verdicts,
+} from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
 import { CommitRights, Judge, type Judged, MissionGrants } from './ports.ts'
 
@@ -229,10 +235,16 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
         Effect.promise(() => resolvePath(call.session.place.root, folder, named, home))
 
       /** The sensitive place a path is, as written and as it leads, or null. */
-      const sensitiveOf = (call: JudgedCall, written: string, resolved: string, writes: boolean) =>
+      const sensitiveOf = (
+        call: JudgedCall,
+        written: string,
+        resolved: string,
+        writes: boolean,
+        links: SensitiveLinks,
+      ) =>
         Effect.gen(function* () {
           const places = yield* SensitivePlaces
-          const asked = { session: call.session, writes }
+          const asked = { session: call.session, writes, links }
           return (
             (yield* places.sensitive(written, asked)) ?? (yield* places.sensitive(resolved, asked))
           )
@@ -295,12 +307,13 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           const writes =
             call.tool !== 'fs_read' && call.tool !== 'fs_list' && call.tool !== 'search'
           const root = call.session.place.root
+          const links = call.links ?? new SensitiveLinks()
           const pointAt = (
             written: string,
             resolved: { path: string; inside: boolean; certain: boolean },
           ) =>
             Effect.gen(function* () {
-              const found = yield* sensitiveOf(call, written, resolved.path, writes)
+              const found = yield* sensitiveOf(call, written, resolved.path, writes, links)
               if (found !== null) sensitive.push(found)
               // The Workspace a place reads beside its own folder is inside for a read (#145).
               const readable = call.session.place.readable

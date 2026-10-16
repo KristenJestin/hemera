@@ -12,7 +12,9 @@
  *   the path of the open file (`/proc/self/fd/<fd>`), so no link or junction stood on the way when
  *   it was opened, whatever the names say before or after;
  * - a file kept as evidence or written over has a single name on the disk, under the rule on
- *   hard links (`SECOND_NAME_REFUSED`, one place); a file only read may have several.
+ *   hard links (`SECOND_NAME_REFUSED`, one place); a file only read may have several;
+ * - a file read is one whose content the session may read (`./withholding.ts`, #392): a file in a
+ *   sensitive place is never opened, its read refused as withheld.
  *
  * A folder is used through its handle too: on Linux a name in it is reached through
  * `/proc/self/fd/<fd>/<name>`, which is the opened folder itself whatever happens to its path, so
@@ -37,6 +39,8 @@ import {
 import { basename, dirname, join } from 'node:path'
 
 import { Predicate } from 'effect'
+
+import { CONTENT_WITHHELD, type Withholding } from './withholding.ts'
 
 /** Why a path is no longer the one judged: a link or a junction stood on its way. */
 export const THROUGH_A_LINK =
@@ -76,11 +80,15 @@ const BY_HANDLE = process.platform === 'linux'
 const NEVER_WAITING = BY_HANDLE ? constants.O_NONBLOCK | constants.O_NOFOLLOW : 0
 
 /** The reasons a use of a judged path is refused rather than failed. */
-export const JUDGED_REFUSALS: ReadonlyArray<string> = [
+const JUDGED_REFUSALS: ReadonlyArray<string> = [
   THROUGH_A_LINK,
   NOT_A_FILE,
   ...Object.values(SECOND_NAME_REFUSED),
 ]
+
+/** Whether a use of a judged path was refused (a rule said no) rather than failed. */
+export const refusedAsJudged = (reason: string): boolean =>
+  JUDGED_REFUSALS.includes(reason) || reason.startsWith(CONTENT_WITHHELD)
 
 /** Why a file is refused for `use` under the rule on hard links, or null. */
 const secondNameRefused = (file: BigIntStats, use: OneNameFor | undefined): string | null =>
@@ -118,30 +126,43 @@ async function proven(handle: FileHandle, path: string, real: string): Promise<v
 }
 
 /**
+ * How a judged file is opened: made to be written (`create`, it must not exist), or read, which
+ * takes what is withheld from the session that reads it.
+ */
+export type Opening =
+  | { readonly create: true; readonly real?: string; readonly mode?: number | undefined }
+  | {
+      readonly create?: false
+      readonly real?: string
+      readonly oneNameFor?: OneNameFor
+      readonly withholding: Withholding
+    }
+
+/**
  * Opens the file at `path` and proves the opened file is the one judged at the real path `real`
  * (the path itself when the gate handed it over), a regular file; with `oneNameFor`, one with a
- * single name. With `create`, the file is made and must not exist. The handle is the caller's to
+ * single name. With `create`, the file is made and must not exist. A file read is first asked of
+ * its `withholding`: one whose content is withheld is never opened. The handle is the caller's to
  * close.
  */
-export async function openJudged(
-  path: string,
-  options: {
-    readonly real?: string
-    readonly create?: boolean
-    readonly mode?: number | undefined
-    readonly oneNameFor?: OneNameFor
-  } = {},
-): Promise<FileHandle> {
-  const flags =
+export async function openJudged(path: string, options: Opening): Promise<FileHandle> {
+  const real = options.real ?? path
+  const read = options.create === true ? null : options
+  const withheld = read === null ? null : await read.withholding.withheld(real)
+  if (withheld !== null) throw new NotJudged(withheld)
+  const handle =
     options.create === true
-      ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL
-      : constants.O_RDONLY
-  const handle = await opened(path, flags | NEVER_WAITING, options.mode)
+      ? await opened(
+          path,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NEVER_WAITING,
+          options.mode,
+        )
+      : await opened(path, constants.O_RDONLY | NEVER_WAITING)
   try {
     const file = await handle.stat({ bigint: true })
     if (!file.isFile()) throw new NotJudged(NOT_A_FILE)
-    await proven(handle, path, options.real ?? path)
-    const refused = secondNameRefused(file, options.oneNameFor)
+    await proven(handle, path, real)
+    const refused = secondNameRefused(file, read?.oneNameFor)
     if (refused !== null) throw new NotJudged(refused)
     return handle
   } catch (cause) {
@@ -153,7 +174,11 @@ export async function openJudged(
 /** The whole file at a judged path (at `real`, when it is reached by another), read through the handle that was proven. */
 export async function readJudged(
   path: string,
-  options: { readonly real?: string; readonly oneNameFor?: OneNameFor } = {},
+  options: {
+    readonly real?: string
+    readonly oneNameFor?: OneNameFor
+    readonly withholding: Withholding
+  },
 ): Promise<Buffer> {
   const handle = await openJudged(path, options)
   try {

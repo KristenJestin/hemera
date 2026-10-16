@@ -27,24 +27,25 @@ import {
 import { and, eq } from 'drizzle-orm'
 import { Effect, Predicate, Result } from 'effect'
 
-import { Secrets } from '../secrets.ts'
+import { Secrets, type SecretsRegistry, maskedHead } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { sessionFiles } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import type { ActionOwner } from './actions.ts'
 import { EffectfulActions } from './actions.ts'
 import {
-  JUDGED_REFUSALS,
   type JudgedFolder,
   MOVED,
   NotJudged,
   madeFolder,
   openFolder,
   openJudged,
+  refusedAsJudged,
 } from './judged.ts'
 import { WriteAttribution } from './ports.ts'
 import { type Page, fingerprintOf, numbered, readPage } from './read.ts'
 import { type SearchResult, searchIn } from './search.ts'
+import type { Withholding } from './withholding.ts'
 
 /** What a tool answers: whether it did what was asked, and what the agent reads. */
 export interface ToolAnswer {
@@ -68,6 +69,9 @@ const KEPT_PER_SESSION = 32
 
 /** How many lines a diff in a refusal shows. */
 const DIFF_LINES = 20
+
+/** How much of one line a diff in a refusal shows: a minified line can be the whole file. */
+const DIFF_LINE_CHARS = 400
 
 /**
  * The versions a session read, kept in memory only to show what changed when a write is refused:
@@ -106,6 +110,8 @@ export interface FileCall {
   /** As the agent wrote it. */
   readonly named: string
   readonly versions: ReadVersions
+  /** What the session may not read of what the call reads (`./withholding.ts`). */
+  readonly withholding: Withholding
 }
 
 /** The fingerprint of the version a session last read or wrote of a file, if it has one. */
@@ -188,7 +194,7 @@ export const attempt = <A>(run: (signal: AbortSignal) => Promise<A>) =>
  * was judged (`./judged.ts`), a failure otherwise.
  */
 export const failedOn = (reason: string, text: string): ToolAnswer =>
-  JUDGED_REFUSALS.includes(reason) ? refusal(`refused: ${text}`) : failure(text)
+  refusedAsJudged(reason) ? refusal(`refused: ${text}`) : failure(text)
 
 /** A page of a file as an agent reads it: its numbered lines, where it stands in the file, and the range. */
 export const pageSaid = (value: Page): string => {
@@ -209,7 +215,9 @@ export const fsRead = (call: FileCall, args: ToolArguments<'fs_read'>) =>
   Effect.gen(function* () {
     const offset = args.range?.offset ?? 0
     const length = args.range?.length ?? READ_PAGE_BYTES
-    const page = yield* attempt(() => readPage(call.path, offset, length)).pipe(Effect.result)
+    const page = yield* attempt(() => readPage(call.path, offset, length, call.withholding)).pipe(
+      Effect.result,
+    )
     if (Result.isFailure(page)) {
       return failedOn(page.failure, `could not read ${call.named}: ${page.failure}`)
     }
@@ -315,7 +323,7 @@ const describeSearch = (result: SearchResult, pattern: string): string => {
       ? []
       : [
           `${String(result.skippedCount)} file(s) not searched: ${result.skipped
-            .map((one) => `${one.path} (${one.reason})`)
+            .map((one) => `${one.path} (${one.reason === 'withheld' ? one.withheld : one.reason})`)
             .join(', ')}${result.skippedCount > result.skipped.length ? ', …' : ''}`,
         ]
   const lines = result.hits.map((hit) => `${hit.path}:${String(hit.line)}: ${hit.text}`)
@@ -332,6 +340,7 @@ export const search = (call: FileCall, args: ToolArguments<'search'>) =>
         glob: args.glob ?? null,
         cursor: args.cursor ?? null,
         signal,
+        withholding: call.withholding,
       }),
     ).pipe(Effect.result)
     if (Result.isFailure(found)) return failure(`the search did not run: ${found.failure}`)
@@ -382,8 +391,12 @@ export async function replaceFile(path: string, content: string): Promise<void> 
   }
 }
 
-/** The lines that differ between two versions, at most `DIFF_LINES`, masked. */
-const diffOf = (before: string, after: string, mask: (text: string) => string): string => {
+/**
+ * The lines that differ between two versions, at most `DIFF_LINES` of at most `DIFF_LINE_CHARS`
+ * each, masked in slices: a longer line is cut to its masked head (`maskedHead`), never masked
+ * whole, and the lines are masked again together, where a credential may span them.
+ */
+const diffOf = (before: string, after: string, secrets: SecretsRegistry) => {
   const old = before.split('\n')
   const now = after.split('\n')
   let start = 0
@@ -408,7 +421,14 @@ const diffOf = (before: string, after: string, mask: (text: string) => string): 
           `… ${String(lines.length - DIFF_LINES - 1)} more line(s)`,
         ]
       : lines
-  return mask(shownLines.join('\n'))
+  return Effect.gen(function* () {
+    const heads = yield* Effect.forEach(shownLines, (line) =>
+      line.length <= DIFF_LINE_CHARS
+        ? Effect.succeed(line)
+        : Effect.map(maskedHead(secrets, line, DIFF_LINE_CHARS), (head) => `${head}…`),
+    )
+    return yield* secrets.maskPaced(heads.join('\n'))
+  })
 }
 
 /**
@@ -439,7 +459,7 @@ const versionRefusal = (
     const change =
       before === undefined || current.text === null
         ? 'The version it read is no longer kept, so what changed cannot be shown.'
-        : `What changed:\n${diffOf(before, current.text, secrets.mask)}`
+        : `What changed:\n${yield* diffOf(before, current.text, secrets)}`
     return refusal(
       `refused: ${call.named} changed since this session read it; read it again before writing. ${change}`,
     )
@@ -447,11 +467,15 @@ const versionRefusal = (
 
 /**
  * The file as it is now: its text and fingerprint, or nothing when there is none. Read from the
- * file judged only (`./judged.ts`): what a link planted since leads to is never read, nor shown.
+ * file judged only (`./judged.ts`): what a link planted since leads to is never read, nor shown;
+ * what the session may not read, neither.
  */
-const currentOf = (path: string) =>
+const currentOf = (call: FileCall) =>
   attempt(async () => {
-    const handle = await openJudged(path, { oneNameFor: 'write' }).catch((cause: Error) => {
+    const handle = await openJudged(call.path, {
+      oneNameFor: 'write',
+      withholding: call.withholding,
+    }).catch((cause: Error) => {
       if (codeOf(cause) === 'ENOENT') return null
       throw cause
     })
@@ -508,7 +532,7 @@ const writeVersion = (call: FileCall, before: string | null, content: string) =>
 
 export const fsWrite = (call: FileCall, args: ToolArguments<'fs_write'>) =>
   Effect.gen(function* () {
-    const current = yield* currentOf(call.path).pipe(Effect.result)
+    const current = yield* currentOf(call).pipe(Effect.result)
     if (Result.isFailure(current)) {
       return failedOn(
         current.failure,
@@ -533,7 +557,7 @@ const occurrences = (text: string, anchor: string): number => {
 
 export const fsEdit = (call: FileCall, args: ToolArguments<'fs_edit'>) =>
   Effect.gen(function* () {
-    const current = yield* currentOf(call.path).pipe(Effect.result)
+    const current = yield* currentOf(call).pipe(Effect.result)
     if (Result.isFailure(current)) {
       return failedOn(
         current.failure,

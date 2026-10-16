@@ -318,6 +318,7 @@ describe("CT-17: the data folder's missions/ exception keeps missions isolated",
               Layer.mergeAll(
                 Layer.succeed(MissionPlaces, {
                   foldersOf: () => Effect.succeed({ own: 'AC-1', dependencies: ['AC-2'] }),
+                  evidenceNamed: () => Effect.succeed(null),
                 }),
                 Layer.succeed(ProfileHome, { dataFolder: data, version: '1', migrations: '' }),
               ),
