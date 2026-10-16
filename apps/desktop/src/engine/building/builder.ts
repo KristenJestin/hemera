@@ -283,8 +283,8 @@ const answerOf = (need: Need): string | null => {
 /**
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
  * start snapshot, after its end snapshot, after its verdict; before the proofs are written, between
- * a green run and its record, between the proofs written and a conflict handed over, between the
- * reds a start runs and its greens; once a start's resume read the end's step, before it brings
+ * a proof's files read and their write, between a green run and its record, between the proofs
+ * written and a conflict handed over, between the reds a start runs and its greens; once a start's resume read the end's step, before it brings
  * the Builder back; once it went past the Builder; where a Retry writes its proof back, in the
  * transaction that withdraws its need; once a need ended, before what it held is released; as its
  * event follower takes in an answer, before it acts on it; as a `proof_run` call begins to execute;
@@ -308,6 +308,7 @@ export type BuilderHold = (
     | 'bringing'
     | 'resumed'
     | 'proving'
+    | 'placed'
     | 'greening'
     | 'greens-due'
     | 'handing'
