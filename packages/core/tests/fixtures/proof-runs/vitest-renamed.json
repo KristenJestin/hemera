@@ -1,1 +1,53 @@
-{"numTotalTestSuites":1,"numPassedTestSuites":0,"numFailedTestSuites":1,"numPendingTestSuites":0,"numTotalTests":1,"numPassedTests":0,"numFailedTests":1,"numPendingTests":0,"numTodoTests":0,"snapshot":{"added":0,"failure":false,"filesAdded":0,"filesRemoved":0,"filesRemovedList":[],"filesUnmatched":0,"filesUpdated":0,"matched":0,"total":0,"unchecked":0,"uncheckedKeysByFile":[],"unmatched":0,"updated":0,"didUpdate":false},"startTime":1792155114639,"success":false,"testResults":[{"assertionResults":[{"ancestorTitles":[],"fullName":"saves","status":"failed","title":"saves","duration":3.236647999999988,"failureMessages":["AssertionError: expected 1 to be 2\n    at /work/acme/api/saves.test.ts:4:19\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"],"meta":{},"tags":[],"benchmarks":[]}],"startTime":1792155114752,"endTime":1792155114755.2366,"status":"failed","message":"","name":"/work/acme/api/saves.test.ts"}]}
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 1,
+  "numPassedTests": 0,
+  "numFailedTests": 1,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1792155114639,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "saves",
+          "status": "failed",
+          "title": "saves",
+          "duration": 3.236647999999988,
+          "failureMessages": [
+            "AssertionError: expected 1 to be 2\n    at /work/acme/api/saves.test.ts:4:19\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///work/acme/api/node_modules/.pnpm/vitest@5.0.1_@opentelemetry+api@1.9.1_@types+node@24.19.1_@vitest+browser-playwright@5._88ae9f3d0884c04027cf50c82d54a359/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1792155114752,
+      "endTime": 1792155114755.2366,
+      "status": "failed",
+      "message": "",
+      "name": "/work/acme/api/saves.test.ts"
+    }
+  ]
+}
