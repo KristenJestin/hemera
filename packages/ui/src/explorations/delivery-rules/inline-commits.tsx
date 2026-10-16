@@ -3,7 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { Frame } from '../../components/frame/frame.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
-import { COMMITS } from '../../blocks/project-settings/delivery-forms.tsx'
+import { COMMITS } from '../../blocks/project-settings/delivery-form-options.ts'
 import type { WhoCommits } from '../../blocks/project-settings/delivery-model.ts'
 
 /**

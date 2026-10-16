@@ -6,7 +6,7 @@ import { DeliveryPage } from '../../blocks/project-settings/delivery-page.tsx'
 import { IconGitMerge } from '../../icons.ts'
 import { findOpen } from '../../overlay-play.ts'
 import { ProjectSettings } from '../../surfaces/project-settings/project-settings.tsx'
-import { SECTIONS } from '../../surfaces/project-settings/settings-fixtures.tsx'
+import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
 import { HEMERA_RULES, LOCAL_CLEANUP_RULES, LOCAL_MERGE_RULES } from './open-questions-fixtures.ts'
 import { InlineCommits } from './inline-commits.tsx'
 
