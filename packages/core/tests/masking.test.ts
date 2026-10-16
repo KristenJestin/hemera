@@ -887,21 +887,31 @@ const markersOf = (text: string): ReadonlySet<string> =>
 /**
  * Masking hides at least all that masking the shapes in turn hid (`feature/1.0` before #381, the
  * oracle): no marker and no known value is left more often than the oracle leaves it, by any of
- * the functions that mask text, paced or not.
+ * the functions that mask text, paced or not. What a CLI printed also hides at least every value
+ * a key that names a credential holds, in any reading of its quotes (#412).
  */
 const hidesAtLeastTheOracle = async (text: string, known: ReadonlyArray<string>): Promise<void> => {
   const oracle = inTurn.maskText(text, known)
-  const masks = [
-    maskText(text, known),
+  const readings = inTurn.maskKeyedInEveryReading(text)
+  const texts = [maskText(text, known), await Effect.runPromise(maskTextPaced(text, known, 0))]
+  const printed = [
     maskPrinted(text, known),
-    await Effect.runPromise(maskTextPaced(text, known, 0)),
     await Effect.runPromise(maskPrintedPaced(text, known, 0)),
   ]
-  for (const masked of masks) {
-    for (const word of [...markersOf(text), ...known]) {
+  const words = [...markersOf(text), ...known]
+  for (const masked of [...texts, ...printed]) {
+    for (const word of words) {
       expect(occurrences(masked, word), `${word} in ${JSON.stringify(text)}`).toBeLessThanOrEqual(
         occurrences(oracle, word),
       )
+    }
+  }
+  for (const masked of printed) {
+    for (const word of words) {
+      expect(
+        occurrences(masked, word),
+        `${word} in a reading of ${JSON.stringify(text)}`,
+      ).toBeLessThanOrEqual(occurrences(readings, word))
     }
   }
 }
@@ -2123,6 +2133,98 @@ describe("A header's value is read by a scan, whatever its length (#412)", () =>
   }
 })
 
+describe('A key that names a credential in any reading of the quotes hides its value (#412)', () => {
+  // Where the quotes pair two ways, the reading kept was the one where `token` is not a key, and
+  // its value was shown. Every reading is now weighed: a key so named in any of them hides its
+  // value, as masking fails closed everywhere else.
+  test('the input where the quotes pair two ways hides the value of its token', async () => {
+    const text = '[ {"t": {"token": {"v": "plainSx1Zq"}}, "b": "[1, "} ", 2] tail'
+    expect(inTurn.maskKeyedInEveryReading(text)).not.toContain('plainSx1Zq')
+    const [masked = ''] = await printedForms([text], [])
+    expect(masked).not.toContain('plainSx1Zq')
+    expect(masked).toContain('"[1, "} ", 2] tail')
+    await hidesAtLeastTheOracle(text, [])
+  })
+
+  test('a number or a literal a credential holds is hidden as a string is', async () => {
+    // Named so that no shape of text reads a value after it (`tokens` is no label): only the
+    // reading of the key hides it.
+    const texts = [
+      '[ {"t": {"tokens": 987654321}, "b": "[1, "} ", 2] tail',
+      '[ {"t": {"secrets": true}, "b": "[1, "} ", 2] tail',
+    ]
+    const [number = '', literal = ''] = await printedForms(texts, [])
+    expect(number).not.toContain('987654321')
+    expect(literal).not.toContain('true')
+  })
+
+  test('a value cut short is hidden to where its reading breaks', async () => {
+    const texts = [
+      'Said: {"token": [1, "plainSx2Zq" oops',
+      'Said: {"token": "plainSx3Zq\nnext',
+      'Said: {"a": {"secret": {"b": "plainSx4Zq"',
+      'Said: {"\\u0074oken": "plainSx6Zq" oops',
+      'Said: {"token": ["plainSx7Zq", {"secret": [1 oops',
+    ]
+    for (const masked of await printedForms(texts, [])) {
+      expect(masked).not.toMatch(/Sx\d+Zq/)
+      expect(masked).toMatch(/^Said: \{"/)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test("a credential's value is hidden, and what follows it is not", async () => {
+    const text =
+      'Said: [{"token": 1}, "seen1", {"password": "x"}, "seen2", {"secret": {"a": 1}}, "seen3"] tail'
+    expect(await printedForms([text], [])).toEqual([
+      `Said: [{"token": "${MASK}"}, "seen1", {"password": "${MASK}"}, "seen2", {"secret": "${MASK}"}, "seen3"] tail`,
+    ])
+  })
+
+  test('a key so named in the reading of a line kept as JSON is masked as before', async () => {
+    const text = 'Said: {"token": {"v": "plainSx5Zq"}, "b": 1}'
+    expect(await printedForms([text], [])).toEqual([`Said: {"token": "${MASK}", "b": 1}`])
+  })
+
+  test('outputs of quotes, brackets and keys, every reading weighed, 5,000 samples', async () => {
+    const piece = fc.oneof(
+      {
+        weight: 6,
+        arbitrary: fc.constantFrom(
+          '"',
+          '"token"',
+          '"password": ',
+          '"a"',
+          ': ',
+          ':',
+          ',',
+          ', ',
+          '{',
+          '}',
+          '[',
+          ']',
+          ' ',
+          '\n',
+          '1',
+          'null',
+          '\\"',
+          'x',
+          'tail',
+        ),
+      },
+      { weight: 2, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
+      { weight: 1, arbitrary: fc.nat({ max: 999 }).map((index) => `"Mk${index}Zq"`) },
+    )
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(piece, { minLength: 1, maxLength: 24 }).map((parts) => parts.join('')),
+        (text) => hidesAtLeastTheOracle(text, []),
+      ),
+      { numRuns: 5_000 },
+    )
+  })
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => void, times: number): number => {
   const start = performance.now()
@@ -2276,6 +2378,30 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
         JSON.stringify(
           Array.from({ length: size / 60 }, () => '{"password":"x","note":"token=\\"a b\\""}'),
         ),
+      printed,
+      4_000,
+    ],
+    [
+      'a header value of escaped quotes (#412)',
+      (size) => 'Cookie: \\"'.repeat(size / 10),
+      printed,
+      4_000,
+    ],
+    [
+      'header values quoted and cut by an escaped line end (#412)',
+      (size) => 'Cookie:"x\\\nCookie: "a \\"b\\" c\n'.repeat(size / 30),
+      printed,
+      4_000,
+    ],
+    [
+      'credentials that each open a container never closed (#412)',
+      (size) => '{"token":'.repeat(size / 9),
+      printed,
+      4_000,
+    ],
+    [
+      'credentials in containers that break, line after line (#412)',
+      (size) => 'Said: [{"password": [1, "x"], "\\u0074oken": "y" oops\n'.repeat(size / 50),
       printed,
       4_000,
     ],

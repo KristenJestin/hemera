@@ -925,9 +925,11 @@ const escapedAt = (text: string, floor: number, at: number): boolean => {
  *   other way crosses the others, and gives way; of two held values that cross, the longer stays;
  * - between all those, every string opened by a quote no backslash escapes and closed before the
  *   next of them.
+ *
+ * On top, the values that keys naming a credential hold, in any reading (`containersIn`).
  */
-function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
-  const { complete, held } = yield* containersIn(text)
+function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<Written> {
+  const { complete, held, keyed } = yield* containersIn(text)
   const outer: Span[] = []
   for (const value of yield* inOrder(yield* byStart(complete), lines, ([start]) => start)) {
     if (value[0] >= (outer.at(-1)?.[1] ?? 0)) outer.push(value)
@@ -971,7 +973,14 @@ function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyA
     gapStart = values[index]?.[1] ?? text.length
     if (due()) yield
   }
-  return yield* inOrder(values, strings, ([start]) => start)
+  return { values: yield* inOrder(values, strings, ([start]) => start), keyed }
+}
+
+/** The JSON values written in a text, and the values keys that name a credential hold. */
+interface Written {
+  readonly values: ReadonlyArray<Span>
+  /** In any reading of the text's quotes, in order and apart (`containersIn`). */
+  readonly keyed: ReadonlyArray<Span>
 }
 
 /**
@@ -1019,6 +1028,13 @@ interface Reader {
   expected: Expected
   /** Where it reads on; in a string, once the string ends there. */
   at: number
+  /** Whether the value it reads next is held by a key that names a credential. */
+  keyed: boolean
+  /**
+   * The containers open that such a key holds, two numbers each: how many containers were open
+   * once it opened, then where it starts.
+   */
+  readonly secrets: number[]
 }
 
 /** What closes the innermost container open in a reader, if one is. */
@@ -1050,6 +1066,14 @@ interface Readers {
 interface Containers {
   readonly complete: ReadonlyArray<Span>
   readonly held: ReadonlyArray<Span>
+  /** The values keys that name a credential hold, in any reader, in order and apart. */
+  readonly keyed: ReadonlyArray<Span>
+}
+
+/** The name a key of the text says, from its quote to after its closing quote. */
+function* keyName(text: string, start: number, end: number): Steps<string> {
+  const plain = text.slice(start + 1, end - 1)
+  return plain.includes('\\') ? (yield* readString(text, start, end)).read : plain
 }
 
 /**
@@ -1061,6 +1085,10 @@ interface Containers {
  * strings where the other reads between them. So two readers at most run at once, one between
  * strings and one in a string, and they swap at each quote: each character is read once by each,
  * and the text is crossed twice at most.
+ *
+ * The two readers are the two ways the quotes pair, and both are weighed (#412): a key that names a
+ * credential in either hides the value it holds, from where it begins to where it ends, or to where
+ * the reader broke when it broke first, as a field so named is masked whole in JSON.
  */
 function* containersIn(text: string): Steps<Containers> {
   const complete: Span[] = []
@@ -1073,10 +1101,18 @@ function* containersIn(text: string): Steps<Containers> {
    * kept to the end in one list: millions of readers may break, most holding one value or none.
    */
   const broken: number[] = []
-  const broke = (reader: Reader) => {
+  /** The values keys that name a credential hold, as the readers find them. */
+  const keyed: Span[] = []
+  const secret = (start: number, end: number) => {
+    if (end > start) keyed.push([start, end])
+  }
+  /** A reader broke at `at`: what it held whole is kept, and a credential's value open hidden to there. */
+  const broke = (reader: Reader, at: number) => {
     for (let index = 0; index + 2 < reader.held.length; index += 3) {
       broken.push(reader.held[index + 1] ?? 0, reader.held[index + 2] ?? 0)
     }
+    // The values open run to the same place: the outermost holds all the others.
+    if (reader.secrets.length > 0) secret(reader.secrets[1] ?? at, at)
   }
   /** The innermost container open in a reader holds a value whole. */
   const hold = (reader: Reader, start: number, end: number) => {
@@ -1114,8 +1150,16 @@ function* containersIn(text: string): Steps<Containers> {
           held: [],
           expected: 'value',
           at: opener,
+          keyed: false,
+          secrets: [],
         }
-      } else return { complete, held: yield* heldIn(broken) }
+      } else {
+        return {
+          complete,
+          held: yield* heldIn(broken),
+          keyed: yield* union(yield* byStart(keyed), []),
+        }
+      }
       continue
     }
     const at = jsonSpace(text, reader.at)
@@ -1124,9 +1168,14 @@ function* containersIn(text: string): Steps<Containers> {
     if ((first === '{' || first === '[') && reader.expected === 'value') {
       const closes = first === '{' ? '}' : ']'
       const inside = jsonSpace(text, at + 1)
-      if (text.charAt(inside) === closes) read(reader, at, inside + 1)
-      else {
+      const keyedHere = reader.keyed
+      reader.keyed = false
+      if (text.charAt(inside) === closes) {
+        if (keyedHere) secret(at, inside + 1)
+        read(reader, at, inside + 1)
+      } else {
         reader.starts.push(at)
+        if (keyedHere) reader.secrets.push(reader.starts.length, at)
         reader.expected = closes === '}' ? 'key' : 'value'
         reader.at = at + 1
       }
@@ -1134,6 +1183,10 @@ function* containersIn(text: string): Steps<Containers> {
       // What it held goes with it: it is now held whole itself.
       const depth = reader.starts.length
       while (reader.held.length > 0 && reader.held.at(-3) === depth) reader.held.length -= 3
+      if (reader.secrets.at(-2) === depth) {
+        secret(reader.secrets.at(-1) ?? at, at + 1)
+        reader.secrets.length -= 2
+      }
       read(reader, reader.starts.pop() ?? at, at + 1)
     } else if (closing !== undefined && first === ',' && reader.expected === 'after') {
       reader.expected = closing === '}' ? 'key' : 'value'
@@ -1146,19 +1199,28 @@ function* containersIn(text: string): Steps<Containers> {
       const other = readers.inString
       readers.inString = null
       const { stop, closed } = stringStop(text, at)
+      // A credential's value that is a string, closed or cut where it stops.
+      if (reader.expected === 'value' && reader.keyed) secret(at, stop)
+      reader.keyed = false
       if (closed && (reader.expected === 'value' || reader.expected === 'key')) {
         if (reader.starts.length > 0) hold(reader, at, stop)
+        if (reader.expected === 'key') {
+          reader.keyed = CREDENTIAL_FIELD.test(yield* keyName(text, at, stop))
+        }
         reader.expected = reader.expected === 'key' ? 'colon' : 'after'
         reader.at = stop
         readers.inString = reader
-      } else broke(reader)
+      } else broke(reader, closed ? at : stop)
       stops(at + 1)
       if (other?.at === at + 1) readers.between = other
-      else if (other !== null) broke(other)
+      else if (other !== null) broke(other, other.at)
     } else if (reader.expected === 'value' && jsonScalarEnd(text, at) !== -1) {
-      read(reader, -1, jsonScalarEnd(text, at))
+      const end = jsonScalarEnd(text, at)
+      if (reader.keyed) secret(at, end)
+      reader.keyed = false
+      read(reader, -1, end)
     } else {
-      broke(reader)
+      broke(reader, at)
       stops(at)
     }
   }
@@ -1361,8 +1423,10 @@ function* printedMasked(
 ): Steps<string> {
   const allJson = yield* jsonRead(text)
   const { lines, mixed } = allJson ? { lines: [], mixed: false } : yield* jsonLines(text)
-  const values: ReadonlyArray<Span> = allJson ? [[0, text.length]] : yield* writtenJson(text, lines)
-  const shapes = yield* union(yield* hiddenSpans(text, known), hiddenAbove)
+  const { values, keyed }: Written = allJson
+    ? { values: [[0, text.length]], keyed: [] }
+    : yield* writtenJson(text, lines)
+  const shapes = yield* union(yield* union(yield* hiddenSpans(text, known), hiddenAbove), keyed)
   const hidden = allJson ? shapes : yield* union(shapes, yield* readAsStrings(text, values, known))
   const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
   const edits: Edit[] = []
