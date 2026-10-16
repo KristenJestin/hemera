@@ -54,6 +54,15 @@ const CREDENTIAL_HEADER = new RegExp(
   'gi',
 )
 
+/**
+ * The header as masking read it before #401, its value stopped at any quote, escaped or not: the
+ * shapes read in turn as the oracle reads them read it this way (`asTheOracleReads`).
+ */
+const CREDENTIAL_HEADER_TO_A_QUOTE = new RegExp(
+  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
+  'gi',
+)
+
 /** A bare `Bearer` credential, and a `Basic` one written as the header writes it. */
 const BEARER = /\b(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi
 const BASIC = /\b(?<keep>Basic\s+)[A-Za-z0-9+/]{8,}={0,2}/g
@@ -245,22 +254,72 @@ const resumeAt = (text: string, start: number, hiddenFrom: number, end: number):
   return at > start ? at : end
 }
 
-/** The stretches one shape hides in a text, in order. */
-function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> {
+/** The stretches one shape hides in a text, in order, and whether one began inside another. */
+interface Found {
+  readonly spans: ReadonlyArray<Span>
+  /**
+   * Whether a match began before the end of the one found before it: only a search that went on
+   * from inside a match (`resumeAt`) finds one. Where none did, each search found what a search
+   * from the end of the match before finds, as the oracle searched: the first match from a
+   * position past that end.
+   */
+  readonly resumed: boolean
+}
+
+/**
+ * The stretches one shape hides in a text, in order. Each search goes on from the last name of
+ * the match before (`resumeAt`), or, read as the oracle reads, from its end.
+ */
+function* shapeFound(text: string, pattern: RegExp, resume: boolean): Steps<Found> {
   const spans: Span[] = []
+  let resumed = false
   let from = 0
+  let reached = 0
   for (;;) {
     const match = matchFrom(pattern, text, from)
     if (match === null) break
     const end = match.index + match[0].length
     const hiddenFrom = match.index + (match.groups?.['keep']?.length ?? 0)
     spans.push([hiddenFrom, end])
-    from = resumeAt(text, match.index, hiddenFrom, end)
+    if (match.index < reached) resumed = true
+    reached = Math.max(reached, end)
+    from = resume ? resumeAt(text, match.index, hiddenFrom, end) : end
     if (due()) yield
   }
   // A step at the end: the pattern may have crossed the whole text without a match.
   yield
-  return spans
+  return { spans, resumed }
+}
+
+/** The stretches one shape hides in a text, in order. */
+function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> {
+  return (yield* shapeFound(text, pattern, true)).spans
+}
+
+/** An escaped quote: the only place where the two ways of reading a header's value part. */
+const ESCAPED_QUOTE = /\\["']/
+
+/**
+ * The shapes read in turn exactly as the oracle reads them (`feature/1.0` before #381): each on
+ * the text where the known values and all the shapes before it found are written over, a header's
+ * value stopped at any quote as before #401, and each search going on from the end of the match
+ * before, as before #391.
+ */
+function* asTheOracleReads(
+  text: string,
+  knownHidden: ReadonlyArray<Span>,
+): Steps<ReadonlyArray<Span>> {
+  let view = knownHidden.length > 0 ? yield* writtenOver(text, knownHidden) : text
+  let hidden = knownHidden
+  for (const pattern of SHAPES) {
+    const read = pattern === CREDENTIAL_HEADER ? CREDENTIAL_HEADER_TO_A_QUOTE : pattern
+    const { spans } = yield* shapeFound(view, read, false)
+    if (spans.length > 0) {
+      hidden = yield* union(hidden, spans)
+      view = yield* writtenOver(view, spans)
+    }
+  }
+  return hidden
 }
 
 /**
@@ -269,20 +328,30 @@ function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> 
  *
  * - each shape on the text as it was given: no shape sees what another hid, so a shape that takes
  *   the first word of another cannot hide the rest of it (`Bearer password=https://u:x@h`);
- * - the shapes in turn, as masking used to read them: each on the text where the known values and
- *   all the shapes before it found are written over. A value that stops at a space, a quote or a
- *   line end then runs on through what an earlier shape hid, and hides what is glued after it
- *   (`password=<private key>x`);
- * - each shape once more, on the text where the known values, and every stretch the two readings
- *   found that holds a space or a quote up to its last one, are written over. A value hidden by
+ * - the shapes in turn: each on the text where the known values and all the shapes before it found
+ *   are written over. A value that stops at a space, a quote or a line end then runs on through
+ *   what an earlier shape hid, and hides what is glued after it (`password=<private key>x`). This
+ *   is read with the shapes as they are, and once more exactly as the oracle reads it
+ *   (`asTheOracleReads`), so that the union hides at least all the oracle hid (#417). The two
+ *   part in two places only: a header's value now runs on through an escaped quote (#401), and a
+ *   search now goes on from the last name of a match (#391). Either may hide the name of a shape
+ *   written after it (`Authorization: \"https://u:…@`, `Bearer a.bearer https://u:…@`), which
+ *   then reads no value through what an earlier shape hid. Where the text holds no escaped quote
+ *   (the two headers take the same characters) and no match of the first began inside the one
+ *   before it (`Found`), the two read the same: each shape finds the same stretches on the same
+ *   text, so the second is not read;
+ * - each shape once more, on the text where the known values, and every stretch the first two
+ *   readings found (the oracle's aside) that holds a space or a quote up to its last one, are
+ *   written over. A value hidden by
  *   itself, quoted or spaced, no longer stops the value it stands in (`password=token="a b"x`,
  *   `https://u:token="a b"x@h`), whichever shape found it. What holds neither is left as it is: it
  *   stops no value that stops at a space or a quote, and the names in it stay readable (`Bearer
  *   password=…`, `password=<private key>token: "a"x`).
  *
- * The union hides at least what any reading hides, and its cost is three scans of each shape. On
- * top, every known value as a JSON string writes it (`se\"same`): in its own reading, since
- * written over in the others it would hide what the shapes read around it.
+ * The union hides at least what any reading hides, and its cost is three scans of each shape, four
+ * where the oracle's reading is read. On top, every known value as a JSON string writes it
+ * (`se\"same`): in its own reading, since written over in the others it would hide what the
+ * shapes read around it.
  */
 function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
   const escapedHidden = yield* knownSpans(text, escapedForms(known))
@@ -297,20 +366,26 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
     view = yield* writtenOver(text, knownHidden)
     written = true
   }
+  let resumed = false
   for (const pattern of SHAPES) {
-    const found = yield* shapeSpans(text, pattern)
-    spans = yield* union(spans, found)
-    closed = yield* union(closed, yield* closedSpans(text, found))
-    const foundInTurn = written ? yield* shapeSpans(view, pattern) : found
-    if (foundInTurn.length > 0) {
-      inTurn = yield* union(inTurn, foundInTurn)
+    const found = yield* shapeFound(text, pattern, true)
+    spans = yield* union(spans, found.spans)
+    closed = yield* union(closed, yield* closedSpans(text, found.spans))
+    const foundInTurn = written ? yield* shapeFound(view, pattern, true) : found
+    if (foundInTurn.resumed) resumed = true
+    if (foundInTurn.spans.length > 0) {
+      inTurn = yield* union(inTurn, foundInTurn.spans)
       if (foundInTurn !== found)
-        closed = yield* union(closed, yield* closedSpans(text, foundInTurn))
-      view = yield* writtenOver(view, foundInTurn)
+        closed = yield* union(closed, yield* closedSpans(text, foundInTurn.spans))
+      view = yield* writtenOver(view, foundInTurn.spans)
       written = true
     }
   }
-  spans = yield* union(yield* union(spans, inTurn), escapedHidden)
+  spans = yield* union(spans, inTurn)
+  if (resumed || ESCAPED_QUOTE.test(text)) {
+    spans = yield* union(spans, yield* asTheOracleReads(text, knownHidden))
+  }
+  spans = yield* union(spans, escapedHidden)
   // Nothing closed: the third reading would read the text as the first did.
   if (closed.length === 0) return spans
   const opened = yield* writtenOver(text, closed)

@@ -905,6 +905,97 @@ const hidesAtLeastTheOracle = async (text: string, known: ReadonlyArray<string>)
   }
 }
 
+/** The known values of the outputs built from fragments: plain, with a quote, a backslash, digits, a letter beyond ASCII. */
+const FRAGMENT_KNOWN = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD']
+/** A piece of an output: a name, a separator, a shape's start, a marker, a known value. */
+const fragment = fc.oneof(
+  {
+    weight: 8,
+    arbitrary: fc.constantFrom(
+      'password',
+      'token',
+      'api_key',
+      'secret',
+      '=',
+      ': ',
+      ':',
+      '"',
+      "'",
+      ' ',
+      '\n',
+      ',',
+      '-',
+      '_',
+      '.',
+      '/',
+      '@',
+      '\\',
+      'Bearer ',
+      'Authorization: ',
+      'Cookie: ',
+      'set-cookie=',
+      'Basic ',
+      '://',
+      'https://u:',
+      '@h.test',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      '-----END RSA PRIVATE KEY-----',
+      'ghp_',
+      'ghp_ABCDEFGHIJKLMNOPQR',
+      'sk-abcdefgh',
+      'AKIAABCDEFGHIJKLMNOP',
+      'eyJ',
+      '.eyJ',
+      '-eyJ',
+      '123',
+      '{',
+      '}',
+      '[',
+      ']',
+      'x',
+    ),
+  },
+  { weight: 3, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
+  { weight: 1, arbitrary: fc.constantFrom(...FRAGMENT_KNOWN) },
+)
+/** Prose made of pieces. */
+const fragmentText = fc
+  .array(fragment, { minLength: 1, maxLength: 14 })
+  .map((parts) => parts.join(''))
+/** JSON whose strings and keys are made of pieces. */
+const fragmentJson = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
+  value: fc.oneof(
+    { depthSize: 'small', withCrossShrink: true },
+    fragmentText,
+    fc.constantFrom(123, 9876543, true, null),
+    fc.array(tie('value'), { minLength: 1, maxLength: 3 }),
+    fc.dictionary(fc.oneof(fragmentText, fc.constantFrom('a', 'token', 'cookie')), tie('value'), {
+      minKeys: 1,
+      maxKeys: 3,
+    }),
+  ),
+})).value
+/** What a CLI may print: prose, JSON, or lines of either. */
+const fragmentOutputs = fc.oneof(
+  fragmentText,
+  fragmentJson.map((value) => JSON.stringify(value)),
+  fc
+    .tuple(
+      fc.array(
+        fc.oneof(
+          fragmentText,
+          fragmentJson.map((value) => JSON.stringify(value)),
+        ),
+        {
+          minLength: 1,
+          maxLength: 4,
+        },
+      ),
+      fc.constantFrom('\n', '\r\n'),
+    )
+    .map(([lines, end]) => lines.join(end)),
+)
+
 describe('Masking hides at least all that masking the shapes in turn hid', () => {
   const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
   // A stretch an earlier shape hid holds a space, a quote or a line end; masked first, it let a
@@ -928,6 +1019,133 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
     })
   }
 
+  test('the counterexample of #417: a header value through an escaped quote, a URL in it', async () => {
+    const text = `${JSON.stringify({
+      Mk0Zq: { a: 'Authorization: kn"own2BBhttps://u:knownAAA1' },
+      'set-cookie=/password': { a: 'Mk0Zq@', Mk0Zq: 'password' },
+    })}\n"password"`
+    expect(occurrences(inTurn.maskText(text, FRAGMENT_KNOWN), 'Mk0Zq')).toBe(2)
+    await hidesAtLeastTheOracle(text, FRAGMENT_KNOWN)
+  })
+
+  // A header's value runs on through an escaped quote (#401), over the name of a URL in it; the
+  // URL's password, read in turn, runs through what a shape hid before it (a `/` that stopped it).
+  const swallowers = [
+    String.raw`Authorization: \"`,
+    String.raw`Cookie: a\"`,
+    String.raw`set-cookie=\"b`,
+    String.raw`Proxy-Authorization: x\"`,
+    String.raw`Authorization: \'`,
+    String.raw`Cookie: a\'`,
+  ]
+  const blockers = ['cookie=/x', 'Cookie:/x', 'BBDC-abcdefghijklmnop/q']
+  for (const swallower of swallowers) {
+    for (const blocker of blockers) {
+      test(`a URL's password in a header value after an escaped quote, through ${blocker} (#417): ${swallower}`, async () => {
+        // The header's value ends at the next quote of the kind it escaped.
+        const quote = swallower.includes("\\'") ? "'" : '"'
+        const text = `${swallower}https://u:${blocker}${quote}Sx1Zq@h.test`
+        expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+        await hidesAtLeastTheOracle(text, [])
+        await hidesAtLeastTheOracle(JSON.stringify({ body: text }), [])
+      })
+    }
+  }
+
+  // The other way round: a URL's password holds a header whose value runs on through an escaped
+  // quote, over a `/` that stops the password; read in turn, the password runs on through it. Read
+  // only as before #401, the header stops at the escaped quote, and the `/` stops the password.
+  const runOn = [
+    String.raw`Cookie:\"a/"`,
+    String.raw`cookie=a\"b/"`,
+    String.raw`Authorization:\"/"`,
+    String.raw`set-cookie=\'a/'`,
+  ]
+  for (const header of runOn) {
+    test(`a header value run on through an escaped quote, in a URL's password, read in turn (#417): ${header}`, async () => {
+      await leavesNoMarkerIn(`https://u:${header}Sx1Zq@h.test`, [])
+    })
+  }
+
+  test('a Bearer value whose search resumed at its last word takes the name of a URL (#417)', async () => {
+    const text = 'Bearer a.bearer https://u:cookie=/x"Mk1Zq@'
+    expect(inTurn.maskText(text, [])).toBe('Bearer ••• https://u:•••@')
+    await hidesAtLeastTheOracle(text, [])
+    await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+  })
+
+  // A search that resumes at the last word of its match (`Bearer a.bearer …`) finds a match the
+  // oracle never found, which takes the name of a URL written after it; read in turn, the URL's
+  // password ran on through what an earlier shape hid, as the oracle reads it.
+  const resumedPrefixes = ['Bearer a.bearer ', 'Bearer a.Bearer ']
+  const stoppers = ['cookie=/x', 'Cookie:/x', 'set-cookie=/password', 'BBDC-abcdefghijklmnop/q']
+  for (const prefix of resumedPrefixes) {
+    for (const stopper of stoppers) {
+      for (const quote of ['"', "'"]) {
+        test(`a URL after a resumed Bearer value, through ${stopper} and ${quote} (#417): ${prefix}`, async () => {
+          const text = `${prefix}https://u:${stopper}${quote}Sx1Zq@h.test`
+          expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+          await hidesAtLeastTheOracle(text, [])
+          await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+        })
+      }
+    }
+  }
+
+  test('texts of a shape, a later shape, a stretch that stops it, and a marker, 5,000 samples (#417)', async () => {
+    const before = fc.constantFrom(
+      '',
+      'Bearer a.bearer ',
+      'Bearer a.Bearer ',
+      String.raw`Authorization: \"`,
+      String.raw`Cookie: \'`,
+      String.raw`Authorization: \\\"`,
+      'password=a.password=',
+      'token=x.token=',
+      'cookie=a.cookie=',
+      'Basic abcdefgh.Basic ',
+      'sk-abcdefgh.',
+      'x ',
+      'Authorization: x\\',
+      String.raw`Cookie: "`,
+      String.raw`set-cookie=\"`,
+      'api_key=a.token=',
+    )
+    const later = fc.constantFrom(
+      'https://u:',
+      'ftp://v:',
+      'password=',
+      'token: ',
+      'cookie=',
+      'Bearer ',
+      'Authorization: ',
+      'api_key=',
+    )
+    const stretch = fc.constantFrom(
+      'cookie=/x',
+      'Cookie:/x',
+      'set-cookie=/password',
+      'BBDC-abcdefghijklmnop/q',
+      'password=/x',
+      'Bearer x/',
+      'token=/x',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'Authorization:/x',
+      '',
+    )
+    const stop = fc.constantFrom('"', "'", ' ', '', String.raw`\"`, '/', '"a b"')
+    const after = fc.constantFrom('@', '@h.test', '', ' ', '"')
+    await fc.assert(
+      fc.asyncProperty(before, later, stretch, stop, after, async (...parts) => {
+        const [head, name, inValue, stopped, tail] = parts
+        const text = `${head}${name}${inValue}${stopped}Mk1Zq${tail}`
+        await hidesAtLeastTheOracle(text, [])
+        await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+      }),
+      { numRuns: 5_000 },
+    )
+  })
+
   test('every shape nested in another, at every position', async () => {
     const indexes = writings('', '').map((_, index) => index)
     const known = ['kn0wnSx1Zq', 'kn0wnSx2Zqx']
@@ -944,92 +1162,20 @@ describe('Masking hides at least all that masking the shapes in turn hid', () =>
   })
 
   test('outputs built from fragments, 5,000 samples', async () => {
-    const known = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD']
-    const fragment = fc.oneof(
-      {
-        weight: 8,
-        arbitrary: fc.constantFrom(
-          'password',
-          'token',
-          'api_key',
-          'secret',
-          '=',
-          ': ',
-          ':',
-          '"',
-          "'",
-          ' ',
-          '\n',
-          ',',
-          '-',
-          '_',
-          '.',
-          '/',
-          '@',
-          '\\',
-          'Bearer ',
-          'Authorization: ',
-          'Cookie: ',
-          'set-cookie=',
-          'Basic ',
-          '://',
-          'https://u:',
-          '@h.test',
-          '-----BEGIN RSA PRIVATE KEY-----',
-          '-----END RSA PRIVATE KEY-----',
-          'ghp_',
-          'ghp_ABCDEFGHIJKLMNOPQR',
-          'sk-abcdefgh',
-          'AKIAABCDEFGHIJKLMNOP',
-          'eyJ',
-          '.eyJ',
-          '-eyJ',
-          '123',
-          '{',
-          '}',
-          '[',
-          ']',
-          'x',
-        ),
-      },
-      { weight: 3, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
-      { weight: 1, arbitrary: fc.constantFrom(...known) },
-    )
-    const text = fc.array(fragment, { minLength: 1, maxLength: 14 }).map((parts) => parts.join(''))
-    const json = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
-      value: fc.oneof(
-        { depthSize: 'small', withCrossShrink: true },
-        text,
-        fc.constantFrom(123, 9876543, true, null),
-        fc.array(tie('value'), { minLength: 1, maxLength: 3 }),
-        fc.dictionary(fc.oneof(text, fc.constantFrom('a', 'token', 'cookie')), tie('value'), {
-          minKeys: 1,
-          maxKeys: 3,
-        }),
-      ),
-    })).value
-    const printed = fc.oneof(
-      text,
-      json.map((value) => JSON.stringify(value)),
-      fc
-        .tuple(
-          fc.array(
-            fc.oneof(
-              text,
-              json.map((value) => JSON.stringify(value)),
-            ),
-            {
-              minLength: 1,
-              maxLength: 4,
-            },
-          ),
-          fc.constantFrom('\n', '\r\n'),
-        )
-        .map(([lines, end]) => lines.join(end)),
-    )
     await fc.assert(
-      fc.asyncProperty(printed, (output) => hidesAtLeastTheOracle(output, known)),
+      fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
       { numRuns: 5_000 },
+    )
+  })
+
+  test('outputs built from fragments, on the seed and path that once left a marker (#417)', async () => {
+    await fc.assert(
+      fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
+      {
+        seed: 1_744_443_877,
+        path: '4870:1:0:4:2:4:5:6:12:10:10:11:10:10:10:10:10:10:10:19:18:19:17:20:9:15:14:15:16:16:16:16:16:16:16:16',
+        endOnFailure: true,
+      },
     )
   })
 })
