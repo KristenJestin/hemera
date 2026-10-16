@@ -945,6 +945,7 @@ export const DELIVERY_PROBLEM_CODES = [
   'local-merge-outside-local',
   'once-per-delivery-after-each-task',
   'step-after-workspace-removed',
+  'step-after-worktrees-removed',
   'duplicate-step-id',
   'step-placed-after-itself',
   'unknown-repository',
@@ -1112,7 +1113,31 @@ const ONCE_PER_DELIVERY = [
   ['pull-request', 'opens a pull request', 'a pull request is opened once per delivery'],
   ['merge', 'merges', 'a branch is merged once per delivery'],
   ['ci', 'waits for CI', 'CI checks a delivery once, after it is pushed'],
+  ['remove-worktrees', 'removes the worktrees', 'they are removed once, when the mission ends'],
+  ['remove-workspace', 'removes the Workspace', 'it is removed once, when the mission ends'],
 ] as const
+
+interface AfterRemoval {
+  readonly step: DeliveryAction
+  readonly removed: 'Workspace' | 'worktrees'
+}
+
+/**
+ * The actions that run after a removal, each with what was removed: nothing runs once the
+ * Workspace is gone, and once the worktrees are, only the Workspace can still be removed.
+ */
+function afterRemovals(steps: ReadonlyArray<DeliveryAction>): AfterRemoval[] {
+  const found: AfterRemoval[] = []
+  let removed: AfterRemoval['removed'] | null = null
+  for (const step of steps) {
+    if (removed === 'Workspace' || (removed === 'worktrees' && step.kind !== 'remove-workspace')) {
+      found.push({ step, removed })
+    }
+    if (step.kind === 'remove-workspace') removed = 'Workspace'
+    else if (step.kind === 'remove-worktrees' && removed === null) removed = 'worktrees'
+  }
+  return found
+}
 
 const PRESET_NAMES: Readonly<Record<DeliveryPreset, string>> = {
   library: 'Library',
@@ -1356,17 +1381,34 @@ export function validateRules(
       )
     }
   }
-  // 10c. Nothing runs in Cleanup once the Workspace is removed.
-  const removed = cleanup.findIndex((step) => step.kind === 'remove-workspace')
-  for (const step of removed === -1 ? [] : cleanup.slice(removed + 1)) {
-    problems.push(
-      problem(
-        'step-after-workspace-removed',
-        null,
-        step.id,
-        `Cleanup runs “${step.id}” after removing the Workspace, but nothing runs once it is gone.`,
-      ),
+  // 10c. Nothing runs once the Workspace is removed, and once the worktrees are, only its removal:
+  // in Cleanup, the Project's, then in each repository's order when one of its moments removes.
+  const removal = (
+    where: string,
+    repositoryId: string | null,
+    after: ReadonlyArray<AfterRemoval>,
+  ) =>
+    after.map(({ step, removed }) =>
+      removed === 'Workspace'
+        ? problem(
+            'step-after-workspace-removed',
+            repositoryId,
+            step.id,
+            `${where} runs “${step.id}” after removing the Workspace, but nothing runs once it is gone.`,
+          )
+        : problem(
+            'step-after-worktrees-removed',
+            repositoryId,
+            step.id,
+            `${where} runs “${step.id}” after removing the worktrees, but only the Workspace can be removed once they are gone.`,
+          ),
     )
+  problems.push(...removal('Cleanup', null, afterRemovals(cleanup)))
+  for (const { repository, own, all } of facts) {
+    if (!own.some((step) => step.kind === 'remove-workspace' || step.kind === 'remove-worktrees')) {
+      continue
+    }
+    problems.push(...removal(repository.name, repository.id, afterRemovals(all)))
   }
   // 11. Each step has an id of its own: overrides and plans address steps by id.
   const twice = (where: string, id: string) =>

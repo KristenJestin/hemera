@@ -1063,10 +1063,11 @@ function withActions(
 /** What a moment holds but cannot run, each refused with its reason ("Checks explain", below). */
 const CANNOT_RUN_IN: Partial<Record<DeliveryMoment | 'cleanup', ReadonlyArray<ActionKind>>> = {
   // Done once per delivery; a bump before Ship, while shared publishes only after Ship.
-  tasks: ['pull-request', 'merge', 'ci', 'bump'],
-  preparation: ['bump'],
-  // Cleanup already ends on removing the Workspace: what follows a removal cannot run.
-  cleanup: ['remove-workspace'],
+  tasks: ['pull-request', 'merge', 'ci', 'bump', 'remove-worktrees', 'remove-workspace'],
+  // A removal ends a delivery: placed first, what follows it cannot run. Cleanup ends on both.
+  preparation: ['bump', 'remove-worktrees', 'remove-workspace'],
+  waves: ['remove-worktrees', 'remove-workspace'],
+  cleanup: ['remove-worktrees', 'remove-workspace'],
 }
 
 describe('The moments of a delivery', () => {
@@ -1315,6 +1316,81 @@ describe('Checks explain the orders an action cannot run in', () => {
     expect(validateRules(rules, SHARED_AND_API).map((one) => one.code)).toEqual([
       'once-per-delivery-after-each-task',
     ])
+  })
+
+  test('a merge after each task waits for the approvals too', () => {
+    const rules = withActions(preparedWith(CHAIN, 'api', { requireApproval: true }), 'tasks', [
+      sample('merge', 'task-merge'),
+    ])
+    expect(
+      validateRules(rules, SHARED_AND_API)
+        .filter((one) => one.code === 'merge-before-approval')
+        .map((one) => [one.repositoryId, one.stepId]),
+    ).toEqual([['api', 'task-merge']])
+  })
+
+  test('removing the Workspace or the worktrees after each task is refused', () => {
+    const refused = (['remove-worktrees', 'remove-workspace'] as const).map((kind) =>
+      validateRules(withActions(CHAIN, 'tasks', [sample(kind, 'early-removal')]), SHARED_AND_API)
+        .filter((one) => one.code === 'once-per-delivery-after-each-task')
+        .map((one) => [one.stepId, one.sentence]),
+    )
+    expect(refused).toEqual([
+      [
+        [
+          'early-removal',
+          'api removes the worktrees after each task, but they are removed once, when the mission ends.',
+        ],
+      ],
+      [
+        [
+          'early-removal',
+          'api removes the Workspace after each task, but it is removed once, when the mission ends.',
+        ],
+      ],
+    ])
+  })
+
+  test('any action after removing the Workspace, in any moment, is refused', () => {
+    const rules = withActions(CHAIN, 'preparation', [sample('remove-workspace', 'early-removal')])
+    const problems = validateRules(rules, SHARED_AND_API)
+    expect(problems.map((one) => [one.code, one.repositoryId, one.stepId])).toEqual(
+      [
+        'commit',
+        'push',
+        'pull-request',
+        'bump',
+        'merge',
+        'ci',
+        'published-version',
+        'pull-main-checkout',
+        'stop-services',
+        'remove-worktrees',
+        'remove-workspace',
+      ].map((stepId) => ['step-after-workspace-removed', 'api', stepId]),
+    )
+    expect(problems[0]?.sentence).toBe(
+      'api runs “commit” after removing the Workspace, but nothing runs once it is gone.',
+    )
+  })
+
+  test('after removing the worktrees, only the Workspace can be removed', () => {
+    const rules = withActions(CHAIN, 'waves', [sample('remove-worktrees', 'early-removal')])
+    const problems = validateRules(rules, SHARED_AND_API)
+    expect(problems.map((one) => [one.code, one.repositoryId, one.stepId])).toEqual(
+      [
+        'bump',
+        'merge',
+        'ci',
+        'published-version',
+        'pull-main-checkout',
+        'stop-services',
+        'remove-worktrees',
+      ].map((stepId) => ['step-after-worktrees-removed', 'api', stepId]),
+    )
+    expect(problems[0]?.sentence).toBe(
+      'api runs “bump” after removing the worktrees, but only the Workspace can be removed once they are gone.',
+    )
   })
 
   test('any action after removing the Workspace in Cleanup is refused', () => {
