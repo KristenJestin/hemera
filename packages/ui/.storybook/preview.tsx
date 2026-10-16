@@ -18,7 +18,6 @@ import '../src/theme.css'
  * portal, a scrollbar or a native control. The tests never see it: each run pins one theme.
  */
 const withTheme: Decorator = (Story, context) => {
-  diag(`decorator ${context.id} ${document.visibilityState}`)
   const chosen = context.globals['theme']
   const dark = chosen === 'dark'
   useEffect(() => {
@@ -66,54 +65,13 @@ const RESULT_TYPES =
     ? ['violations']
     : ['violations', 'incomplete', 'passes', 'inapplicable']
 
-const diag = (message: string): void => {
-  console.log(
-    `DIAG ${performance.now().toFixed(0)} ${document.documentElement.classList.contains('dark') ? 'dark' : 'light'} ${message}`,
-  )
-}
-if ('__vitest_browser__' in globalThis) {
-  diag(`preview loaded ${document.documentElement.className}`)
-  let lastTimer = performance.now()
-  window.setInterval(() => {
-    const now = performance.now()
-    if (now - lastTimer > 1000) diag(`timer gap ${(now - lastTimer).toFixed(0)}ms`)
-    lastTimer = now
-  }, 200)
-  let lastFrame = performance.now()
-  const frame = (): void => {
-    const now = performance.now()
-    if (now - lastFrame > 1000) diag(`frame gap ${(now - lastFrame).toFixed(0)}ms`)
-    lastFrame = now
-    window.requestAnimationFrame(frame)
-  }
-  window.requestAnimationFrame(frame)
-  new PerformanceObserver((list) => {
-    list.getEntries().forEach((entry) => {
-      if (entry.duration > 400) diag(`long task ${entry.duration.toFixed(0)}ms`)
-    })
-  }).observe({ entryTypes: ['longtask'] })
-  window.addEventListener('beforeunload', () => {
-    diag('beforeunload')
-  })
-  window.addEventListener('error', (event) => {
-    diag(`window error ${event.message}`)
-  })
-  window.addEventListener('unhandledrejection', (event) => {
-    diag(`unhandled rejection ${String(event.reason)}`)
-  })
-}
-
 const preview: Preview = {
   decorators: [withTooltips, withMotion, withTheme],
-  afterEach: (context) => {
-    diag(`afterEach ${context.id}`)
-  },
   /**
    * How long a play waits for the state it asked for: a loaded CI machine takes seconds to paint
    * what a developer machine paints in frames.
    */
-  beforeEach: (context) => {
-    diag(`beforeEach ${context.id}`)
+  beforeEach: () => {
     configure({ asyncUtilTimeout: 10_000 })
   },
   initialGlobals: { theme: 'light' },

@@ -1,5 +1,5 @@
 import type { KeptAgentView } from '../../blocks/mission/kept-agent-chip.tsx'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import type { PermissionChoice } from '../../blocks/need/need-card.tsx'
 import type {
@@ -201,10 +201,6 @@ export function PlanningScreen({
   ...handlers
 }: PlanningScreenProps): ReactNode {
   const { shown, answer, waitOnSomeone, dismissFinding, allow } = usePlayed(moment, handlers)
-  console.log(`DIAG ${performance.now().toFixed(0)} screen render ${moment}`)
-  useEffect(() => {
-    console.log(`DIAG ${performance.now().toFixed(0)} screen effect ${moment}`)
-  }, [moment])
   const data = shown?.data ?? null
   const { frame, setFrame, starting, discuss, openProbe } = useFrame(
     opened,

@@ -89,14 +89,11 @@ const inView = (element: Element): boolean => {
 /** The first read is on its way: skeletons where the sections and the Spec will be. */
 export const Loading: Story = {
   args: { moment: 'loading' },
-  parameters: { a11y: { test: 'off' } },
   play: async ({ canvasElement }) => {
-    console.log(`DIAG ${performance.now().toFixed(0)} loading play start`)
     await expect(page(canvasElement).getByRole('region', { name: 'Spec' })).toHaveAttribute(
       'aria-busy',
       'true',
     )
-    console.log(`DIAG ${performance.now().toFixed(0)} loading play end`)
   },
 }
 

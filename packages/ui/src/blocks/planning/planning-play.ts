@@ -3,14 +3,7 @@ import { expect, userEvent, waitFor } from 'storybook/test'
 import { loadMentionEditor } from '../../components/mention-field/load-mention-editor.ts'
 
 /** A story whose field is written in loads the editor first, so the field draws ready. */
-export const EDITOR_LOADED = [
-  async () => {
-    console.log(`DIAG ${performance.now().toFixed(0)} loader start`)
-    const editor = await loadMentionEditor()
-    console.log(`DIAG ${performance.now().toFixed(0)} loader end`)
-    return { editor }
-  },
-]
+export const EDITOR_LOADED = [async () => ({ editor: await loadMentionEditor() })]
 
 /** Writes in a mention field one key after the other, as a person does, then sends it. */
 export async function writeAndSend(field: HTMLElement, text: string): Promise<void> {
