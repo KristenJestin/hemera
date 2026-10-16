@@ -6,11 +6,14 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { Worker } from 'node:worker_threads'
 
 import { Predicate } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  KEYS_CAP,
+  NAME_CAP,
   REPORT_CAP,
   type ReportFound,
   type ScenarioProofState,
@@ -4607,6 +4610,196 @@ describe('What a test threw, as its runner and its report say it (#342, round 10
     expect(validRed(vitestRun(output, text), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(
       true,
     )
+  })
+})
+
+/**
+ * A worker that classifies the run it is given and posts how long that took and how many tests
+ * the report names (null when it is not read).
+ */
+const CLASSIFY_IN_WORKER = `
+import { parentPort, workerData } from 'node:worker_threads'
+const { classifyProofRun } = await import(workerData.module)
+const started = performance.now()
+const { reported } = classifyProofRun(workerData.run)
+parentPort.postMessage({ ms: performance.now() - started, reported: reported === null ? null : reported.length })
+`
+
+/**
+ * A run classified in a worker whose heap is capped at `heapMb`: a report that takes more ends the
+ * worker, never the process, and the promise rejects.
+ */
+const classifiedInHeap = (classified: Parameters<typeof classifyProofRun>[0], heapMb: number) =>
+  new Promise<{ readonly ms: number; readonly reported: number | null }>((resolve, reject) => {
+    const worker = new Worker(
+      new URL(`data:text/javascript,${encodeURIComponent(CLASSIFY_IN_WORKER)}`),
+      {
+        workerData: {
+          module: new URL('../src/domain/proof-runs.ts', import.meta.url).href,
+          run: classified,
+        },
+        resourceLimits: { maxOldGenerationSizeMb: heapMb },
+      },
+    )
+    worker.once('message', resolve)
+    worker.once('error', reject)
+  })
+
+/** A node run of `a.test.mjs`, one test `t`, with the JUnit report given. */
+const nodeReportRun = (text: string) => ({
+  output: '✖ t (1ms)',
+  exitCode: 1,
+  testPath: 'a.test.mjs',
+  report: {
+    reporting: NODE_REPORT,
+    found: { kind: 'read' as const, text },
+    source: "import { test } from 'node:test'\n\ntest('t', () => {})\n",
+  },
+})
+
+/** The review's report: one suite named by `length` characters around `suites` suites of one test. */
+const longSuiteReport = (length: number, suites: number) =>
+  `<testsuites><testsuite name="${'a'.repeat(length)}">${'<testsuite name="x"><testcase name="t" file="a.test.mjs"/></testsuite>'.repeat(suites)}</testsuite></testsuites>`
+
+/** As many copies of `unit` as fit between `head` and `tail` in a report of `REPORT_CAP` bytes. */
+const filled = (head: string, unit: string, tail: string) =>
+  `${head}${unit.repeat(Math.floor((REPORT_CAP - head.length - tail.length) / unit.length))}${tail}`
+
+describe('A report read in bounded memory, whatever its names (#342, round 11)', () => {
+  const name = 'a'.repeat(NAME_CAP)
+  const classname = `tests.test_a.${'A'.repeat(NAME_CAP - 'tests.test_a.'.length)}`
+
+  for (const [megabytes, suites] of [
+    [1, 4_000],
+    [2, 8_000],
+  ] as const) {
+    test(`the review’s report, a suite of a ${megabytes} MB name around ${suites} suites, is not read, in a heap of 256 MB`, async () => {
+      const text = longSuiteReport(megabytes * 1_000_000, suites)
+      await expect(classifiedInHeap(nodeReportRun(text), 256)).resolves.toMatchObject({
+        reported: null,
+      })
+    })
+  }
+
+  /** A run of the shapes a report at its cap can take, each name at its cap where it has one. */
+  const worst = {
+    'node’s suites at their deepest, each named at the cap, around the most empty test cases': () =>
+      nodeReportRun(
+        filled(
+          `<testsuites>${`<testsuite name="${name}">`.repeat(63)}`,
+          '<testcase name="t" file="a.test.mjs"/>',
+          `${'</testsuite>'.repeat(63)}</testsuites>`,
+        ),
+      ),
+    'node’s suites side by side, each and its test named at the cap': () =>
+      nodeReportRun(
+        filled(
+          '<testsuites>',
+          `<testsuite name="${name}"><testcase name="${name}" file="a.test.mjs"/></testsuite>`,
+          '</testsuites>',
+        ),
+      ),
+    'pytest’s test cases, each class and function named at the cap': () => ({
+      ...nodeReportRun(''),
+      testPath: 'tests/test_a.py',
+      report: {
+        reporting: PYTEST_REPORT,
+        found: {
+          kind: 'read' as const,
+          text: filled(
+            '<testsuites><testsuite name="pytest">',
+            `<testcase classname="${classname}" name="${name}"/>`,
+            '</testsuite></testsuites>',
+          ),
+        },
+        source: 'def test_t():\n    pass\n',
+      },
+    }),
+    'vitest’s tests, each under a thousand describes of an empty title': () => ({
+      ...nodeReportRun(''),
+      testPath: 'a.test.ts',
+      report: {
+        reporting: VITEST_REPORT,
+        found: {
+          kind: 'read' as const,
+          text: filled(
+            '{"testResults":[{"name":"/work/acme/api/a.test.ts","assertionResults":[',
+            `{"ancestorTitles":[${'""'.concat(',""'.repeat(999))}],"title":"t","status":"passed"},`,
+            '{"ancestorTitles":[],"title":"t","status":"passed"}]}]}',
+          ),
+        },
+        source: "import { test } from 'vite-plus/test'\n\ntest('t', () => {})\n",
+      },
+    }),
+  }
+  for (const [shape, made] of Object.entries(worst)) {
+    test(`a report at the cap of ${shape} is classified in a heap of 256 MB and within seconds`, async () => {
+      const classified = made()
+      expect(classified.report.found.text.length).toBeLessThanOrEqual(REPORT_CAP)
+      const { ms } = await classifiedInHeap(classified, 256)
+      expect(ms).toBeLessThan(5_000)
+    })
+  }
+
+  test('a JUnit report holding a suite name or a test name longer than its cap is not read, one at the cap is', () => {
+    const node = (suite: string, title: string) =>
+      reportedTests(
+        NODE_REPORT,
+        `<testsuites><testsuite name="${suite}"><testcase name="${title}" file="a.test.mjs"/></testsuite></testsuites>`,
+        'a.test.mjs',
+      )
+    const pytest = (scope: string, title: string) =>
+      reportedTests(
+        PYTEST_REPORT,
+        `<testsuites><testsuite name="pytest"><testcase classname="${scope}" name="${title}"/></testsuite></testsuites>`,
+        'tests/test_a.py',
+      )
+    expect([
+      node(name, 't')?.length,
+      node(`${name}a`, 't'),
+      node('s', name)?.length,
+      node('s', `${name}a`),
+      pytest(classname, 'test_t')?.length,
+      pytest(`${classname}A`, 'test_t'),
+      pytest('tests.test_a', name)?.length,
+      pytest('tests.test_a', `${name}a`),
+    ]).toEqual([1, null, 1, null, 1, null, 1, null])
+  })
+
+  test('a vitest JSON report holding a describe or a test title longer than its cap is not read, one at the cap is', () => {
+    const json = (ancestor: string, title: string) =>
+      reportedTests(
+        VITEST_REPORT,
+        JSON.stringify({
+          testResults: [
+            {
+              name: '/work/acme/api/a.test.ts',
+              assertionResults: [{ ancestorTitles: [ancestor], title, status: 'passed' }],
+            },
+          ],
+        }),
+        'a.test.ts',
+      )
+    expect([
+      json(name, 't')?.length,
+      json(`${name}a`, 't'),
+      json('d', name)?.length,
+      json('d', `${name}a`),
+    ]).toEqual([1, null, 1, null])
+  })
+
+  test('a report whose test paths add up to more than their cap is not read, one at the cap is', () => {
+    // Each test's path is the suite's name, ` > ` and `t`: 4,096 characters, 2,048 of them the cap.
+    const suite = 'a'.repeat(4_096 - ' > t'.length)
+    const tests = (count: number) =>
+      reportedTests(
+        NODE_REPORT,
+        `<testsuites><testsuite name="${suite}">${'<testcase name="t" file="a.test.mjs"/>'.repeat(count)}</testsuite></testsuites>`,
+        'a.test.mjs',
+      )
+    const most = KEYS_CAP / 4_096
+    expect(Number.isInteger(most)).toBe(true)
+    expect([tests(most)?.length, tests(most + 1)]).toEqual([most, null])
   })
 })
 

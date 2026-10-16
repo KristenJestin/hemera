@@ -51,6 +51,20 @@ export type TestReporting = typeof TestReporting.Type
  */
 export const REPORT_CAP = 8 * 1024 * 1024
 
+/**
+ * The longest name a report is read with, a suite's or a test's: a longer one could never be
+ * listed, the console's lines being read to their last 4,096 characters, and a report holding one
+ * is not read.
+ */
+export const NAME_CAP = 4_096
+
+/**
+ * The most characters the paths of a report's tests of the file add up to: a report whose suites
+ * repeat a long name for many tests is not read, so its paths never take more memory than a report
+ * at its cap.
+ */
+export const KEYS_CAP = REPORT_CAP
+
 /** A report as the engine found it once the run ended: its text, or why it was not read. */
 export type ReportFound =
   | { readonly kind: 'read'; readonly text: string }
@@ -123,18 +137,26 @@ const sameFile = (shown: string, testPath: string): boolean => {
   return one === other || one.endsWith(`/${other}`) || other.endsWith(`/${one}`)
 }
 
+/** Whether a name is longer than a report is read with. */
+const overCap = (name: string): boolean => name.length > NAME_CAP
+
 /** vitest's JSON reporter's file: each test of the test file, or null. */
 const jsonTests = (text: string, testPath: string): ReadonlyArray<ReportedTest> | null =>
   Option.match(readJson(text), {
     onNone: () => null,
-    onSome: (report) =>
-      report.testResults
+    onSome: (report) => {
+      const results = report.testResults.flatMap((file) => file.assertionResults)
+      if (results.some((one) => overCap(one.title) || one.ancestorTitles.some(overCap))) {
+        return null
+      }
+      return report.testResults
         .filter((file) => sameFile(file.name, testPath))
         .flatMap((file) => file.assertionResults)
         .map((one) => ({
           key: [...one.ancestorTitles, one.title].join(' > '),
           verdict: jsonVerdict(one.status, one.failureMessages ?? []),
-        })),
+        }))
+    },
   })
 
 const jsonVerdict = (status: string, messages: ReadonlyArray<string>): ReportedTest['verdict'] => {
@@ -221,8 +243,8 @@ const uncommented = (text: string): string | null => {
 /**
  * The test cases of a JUnit report, read once left to right; null when it is not one read whole: its
  * root element, `<testsuites>` or `<testsuite>`, not closed at its end (a report cut short), a test
- * case or a comment never closed, a section the reader does not read (`CDATA`, a doctype), or
- * suites nested deeper than `SUITE_DEPTH`. Each case keeps only its innermost suite, which keeps
+ * case or a comment never closed, a section the reader does not read (`CDATA`, a doctype), a
+ * suite named by more than `NAME_CAP` characters, or suites nested deeper than `SUITE_DEPTH`. Each case keeps only its innermost suite, which keeps
  * its parents: the memory it takes grows with the report, never with its cases times its depth.
  */
 const junitCases = (text: string): ReadonlyArray<JunitCase> | null => {
@@ -244,6 +266,7 @@ const junitCases = (text: string): ReadonlyArray<JunitCase> | null => {
       if (opening.endsWith('/')) continue
       if (open.length >= SUITE_DEPTH) return null
       const name = attributesOf(opening).get('name') ?? ''
+      if (overCap(name)) return null
       const parent = open.at(-1)
       open.push({ path: parent === undefined ? name : `${parent.path} > ${name}` })
     } else {
@@ -317,6 +340,8 @@ const junitTests = (
   if (runner !== 'pytest' && runner !== 'node') return null
   const cases = junitCases(text)
   if (cases === null) return null
+  const names = (one: JunitCase) => [one.attributes.get('name'), one.attributes.get('classname')]
+  if (cases.some((one) => names(one).some((name) => overCap(name ?? '')))) return null
   return cases.flatMap((one) => {
     const classname = one.attributes.get('classname') ?? ''
     const name = one.attributes.get('name') ?? ''
@@ -355,8 +380,9 @@ const junitVerdict = (one: JunitCase, runner: TestRunner): ReportedTest['verdict
 
 /**
  * The tests of the test file a report names, each with how it ended; null when the report cannot
- * be read whole, or is a format its runner is not read in (vitest's JSON, pytest's and node's
- * JUnit are).
+ * be read whole, holds a name over `NAME_CAP`, names tests whose paths add up to more than
+ * `KEYS_CAP`, or is a format its runner is not read in (vitest's JSON, pytest's and node's JUnit
+ * are).
  */
 export const reportedTests = (
   reporting: TestReporting,
@@ -364,10 +390,15 @@ export const reportedTests = (
   testPath: string,
 ): ReadonlyArray<ReportedTest> | null => {
   const format = reporting.report?.format
-  if (format === 'json') {
-    return reporting.runner === 'vitest' ? jsonTests(text, testPath) : null
-  }
-  return format === 'junit' ? junitTests(text, reporting.runner, testPath) : null
+  const tests =
+    format === 'json' && reporting.runner === 'vitest'
+      ? jsonTests(text, testPath)
+      : format === 'junit'
+        ? junitTests(text, reporting.runner, testPath)
+        : null
+  // A key's length is read without joining its parts into one string.
+  const length = (tests ?? []).reduce((sum, one) => sum + one.key.length, 0)
+  return length > KEYS_CAP ? null : tests
 }
 
 /** A command's word as a program's name: its file name, without `.exe` or `.cmd`. */
