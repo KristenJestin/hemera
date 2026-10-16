@@ -1,18 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, within } from 'storybook/test'
 
-import { HISTORIES } from '../../blocks/project-settings/delivery-fixtures.ts'
 import { DeliveryPage } from '../../blocks/project-settings/delivery-page.tsx'
-import { IconGitMerge } from '../../icons.ts'
-import { findOpen } from '../../overlay-play.ts'
-import { ProjectSettings } from '../../surfaces/project-settings/project-settings.tsx'
-import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
 import { HEMERA_RULES, LOCAL_CLEANUP_RULES, LOCAL_MERGE_RULES } from './open-questions-fixtures.ts'
-import { InlineCommits } from './inline-commits.tsx'
 
 /**
- * The open questions of the delivery rules, each drawn in the settings page it lives in: who
- * commits and when (26), Hemera's own delivery (47), and the Local preset's merge (80). The
+ * The open questions of the delivery rules, each drawn in the settings page it lives in: Hemera's
+ * own delivery (47) and the Local preset's merge (80). Who commits (26) is settled: committing is
+ * an action of the catalogue, placed in a moment like any other (#422). The
  * recommended variant of each comes first; the variants not chosen are removed before the merge.
  */
 const meta = {
@@ -26,50 +21,6 @@ const meta = {
 
 export default meta
 type Story = StoryObj<typeof meta>
-
-const body = () => within(document.body)
-
-/**
- * Question 26, recommended: a dialog of three choices, each saying what it does, and under them
- * the history api has after ACME-12 — the visible effect, before anything is committed.
- */
-export const WhoCommitsInADialog: Story = {
-  args: { rules: LOCAL_MERGE_RULES, form: { kind: 'commits' } },
-  play: async () => {
-    const dialog = await findOpen(body(), 'dialog', { name: 'Who commits' })
-    expect(within(dialog).getAllByRole('radio')).toHaveLength(3)
-    expect(within(dialog).getByRole('list', { name: 'History of api after ACME-12' })).toBeVisible()
-  },
-}
-
-/** Question 26, alternative: chosen in the line itself, the history always under it. */
-export const WhoCommitsInTheLine: Story = {
-  render: () => (
-    <main className="flex h-screen flex-col bg-surface-content">
-      <ProjectSettings
-        name="Acme"
-        mainCheckout="~/work/acme"
-        sections={[
-          ...SECTIONS,
-          { id: 'delivery', label: 'Delivery rules', icon: <IconGitMerge size="sm" /> },
-        ]}
-        current="delivery"
-        onSection={() => {}}
-        onRetry={() => {}}
-        onCloseForm={() => {}}
-      >
-        <InlineCommits histories={HISTORIES} />
-      </ProjectSettings>
-    </main>
-  ),
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('combobox', { name: 'Who commits' }))
-    await userEvent.click(await body().findByRole('option', { name: 'Hemera, once, at the push' }))
-    const history = canvas.getByRole('list', { name: 'History of api after ACME-12' })
-    expect(within(history).getAllByRole('listitem')).toHaveLength(1)
-  },
-}
 
 /**
  * Question 47: Hemera's own delivery with the Application preset — pull requests into `dev`,

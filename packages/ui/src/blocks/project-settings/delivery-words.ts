@@ -51,13 +51,6 @@ export function pushWords(rules: Pick<PullRequestRules, 'placement' | 'start'>):
   return `${when} · ${rules.start === 'auto' ? 'on its own' : 'waits for your click'}`
 }
 
-/** Who commits, in words. */
-export const COMMITS_WORDS: Record<PullRequestRules['commits'], string> = {
-  task: 'Hemera, after each verified task',
-  agent: 'The agent, as it works',
-  push: 'Hemera, once, at the push',
-}
-
 /** The reviewers, in words: the first two, and how many more. */
 export function reviewersWords(rules: Pick<PullRequestRules, 'reviewers'>): string {
   const names = rules.reviewers.map((one) => one.name ?? one.handle)
