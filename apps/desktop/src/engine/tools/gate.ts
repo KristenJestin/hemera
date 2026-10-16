@@ -270,51 +270,71 @@ const withoutProposedValues = (tool: string, args: Schema.Json): Schema.Json =>
       })
 
 /**
- * How deep in a call's arguments a long string is looked for: past it, the masking of the record
- * keeps nothing but `•••` (its nesting limit), so there is nothing to cut.
+ * How much of a call's arguments is walked before the rest is `•••`: twice what a record keeps,
+ * so what is cut at `ARGUMENTS_KEPT` is never short of what was walked.
  */
-const HEADS_DEPTH = 32
+const ARGUMENTS_WALKED = 2 * ARGUMENTS_KEPT
 
 /** `Array.isArray` does not narrow a read-only array out of a union: this does. */
 const isJsonList = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
 
-/** A value of a call's arguments with each string longer than a record keeps as its masked head. */
-const headsOf = (
-  secrets: SecretsRegistry,
-  value: Schema.Json,
-  depth: number,
-): Effect.Effect<Schema.Json> => {
-  if (Predicate.isString(value)) {
-    return value.length <= ARGUMENTS_KEPT
-      ? Effect.succeed(value)
-      : maskedHead(secrets, value, ARGUMENTS_KEPT)
+/**
+ * A call's arguments cut to what a record keeps of them, before they are masked (#392): a string
+ * longer than a record keeps becomes its masked head (`maskedHead`, in slices), what lies past
+ * `NESTING_LIMIT` levels is `•••` as the masking makes it, and once `ARGUMENTS_WALKED` characters
+ * were walked, the values left are dropped for one `•••`. So the masking of the record walks a few
+ * thousand characters, however large or deep the arguments the agent sent.
+ */
+const cutForRecord = (secrets: SecretsRegistry, record: Schema.JsonObject) => {
+  let left = ARGUMENTS_WALKED
+  const text = (one: string) =>
+    Effect.map(
+      one.length <= ARGUMENTS_KEPT ? Effect.succeed(one) : maskedHead(secrets, one, ARGUMENTS_KEPT),
+      (kept) => {
+        left -= kept.length + 3
+        return kept
+      },
+    )
+  const value = (one: Schema.Json, depth: number): Effect.Effect<Schema.Json> => {
+    if (Predicate.isString(one)) return text(one)
+    if (one === null || Predicate.isNumber(one) || Predicate.isBoolean(one)) {
+      left -= 8
+      return Effect.succeed(one)
+    }
+    if (depth >= NESTING_LIMIT) return Effect.succeed(MASK)
+    return isJsonList(one) ? list(one, depth + 1) : fields(one, depth + 1)
   }
-  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
-    return Effect.succeed(value)
-  }
-  if (depth >= HEADS_DEPTH) return Effect.succeed(value)
-  return isJsonList(value)
-    ? Effect.forEach(value, (item) => headsOf(secrets, item, depth + 1))
-    : headsIn(secrets, value, depth + 1)
+  const list = (items: Schema.JsonArray, depth: number) =>
+    Effect.gen(function* () {
+      const kept: Schema.Json[] = []
+      for (const item of items) {
+        if (left <= 0) {
+          kept.push(MASK)
+          break
+        }
+        kept.push(yield* value(item, depth))
+      }
+      return kept
+    })
+  const fields = (named: Schema.JsonObject, depth: number): Effect.Effect<Schema.JsonObject> =>
+    Effect.gen(function* () {
+      const kept: Array<[string, Schema.Json]> = []
+      for (const [name, item] of Object.entries(named)) {
+        if (left <= 0) {
+          kept.push([MASK, MASK])
+          break
+        }
+        kept.push([yield* text(name), yield* value(item, depth)])
+      }
+      return Object.fromEntries(kept)
+    })
+  return fields(record, 1)
 }
 
-/** The fields of a record, each as `headsOf` keeps it. */
-const headsIn = (
-  secrets: SecretsRegistry,
-  record: Schema.JsonObject,
-  depth: number,
-): Effect.Effect<Schema.JsonObject> =>
-  Effect.map(
-    Effect.forEach(Object.entries(record), ([name, value]) =>
-      Effect.map(headsOf(secrets, value, depth), (head): [string, Schema.Json] => [name, head]),
-    ),
-    (fields) => Object.fromEntries(fields),
-  )
-
 /**
- * A call's arguments as its record keeps them: masked, then cut. A string longer than what is kept
- * is masked by its head only (`maskedHead`), in slices: a request of 16 MiB is never masked whole,
- * at once, for the 2,000 characters a record holds of it (#392).
+ * A call's arguments as its record keeps them: cut (`cutForRecord`), masked, then cut again at
+ * what a record holds. A request of 16 MiB is never masked whole, at once, for the 2,000
+ * characters a record holds of it (#392).
  */
 const argumentsKept = (secrets: SecretsRegistry, tool: string, given: Schema.Json) =>
   Effect.gen(function* () {
@@ -322,7 +342,7 @@ const argumentsKept = (secrets: SecretsRegistry, tool: string, given: Schema.Jso
     const fields = readArgumentFields(args)
     const masked = Option.isNone(fields)
       ? yield* maskedHead(secrets, agentText(args), ARGUMENTS_KEPT + 1)
-      : maskedJson(secrets.maskArguments(yield* headsIn(secrets, fields.value, 1)))
+      : maskedJson(secrets.maskArguments(yield* cutForRecord(secrets, fields.value)))
     return masked.length > ARGUMENTS_KEPT
       ? secrets.mask(`${masked.slice(0, ARGUMENTS_KEPT)}…`)
       : masked

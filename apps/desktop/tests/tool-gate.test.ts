@@ -23,6 +23,7 @@ import { join } from 'node:path'
 
 import { eq } from 'drizzle-orm'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
+import type { Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { secretsRegistry } from '../src/engine/secrets.ts'
@@ -808,6 +809,87 @@ describe('A large call’s arguments and a large refusal’s diff are masked in 
     const kept = calls[0]?.arguments ?? ''
     expect(kept.length).toBeLessThan(2100)
     expect(kept).toContain('xxxx')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  /** What the record of a Builder's one call keeps of its arguments, and how long the call took. */
+  const keptOf = async (tool: string, args: Schema.Json) => {
+    const { secrets, watch } = watchedSecrets((real) => real.register('suite', [VALUE]))
+    const verdicts = verdictsSaying(() => ALLOW)
+    const { calls, took } = await commandsEngine(data, {
+      tools: { verdicts: verdicts.layer },
+      secrets,
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          const began = performance.now()
+          yield* callTool(builder.grantId, tool, args)
+          const took = performance.now() - began
+          return { calls: yield* callsOf(builder.sessionId), took }
+        }),
+      ),
+    )
+    return { kept: calls[0]?.arguments ?? '', watch, took }
+  }
+
+  /**
+   * How long recording a call may take, whatever its arguments: masking them whole took seconds
+   * for the shapes below, cutting them first takes milliseconds.
+   */
+  const RECORDED_WITHIN = 1500
+
+  test('a call whose 4 MiB string lies 40 levels deep is kept cut, masked in slices, and recorded quickly', async () => {
+    let deep: Schema.Json = `${'z'.repeat(4 * 1024 * 1024)}${VALUE}`
+    for (let level = 0; level < 40; level += 1) deep = [deep]
+    const { kept, watch, took } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: deep,
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('zzzz')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+    expect(took).toBeLessThan(RECORDED_WITHIN)
+  })
+
+  test('a call made of 4,000 strings of 1,999 characters is kept cut, never masked whole, and recorded quickly', async () => {
+    const many = Array.from({ length: 4000 }, (_, at) =>
+      at === 3999 ? `${'m'.repeat(1975)}${VALUE}` : 'm'.repeat(1999),
+    )
+    const { kept, watch, took } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: many,
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('mmmm')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+    expect(took).toBeLessThan(RECORDED_WITHIN)
+  })
+
+  test('an fs_edit whose new text is a megabyte is kept cut, its head masked in slices', async () => {
+    const { kept, watch } = await keptOf('fs_edit', {
+      path: 'a.txt',
+      edits: [{ old: 'x', new: `${'n'.repeat(1985)}${VALUE}${'n'.repeat(1024 * 1024)}` }],
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('nnnn')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('arguments that are one megabyte-long text, not a record, are kept cut and masked in slices', async () => {
+    const { kept, watch } = await keptOf(
+      'fs_write',
+      `${'t'.repeat(1985)}${VALUE}${'t'.repeat(1024 * 1024)}`,
+    )
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('tttt')
     expect(kept).not.toContain(VALUE.slice(0, 6))
     expect(watch.syncOnLarge).toBe(0)
   })

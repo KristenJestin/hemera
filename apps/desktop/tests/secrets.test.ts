@@ -114,6 +114,17 @@ describe('The head of a long text is masked without masking the whole of it (#39
     expect(head.length).toBeLessThanOrEqual(2000)
   })
 
+  test('a registered value longer than the margin, which the cut would split, is masked whole and never kept in part', async () => {
+    const secrets = secretsRegistry()
+    // A certificate kept as a variable: three times longer than the margin.
+    const long = 'certificate-line-'.repeat(720)
+    secrets.register('suite', [long])
+    const text = `${'a'.repeat(1500)}${long}${'b'.repeat(1024 * 1024)}`
+    const head = await Effect.runPromise(maskedHead(secrets, text, 2000))
+    expect(head).not.toContain('certificate')
+    expect(head.startsWith(`${'a'.repeat(1500)}${MASK}b`)).toBe(true)
+  })
+
   test('a short text is masked whole, and a long one keeps the head it asked for, masked', async () => {
     const secrets = secretsRegistry()
     secrets.register('suite', [VALUE])
