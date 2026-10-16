@@ -2475,8 +2475,11 @@ export const buildings = sqliteTable(
     /** When `BuildingEnd` returned: a start finds a Building whose tasks are done without it. */
     endCalledAt: text('end_called_at'),
     summary: text('summary').$type<Masked<string>>(),
-    /** The checkpoint the automatic review read (#147); null before its end took it. */
-    reviewCheckpointId: text('review_checkpoint_id'),
+    /**
+     * The checkpoint the automatic review read (#147); null before its end took it. Never dropped
+     * while a Building points to it.
+     */
+    reviewCheckpointId: text('review_checkpoint_id').references(() => checkpoints.id),
     /**
      * When the Builder last ended a turn during the end (#147): a red of the final checks waits
      * for a turn ended after the attempt it opened, across a restart.
@@ -3068,7 +3071,9 @@ export const reviewPasses = sqliteTable(
     buildingId: text('building_id')
       .notNull()
       .references(() => buildings.id, { onDelete: 'cascade' }),
-    checkpointId: text('checkpoint_id').notNull(),
+    checkpointId: text('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id),
     reviewer: text('reviewer').notNull(),
     lineage: text('lineage').notNull(),
     state: text('state').notNull(),

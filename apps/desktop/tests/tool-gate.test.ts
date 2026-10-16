@@ -18,8 +18,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,8 +35,9 @@ import { placesForWorkflow } from '../src/engine/tools/gate.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { SensitivePlaces, Verdicts } from '../src/engine/tools/ports.ts'
 import { commandsEngine, nodeLine, script } from './commands-engine.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { acmeIn, sessionsEngine, until, within } from './sessions-world.ts'
-import { endChild, removeFolders, temporaryFolder } from './storage.ts'
+import { endChild, holdFile, removeFolders, temporaryFolder } from './storage.ts'
 import {
   ALLOW,
   acmeWithMission,
@@ -540,23 +539,6 @@ describe('Writing only on the version that was read', () => {
 
   test('a write over a file another process holds open replaces it, or fails clearly and leaves it whole', async () => {
     const file = join(work, 'acme', 'held.txt')
-    const holder = async () => {
-      // On Windows the holder shares nothing, as an editor or an antivirus may; elsewhere an
-      // open file never stops a rename.
-      const child =
-        process.platform === 'win32'
-          ? spawn('powershell.exe', [
-              '-NoProfile',
-              '-Command',
-              `$f = [System.IO.File]::Open('${file}', 'Open', 'Read', 'None'); 'held'; Start-Sleep -Seconds 60`,
-            ])
-          : spawn(process.execPath, [
-              '-e',
-              `require('node:fs').openSync(${JSON.stringify(file)}, 'r'); console.log('held'); setInterval(() => {}, 1000)`,
-            ])
-      await once(child.stdout, 'data')
-      return child
-    }
     const answer = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
@@ -565,7 +547,9 @@ describe('Writing only on the version that was read', () => {
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
           yield* callTool(builder.grantId, 'fs_read', { path: 'held.txt' })
           return yield* Effect.acquireUseRelease(
-            Effect.promise(holder),
+            // On Windows a file held open cannot be replaced; elsewhere an open file never stops a
+            // rename.
+            Effect.promise(() => holdFile(file)),
             () => callTool(builder.grantId, 'fs_write', { path: 'held.txt', content: 'after\n' }),
             (child) => Effect.promise(() => endChild(child)),
           )
@@ -575,9 +559,11 @@ describe('Writing only on the version that was read', () => {
     const now = readFileSync(file, 'utf8')
     // Which of the two the system chose, for the record of a run on each system.
     console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
+    // Held open, the file cannot be replaced on Windows: the test did hold it.
+    if (process.platform === 'win32') expect(answer.ok).toBe(false)
     if (answer.ok) expect(now).toBe('after\n')
     else {
-      // A file shared with no one cannot even be read for its version: refused before writing.
+      // Refused while reading its version or while replacing it, the file is left as it was.
       expect(answer.text).toMatch(
         /^could not (?:write held\.txt: .*; the file is as it was|read held\.txt: .*; nothing was written)$/,
       )
@@ -774,6 +760,27 @@ describe('Every call is recorded', () => {
       },
     ])
     expect(calls[0]?.durationMs).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('A call’s arguments are kept masked as JSON (#397)', () => {
+  test('arguments that are not a record, holding a quoted credential and a known value, are kept with nothing of either, and still JSON', async () => {
+    const verdicts = verdictsSaying(() => ALLOW)
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', [KNOWN_SECRET])
+    const calls = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', [QUOTED_SECRET, `key ${KNOWN_SECRET}`])
+            return yield* callsOf(builder.sessionId)
+          }),
+        ),
+    )
+    expect(calls).toHaveLength(1)
+    expectMaskedJson(calls[0]?.arguments)
   })
 })
 

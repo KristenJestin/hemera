@@ -21,7 +21,7 @@ import { Context, Effect, Layer, Schema } from 'effect'
 
 import type { DomainEvents } from '../domain-events.ts'
 import { Secrets } from '../secrets.ts'
-import { Database, refusedWhile } from '../storage/database.ts'
+import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import { buildingAttempts, buildingCheckResults, missions } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn, checkResultsIn } from './attempts.ts'
@@ -96,32 +96,40 @@ const encodeTrees = Schema.encodeSync(
 
 /** Keeps one check's result on its attempt, masked, as soon as it is known. */
 export const keepCheckResult = (attemptId: string, result: CheckResult) =>
+  mutate('keeping a check', (transaction) =>
+    Effect.map(keepCheckResultIn(transaction, attemptId, result), () => ({
+      result: undefined,
+      events: [],
+    })),
+  )
+
+/** A check's result kept in the transaction given, with the attempt it judges. */
+export const keepCheckResultIn = (
+  transaction: EngineTransaction,
+  attemptId: string,
+  result: CheckResult,
+) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
-    yield* mutate('keeping a check', (transaction) =>
-      transaction
-        .insert(buildingCheckResults)
-        .values({
-          id: crypto.randomUUID(),
-          attemptId,
-          name: secrets.mask(result.name),
-          place: result.place,
-          verdict: result.verdict,
-          detail: secrets.mask(result.detail),
-          outputTail: secrets.mask(result.outputTail),
-          runId: result.runId,
-          at: new Date().toISOString(),
-          line: result.line == null ? null : secrets.mask(result.line),
-          exitCode: result.exitCode ?? null,
-          value: result.value ?? null,
-          trees: result.trees === undefined ? null : encodeTrees(result.trees),
-          evidenceId: result.evidenceId ?? null,
-        })
-        .pipe(
-          Effect.mapError(refusedWhile('keeping a check')),
-          Effect.as({ result: undefined, events: [] }),
-        ),
-    )
+    yield* transaction
+      .insert(buildingCheckResults)
+      .values({
+        id: crypto.randomUUID(),
+        attemptId,
+        name: secrets.mask(result.name),
+        place: result.place,
+        verdict: result.verdict,
+        detail: secrets.mask(result.detail),
+        outputTail: secrets.mask(result.outputTail),
+        runId: result.runId,
+        at: new Date().toISOString(),
+        line: result.line == null ? null : secrets.mask(result.line),
+        exitCode: result.exitCode ?? null,
+        value: result.value ?? null,
+        trees: result.trees === undefined ? null : encodeTrees(result.trees),
+        evidenceId: result.evidenceId ?? null,
+      })
+      .pipe(Effect.mapError(refusedWhile('keeping a check')))
   })
 
 export class TaskChecks extends Context.Service<

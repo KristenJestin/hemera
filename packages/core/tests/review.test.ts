@@ -9,6 +9,7 @@ import {
   CONTRADICTION_OPTIONS,
   type ReviewFinding,
   findingProblem,
+  repositoriesOfPath,
   specialTaskId,
   specialTaskOf,
   toolsOf,
@@ -23,25 +24,77 @@ const finding = (fields: Partial<ReviewFinding> = {}): ReviewFinding => ({
 
 const inCheckpoint = (repository: string | null, path: string) =>
   repository === 'api' && path === 'src/x.ts'
+const onlyApi = () => ['api']
+
+/** Two repositories: `src/x.ts` changed in `api` only, `shared.ts` changed in both. */
+const changed = new Map([
+  ['api', ['src/x.ts', 'shared.ts']],
+  ['web', ['shared.ts']],
+])
+const choicesIn = (repositories: ReadonlyArray<string>) => (path: string) =>
+  repositoriesOfPath(repositories, (one) => changed.get(one)?.includes(path) === true)
+const inBoth = (repository: string | null, path: string) =>
+  repository !== null && changed.get(repository)?.includes(path) === true
 
 describe('A finding of review_report', () => {
   test('a blocking finding without evidence is refused', () => {
-    expect(findingProblem(finding({ severity: 'blocking' }), inCheckpoint)).toBe(
+    expect(findingProblem(finding({ severity: 'blocking' }), inCheckpoint, onlyApi)).toBe(
       'a blocking finding carries its evidence: what you read that shows it',
     )
     expect(
-      findingProblem(finding({ severity: 'blocking', evidence: 'R1.S1 says so.' }), inCheckpoint),
+      findingProblem(
+        finding({ severity: 'blocking', evidence: 'R1.S1 says so.' }),
+        inCheckpoint,
+        onlyApi,
+      ),
     ).toBeNull()
   })
 
   test('a path not in the checkpoint is refused; a finding with no path is kept', () => {
-    expect(findingProblem(finding({ repository: 'api', path: 'src/y.ts' }), inCheckpoint)).toBe(
-      'api/src/y.ts is not in the checkpoint: name a file you read there',
-    )
     expect(
-      findingProblem(finding({ repository: 'api', path: 'src/x.ts' }), inCheckpoint),
+      findingProblem(finding({ repository: 'api', path: 'src/y.ts' }), inCheckpoint, onlyApi),
+    ).toBe('api/src/y.ts is not in the checkpoint: name a file you read there')
+    expect(
+      findingProblem(finding({ repository: 'api', path: 'src/x.ts' }), inCheckpoint, onlyApi),
     ).toBeNull()
-    expect(findingProblem(finding(), inCheckpoint)).toBeNull()
+    expect(findingProblem(finding(), inCheckpoint, onlyApi)).toBeNull()
+  })
+})
+
+describe('A path given without its repository', () => {
+  const both = ['api', 'web']
+
+  test('one repository: the path names it, changed there or not', () => {
+    expect(choicesIn(['api'])('README.md')).toEqual(['api'])
+    expect(choicesIn(['api'])('src/x.ts')).toEqual(['api'])
+  })
+
+  test('two repositories with the path changed in one: it names that one', () => {
+    expect(choicesIn(both)('src/x.ts')).toEqual(['api'])
+  })
+
+  test('two repositories with the path changed in both: both are the choices', () => {
+    expect(choicesIn(both)('shared.ts')).toEqual(['api', 'web'])
+  })
+
+  test('two repositories with the path changed in neither: every repository is a choice', () => {
+    expect(choicesIn(both)('README.md')).toEqual(['api', 'web'])
+  })
+
+  test('a finding whose path names no single repository is refused with the repositories to choose from', () => {
+    expect(findingProblem(finding({ path: 'shared.ts' }), inBoth, choicesIn(both))).toBe(
+      'shared.ts names no single repository: say which, one of api, web',
+    )
+    expect(findingProblem(finding({ path: 'README.md' }), inBoth, choicesIn(both))).toBe(
+      'README.md names no single repository: say which, one of api, web',
+    )
+  })
+
+  test('a finding whose path names exactly one repository is kept', () => {
+    expect(findingProblem(finding({ path: 'src/x.ts' }), inBoth, choicesIn(both))).toBeNull()
+    expect(
+      findingProblem(finding({ repository: 'web', path: 'shared.ts' }), inBoth, choicesIn(both)),
+    ).toBeNull()
   })
 })
 

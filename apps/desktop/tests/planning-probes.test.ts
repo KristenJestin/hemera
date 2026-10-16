@@ -14,6 +14,7 @@
  * preparation resumed after a restart.
  */
 
+import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -82,7 +83,18 @@ import { ToolAccess } from '../src/engine/tools/access.ts'
 import { PermissionRequests } from '../src/engine/tools/ports.ts'
 import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
 import { commitOnRemote, git, remote, repository } from './repositories.ts'
-import { SILENCE, type World, held, sessionsEngine, text, until, within } from './sessions-world.ts'
+import {
+  SILENCE,
+  type World,
+  held,
+  heldSweeps,
+  sessionsEngine,
+  text,
+  until,
+  within,
+} from './sessions-world.ts'
+import { observedProcesses } from './observed-processes.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 
@@ -978,9 +990,13 @@ describe('probe_report ends the Probe', () => {
   const reportedAfter = (
     steps: ReadonlyArray<{ readonly line: string }>,
     leave: (tree: string) => void,
+    options: Parameters<typeof sessionsEngine>[2] = {},
   ) => {
     const hold = held()
-    const { run } = probing(() => ({ steps: [says('Waiting.')], between: () => hold.promise }))
+    const { run } = probing(
+      () => ({ steps: [says('Waiting.')], between: () => hold.promise }),
+      options,
+    )
     return run(({ profile }) =>
       within(
         profile,
@@ -1038,6 +1054,48 @@ describe('probe_report ends the Probe', () => {
     const bytes = kept.reduce((sum, file) => sum + Buffer.byteLength(file.content ?? ''), 0)
     expect(bytes).toBeLessThanOrEqual(5 * 1024 * 1024)
     expect(withheld.every((file) => /^[0-9a-f]{64}$/.test(file.sha256))).toBe(true)
+  })
+
+  test('a large JSON file and the large patch the Probe left are kept masked as the whole mask gives them, while another fiber keeps its turns (#402)', async () => {
+    const value = 'variable-value-8812'
+    const json = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    let patch = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        writeFileSync(join(tree, 'lock.json'), json)
+        writeFileSync(join(tree, 'importer.ts'), json)
+        patch = execFileSync(
+          'git',
+          [
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--src-prefix=a/',
+            '--dst-prefix=b/',
+            '--end-of-options',
+            'HEAD',
+            '--',
+            'importer.ts',
+          ],
+          { cwd: tree, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+        )
+      },
+      { secrets },
+    )
+    const files = new Map(seen.detail.files.map((file) => [file.path, file]))
+    expect(patch.length).toBeGreaterThan(LARGE_TEXT)
+    expect(files.get('lock.json')?.content).toBe(unwatched.mask(json))
+    expect(files.get('importer.ts')?.content).toBe(unwatched.mask(json))
+    expect(files.get('importer.ts')?.patch).toBe(unwatched.mask(patch))
+    expect(unwatched.mask(patch)).not.toContain(value)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(3)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
   })
 
   test('what the Probe committed in its worktree is captured against its base commit', async () => {
@@ -1148,6 +1206,7 @@ ${STAYS_UP}`)
           (state) => Effect.sync(() => void cleaned.push({ probe, ...state })),
         ),
     })
+    const observed = observedProcesses()
     const { world, run } = probing(
       () => ({
         turns: [
@@ -1163,7 +1222,7 @@ ${STAYS_UP}`)
         steps: [says('Waiting.')],
         between: () => hold.promise,
       }),
-      { children: true, probes: { cleanup } },
+      { children: true, probes: { cleanup }, hostProcesses: observed.layer },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1223,8 +1282,9 @@ ${STAYS_UP}`)
         runsLive: 0,
       },
     ])
-    expect(() => process.kill(seen.servePid, 0)).toThrow()
-    for (const pid of world.pids) expect(() => process.kill(pid, 0)).toThrow()
+    // Each process's end as the supervisor saw it: a freed pid may already be another's.
+    expect(world.pids.length).toBeGreaterThan(0)
+    for (const pid of [seen.servePid, ...world.pids]) expect(observed.ended(pid)).toBe(true)
   })
 
   // Git for Windows writes `gitdir: C:/…/.git/worktrees/<name>`, and `worktree.useRelativePaths`
@@ -1748,6 +1808,7 @@ describe('A restored Profile’s Probes (#4’s registry)', () => {
 describe('Stuck (#40’s rule)', () => {
   test('a Probe silent in a turn past the bound is stuck, its Planner told; not while its command runs', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     let longId = ''
     const { world, run } = probing(
       (index) => {
@@ -1760,7 +1821,8 @@ describe('Stuck (#40’s rule)', () => {
         if (index === 1) return { steps: [says('Silent.')], between: () => hold.promise }
         return { steps: [says('Back.')] }
       },
-      { timings: SILENCE },
+      // Its agents start slower than the bound, as under load: the start is part of the turn.
+      { ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1780,6 +1842,10 @@ describe('Stuck (#40’s rule)', () => {
           yield* until(Effect.sync(() => runs.live.size === 1))
           yield* launch(grantId, 'does the importer keep accents?')
           yield* probeIn(mission.id, 2, ['running'])
+          // Its turn begun, silent past the bound, its sibling's command running all along: looked at.
+          yield* until(Effect.sync(() => (world.agents[1]?.answers.prompts.length ?? 0) > 0))
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           // Stuck is told by its event: the fresh session may speak before a row is read.
           yield* until(Effect.map(eventsOf(mission.id, 'probe.stuck'), (rows) => rows.length > 0))
           const database = yield* Database

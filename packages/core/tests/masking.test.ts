@@ -3,21 +3,33 @@
  * the shapes of credentials it recognises without knowing their value. Every mask is `•••`.
  */
 
-import { Effect } from 'effect'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
+
+import { Effect, Option, Predicate, Schema } from 'effect'
 import * as fc from 'fast-check'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  DecisionFields,
+  EnvironmentFields,
+  ErrorFields,
   isJson,
   MASK,
   maskAction,
+  maskArguments,
   maskPrinted,
   maskPrintedPaced,
   maskRecord,
   maskShapes,
   maskText,
   maskTextPaced,
+  maskedJson,
+  NeedFields,
+  NESTING_LIMIT,
+  PermissionFields,
 } from '../src/domain/index.ts'
+import * as inTurn from './oracle/masking-in-turn.ts'
 
 /** A value as a secret is: long enough to mean something, and nothing a shape would catch. */
 const secretValue = fc
@@ -228,6 +240,16 @@ describe('An action is never sent in part', () => {
     expect(
       maskAction({ tool: 'fs_write', path: '/work/known-value/notes.txt' }, ['known-value']),
     ).toBeNull()
+  })
+
+  test('an action whose destination cannot be masked is refused, as a partial action', () => {
+    // A quoted value of megabytes after a label: the pattern of a quoted value throws on it.
+    const unmaskable = `token: "${'x'.repeat(16 * 1024 * 1024)}"`
+    expect(maskAction({ tool: 'commands_run', line: unmaskable }, [])).toBeNull()
+    expect(maskAction({ tool: 'fs_write', note: unmaskable }, [])).toEqual({
+      tool: 'fs_write',
+      note: MASK,
+    })
   })
 
   test('the same holds for every destination field', () => {
@@ -677,8 +699,1062 @@ describe('What a CLI printed is masked at least as much as the whole text would 
   })
 })
 
+/**
+ * A shape of credential written around a marker no mask may leave (`Sx<n>Zq`, in any case): what
+ * stands before its value, its value, and what it needs after it. `glued` says its value does not
+ * begin a word, so another shape cannot stand at its start; `closed` that it is a credential only
+ * while nothing stands between its value and its tail.
+ */
+interface Written {
+  readonly head: string
+  readonly value: string
+  readonly tail: string
+  readonly glued: boolean
+  readonly closed: boolean
+}
+
+/** The shapes, one writing of each per marker, and the known values written as they are. */
+const writings = (mark: string, known: string): ReadonlyArray<Written> => {
+  const word = (head: string, value: string, tail = '', glued = false, closed = false) => ({
+    head,
+    value,
+    tail,
+    glued,
+    closed,
+  })
+  const upper = mark.toUpperCase().padEnd(16, 'A')
+  return [
+    word('-----BEGIN RSA PRIVATE KEY-----\n', mark, '\n-----END RSA PRIVATE KEY-----'),
+    word('-----BEGIN OPENSSH PRIVATE KEY-----\n', mark),
+    word('Authorization: ', mark),
+    word('Cookie: ', mark),
+    word('set-cookie=', mark),
+    word('Bearer ', mark),
+    word('Basic ', mark.padEnd(8, 'A')),
+    word(`eyJ${mark}.eyJ${mark}.`, `c2ln${mark}`),
+    word(`eyJ${mark}-`, `AKIA${upper}.eyJ${mark}.c2ln`, '', true),
+    word('ghp_', mark.padEnd(16, 'A'), '', true),
+    word('sk-', mark.padEnd(8, 'A'), '', true),
+    word('AKIA', upper, '', true),
+    word('https://u:', mark, '@h.test', true, true),
+    word('password=', mark),
+    word('token: ', `"${mark} x"`),
+    word("api_key='", mark, "'"),
+    word('', known),
+  ]
+}
+
+/**
+ * Where the inner shape stands in the outer one's value: at its start, after the outer value and a
+ * `-` (still inside most values), or after a separator that ends some of them.
+ */
+const POSITIONS = ['start', 'middle', ' ', ';', '.', ',', '=', ':', '/', '\n', '"'] as const
+
+/** One writing nested in another's value, at a position; nothing when there is no such writing. */
+const nested = (
+  outerAt: number,
+  innerAt: number,
+  where: (typeof POSITIONS)[number],
+  outerMark: string,
+  innerMark: string,
+  known: ReadonlyArray<string>,
+): string | undefined => {
+  const outer = writings(outerMark, known[0] ?? '')[outerAt]
+  const inner = writings(innerMark, known[1] ?? '')[innerAt]
+  if (outer === undefined || inner === undefined) return undefined
+  const shape = `${inner.head}${inner.value}${inner.tail}`
+  // A glued value has no start another shape can stand at: its inner shape goes after it. A
+  // closed shape with another inside may be no credential at all: no marker in its value then.
+  return where === 'start' && !outer.glued
+    ? `${outer.head}${shape}${outer.tail}`
+    : `${outer.head}${outer.closed ? 'pw' : outer.value}${where === 'start' || where === 'middle' ? '-' : where}${shape}${outer.tail}`
+}
+
+/**
+ * One writing nested in another's value, at a position, masked by every function that masks
+ * text: none leaves a marker, and paced masking gives what masking at once gives.
+ */
+const leavesNoMarker = async (
+  outerAt: number,
+  innerAt: number,
+  where: (typeof POSITIONS)[number],
+  outerMark: string,
+  innerMark: string,
+): Promise<void> => {
+  const known = [`kn0wn${outerMark}`, `kn0wn${innerMark}x`]
+  const text = nested(outerAt, innerAt, where, outerMark, innerMark, known)
+  if (text === undefined) return
+  const forms = [
+    maskText(text, known),
+    maskRecord({ body: text }, known)['body'],
+    maskAction({ note: text }, known)?.['note'],
+    maskPrinted(text, known),
+    maskPrinted(JSON.stringify({ body: text }), known),
+    maskPrinted(JSON.stringify([text, { text }]), known),
+    await Effect.runPromise(maskTextPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+  ]
+  for (const masked of forms) expect(masked, text).not.toMatch(/sx\d+zq/i)
+  expect(forms[6], text).toBe(forms[0])
+  expect(forms[7], text).toBe(forms[3])
+}
+
+describe('Every shape is matched on the text as it was given', () => {
+  // Each shape sees the original text, and what is masked is every stretch any of them hides: a
+  // shape that takes the first word of another no longer hides the rest of it.
+  const leaks: ReadonlyArray<readonly [string, string, string]> = [
+    [
+      'a Bearer credential that takes the scheme of a URL',
+      'Bearer password=https://user:value@host.test',
+      'value',
+    ],
+    [
+      'a Basic credential that takes the first part of a web token',
+      `Basic eyJxAAAA-${FAKE.github}.eyJy.sig`,
+      'eyJy',
+    ],
+  ]
+  for (const [what, text, secret] of leaks) {
+    test(`${what} leaves nothing of the other`, async () => {
+      for (const masked of [
+        maskShapes(text),
+        maskText(text, []),
+        maskPrinted(text, []),
+        maskPrinted(JSON.stringify({ body: text }), []),
+        await Effect.runPromise(maskTextPaced(text, [])),
+        await Effect.runPromise(maskPrintedPaced(text, [])),
+      ]) {
+        expect(masked).not.toContain(secret)
+      }
+    })
+  }
+
+  test('a shape glued to a known value is masked as when the value stood apart', async () => {
+    const known = ['kn0wnValue']
+    const glued = [
+      [FAKE.github, 'abcdefghij'],
+      [FAKE.aws, 'EFGHIJKLMNOP'],
+      [FAKE.jwt, 'eyJzdWIiOiIxIn0'],
+      ['Bearer Sx1Zq', 'Sx1Zq'],
+      ['Basic Sx1ZqAAA', 'Sx1Zq'],
+      ['Cookie: Sx1Zq', 'Sx1Zq'],
+      ['https://u:Sx1Zq@h.test', 'Sx1Zq'],
+    ] as const
+    await Promise.all(
+      glued.map(async ([shape, secret]) => {
+        const text = `${known[0] ?? ''}${shape}`
+        for (const masked of [
+          maskText(text, known),
+          maskPrinted(text, known),
+          maskPrinted(JSON.stringify({ body: text }), known),
+          await Effect.runPromise(maskTextPaced(text, known, 0)),
+          await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+        ]) {
+          expect(masked, text).not.toContain(secret)
+          expect(masked, text).not.toContain('kn0wn')
+        }
+      }),
+    )
+  })
+
+  test('a shape nested in another, every pair at every position, leaves none of its markers', async () => {
+    const indexes = writings('', '').map((_, index) => index)
+    // Run at once, the paced maskings take turns with one another.
+    await Promise.all(
+      indexes.flatMap((outerAt) =>
+        indexes.flatMap((innerAt) =>
+          POSITIONS.map((where) => leavesNoMarker(outerAt, innerAt, where, 'Sx1Zq', 'Sx2Zq')),
+        ),
+      ),
+    )
+  })
+
+  test('the same with markers of any length, 5,000 samples', async () => {
+    const mark = fc.nat({ max: 99_999 }).map((index) => `Sx${index}Zq`)
+    const at = fc.nat({ max: writings('', '').length - 1 })
+    await fc.assert(
+      fc.asyncProperty(at, at, fc.constantFrom(...POSITIONS), mark, mark, leavesNoMarker),
+      { numRuns: 5_000 },
+    )
+  })
+})
+
+/** The markers a text holds, which no mask may leave once a mask hid them: `Mk<n>Zq`, `Sx<n>Zq`. */
+const markersOf = (text: string): ReadonlySet<string> =>
+  new Set(text.match(/(?:Mk|Sx)\d+Zq/gi) ?? [])
+
+/**
+ * Masking hides at least all that masking the shapes in turn hid (`feature/1.0` before #381, the
+ * oracle): no marker and no known value is left more often than the oracle leaves it, by any of
+ * the functions that mask text, paced or not.
+ */
+const hidesAtLeastTheOracle = async (text: string, known: ReadonlyArray<string>): Promise<void> => {
+  const oracle = inTurn.maskText(text, known)
+  const masks = [
+    maskText(text, known),
+    maskPrinted(text, known),
+    await Effect.runPromise(maskTextPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+  ]
+  for (const masked of masks) {
+    for (const word of [...markersOf(text), ...known]) {
+      expect(occurrences(masked, word), `${word} in ${JSON.stringify(text)}`).toBeLessThanOrEqual(
+        occurrences(oracle, word),
+      )
+    }
+  }
+}
+
+/** The known values of the outputs built from fragments: plain, with a quote, a backslash, digits, a letter beyond ASCII. */
+const FRAGMENT_KNOWN = ['knownAAA1', 'kn"own2BB', 'k\\nown3CC', '9876543', 'café4DD']
+/** A piece of an output: a name, a separator, a shape's start, a marker, a known value. */
+const fragment = fc.oneof(
+  {
+    weight: 8,
+    arbitrary: fc.constantFrom(
+      'password',
+      'token',
+      'api_key',
+      'secret',
+      '=',
+      ': ',
+      ':',
+      '"',
+      "'",
+      ' ',
+      '\n',
+      ',',
+      '-',
+      '_',
+      '.',
+      '/',
+      '@',
+      '\\',
+      'Bearer ',
+      'Authorization: ',
+      'Cookie: ',
+      'set-cookie=',
+      'Basic ',
+      '://',
+      'https://u:',
+      '@h.test',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      '-----END RSA PRIVATE KEY-----',
+      'ghp_',
+      'ghp_ABCDEFGHIJKLMNOPQR',
+      'sk-abcdefgh',
+      'AKIAABCDEFGHIJKLMNOP',
+      'eyJ',
+      '.eyJ',
+      '-eyJ',
+      '123',
+      '{',
+      '}',
+      '[',
+      ']',
+      'x',
+    ),
+  },
+  { weight: 3, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
+  { weight: 1, arbitrary: fc.constantFrom(...FRAGMENT_KNOWN) },
+)
+/** Prose made of pieces. */
+const fragmentText = fc
+  .array(fragment, { minLength: 1, maxLength: 14 })
+  .map((parts) => parts.join(''))
+/** JSON whose strings and keys are made of pieces. */
+const fragmentJson = fc.letrec<{ value: fc.JsonValue }>((tie) => ({
+  value: fc.oneof(
+    { depthSize: 'small', withCrossShrink: true },
+    fragmentText,
+    fc.constantFrom(123, 9876543, true, null),
+    fc.array(tie('value'), { minLength: 1, maxLength: 3 }),
+    fc.dictionary(fc.oneof(fragmentText, fc.constantFrom('a', 'token', 'cookie')), tie('value'), {
+      minKeys: 1,
+      maxKeys: 3,
+    }),
+  ),
+})).value
+/** What a CLI may print: prose, JSON, or lines of either. */
+const fragmentOutputs = fc.oneof(
+  fragmentText,
+  fragmentJson.map((value) => JSON.stringify(value)),
+  fc
+    .tuple(
+      fc.array(
+        fc.oneof(
+          fragmentText,
+          fragmentJson.map((value) => JSON.stringify(value)),
+        ),
+        {
+          minLength: 1,
+          maxLength: 4,
+        },
+      ),
+      fc.constantFrom('\n', '\r\n'),
+    )
+    .map(([lines, end]) => lines.join(end)),
+)
+
+describe('Masking hides at least all that masking the shapes in turn hid', () => {
+  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
+  // A stretch an earlier shape hid holds a space, a quote or a line end; masked first, it let a
+  // later shape's value run on through it, and what is glued after it was hidden too.
+  const glued: ReadonlyArray<readonly [string, string]> = [
+    ["a label's value through a private key", `password=${pem}Sx1Zq`],
+    ["a header's value through a private key", `Authorization: ${pem}Sx2Zq`],
+    ["a URL's password through a private key", `https://u:${pem}Sx3Zq@h.test`],
+    ["a label's value through a quoted header value", 'password=cookie="a b"Sx4Zq'],
+    ["a URL's password through a quoted header value", 'https://u:cookie="a b"Sx5Zq@h.test'],
+    [
+      "a label's value through a header's value through a private key",
+      `password=cookie=${pem}tail with Sx9Zq`,
+    ],
+  ]
+  for (const [what, text] of glued) {
+    test(`${what}: what is glued after it stays hidden`, async () => {
+      expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+      await hidesAtLeastTheOracle(text, [])
+      await hidesAtLeastTheOracle(JSON.stringify({ body: text }), [])
+    })
+  }
+
+  test('the counterexample of #417: a header value through an escaped quote, a URL in it', async () => {
+    const text = `${JSON.stringify({
+      Mk0Zq: { a: 'Authorization: kn"own2BBhttps://u:knownAAA1' },
+      'set-cookie=/password': { a: 'Mk0Zq@', Mk0Zq: 'password' },
+    })}\n"password"`
+    expect(occurrences(inTurn.maskText(text, FRAGMENT_KNOWN), 'Mk0Zq')).toBe(2)
+    await hidesAtLeastTheOracle(text, FRAGMENT_KNOWN)
+  })
+
+  // A header's value runs on through an escaped quote (#401), over the name of a URL in it; the
+  // URL's password, read in turn, runs through what a shape hid before it (a `/` that stopped it).
+  const swallowers = [
+    String.raw`Authorization: \"`,
+    String.raw`Cookie: a\"`,
+    String.raw`set-cookie=\"b`,
+    String.raw`Proxy-Authorization: x\"`,
+    String.raw`Authorization: \'`,
+    String.raw`Cookie: a\'`,
+  ]
+  const blockers = ['cookie=/x', 'Cookie:/x', 'BBDC-abcdefghijklmnop/q']
+  for (const swallower of swallowers) {
+    for (const blocker of blockers) {
+      test(`a URL's password in a header value after an escaped quote, through ${blocker} (#417): ${swallower}`, async () => {
+        // The header's value ends at the next quote of the kind it escaped.
+        const quote = swallower.includes("\\'") ? "'" : '"'
+        const text = `${swallower}https://u:${blocker}${quote}Sx1Zq@h.test`
+        expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+        await hidesAtLeastTheOracle(text, [])
+        await hidesAtLeastTheOracle(JSON.stringify({ body: text }), [])
+      })
+    }
+  }
+
+  // The other way round: a URL's password holds a header whose value runs on through an escaped
+  // quote, over a `/` that stops the password; read in turn, the password runs on through it. Read
+  // only as before #401, the header stops at the escaped quote, and the `/` stops the password.
+  const runOn = [
+    String.raw`Cookie:\"a/"`,
+    String.raw`cookie=a\"b/"`,
+    String.raw`Authorization:\"/"`,
+    String.raw`set-cookie=\'a/'`,
+  ]
+  for (const header of runOn) {
+    test(`a header value run on through an escaped quote, in a URL's password, read in turn (#417): ${header}`, async () => {
+      await leavesNoMarkerIn(`https://u:${header}Sx1Zq@h.test`, [])
+    })
+  }
+
+  test('a Bearer value whose search resumed at its last word takes the name of a URL (#417)', async () => {
+    const text = 'Bearer a.bearer https://u:cookie=/x"Mk1Zq@'
+    expect(inTurn.maskText(text, [])).toBe('Bearer ••• https://u:•••@')
+    await hidesAtLeastTheOracle(text, [])
+    await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+  })
+
+  // A search that resumes at the last word of its match (`Bearer a.bearer …`) finds a match the
+  // oracle never found, which takes the name of a URL written after it; read in turn, the URL's
+  // password ran on through what an earlier shape hid, as the oracle reads it.
+  const resumedPrefixes = ['Bearer a.bearer ', 'Bearer a.Bearer ']
+  const stoppers = ['cookie=/x', 'Cookie:/x', 'set-cookie=/password', 'BBDC-abcdefghijklmnop/q']
+  for (const prefix of resumedPrefixes) {
+    for (const stopper of stoppers) {
+      for (const quote of ['"', "'"]) {
+        test(`a URL after a resumed Bearer value, through ${stopper} and ${quote} (#417): ${prefix}`, async () => {
+          const text = `${prefix}https://u:${stopper}${quote}Sx1Zq@h.test`
+          expect(inTurn.maskText(text, [])).not.toMatch(/Sx\d+Zq/)
+          await hidesAtLeastTheOracle(text, [])
+          await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+        })
+      }
+    }
+  }
+
+  test('texts of a shape, a later shape, a stretch that stops it, and a marker, 5,000 samples (#417)', async () => {
+    const before = fc.constantFrom(
+      '',
+      'Bearer a.bearer ',
+      'Bearer a.Bearer ',
+      String.raw`Authorization: \"`,
+      String.raw`Cookie: \'`,
+      String.raw`Authorization: \\\"`,
+      'password=a.password=',
+      'token=x.token=',
+      'cookie=a.cookie=',
+      'Basic abcdefgh.Basic ',
+      'sk-abcdefgh.',
+      'x ',
+      'Authorization: x\\',
+      String.raw`Cookie: "`,
+      String.raw`set-cookie=\"`,
+      'api_key=a.token=',
+    )
+    const later = fc.constantFrom(
+      'https://u:',
+      'ftp://v:',
+      'password=',
+      'token: ',
+      'cookie=',
+      'Bearer ',
+      'Authorization: ',
+      'api_key=',
+    )
+    const stretch = fc.constantFrom(
+      'cookie=/x',
+      'Cookie:/x',
+      'set-cookie=/password',
+      'BBDC-abcdefghijklmnop/q',
+      'password=/x',
+      'Bearer x/',
+      'token=/x',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'Authorization:/x',
+      '',
+    )
+    const stop = fc.constantFrom('"', "'", ' ', '', String.raw`\"`, '/', '"a b"')
+    const after = fc.constantFrom('@', '@h.test', '', ' ', '"')
+    await fc.assert(
+      fc.asyncProperty(before, later, stretch, stop, after, async (...parts) => {
+        const [head, name, inValue, stopped, tail] = parts
+        const text = `${head}${name}${inValue}${stopped}Mk1Zq${tail}`
+        await hidesAtLeastTheOracle(text, [])
+        await hidesAtLeastTheOracle(JSON.stringify({ a: text }), [])
+      }),
+      { numRuns: 5_000 },
+    )
+  })
+
+  test('every shape nested in another, at every position', async () => {
+    const indexes = writings('', '').map((_, index) => index)
+    const known = ['kn0wnSx1Zq', 'kn0wnSx2Zqx']
+    await Promise.all(
+      indexes.flatMap((outerAt) =>
+        indexes.flatMap((innerAt) =>
+          POSITIONS.map((where) => {
+            const text = nested(outerAt, innerAt, where, 'Sx1Zq', 'Sx2Zq', known)
+            return text === undefined ? Promise.resolve() : hidesAtLeastTheOracle(text, known)
+          }),
+        ),
+      ),
+    )
+  })
+
+  test('outputs built from fragments, 5,000 samples', async () => {
+    await fc.assert(
+      fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
+      { numRuns: 5_000 },
+    )
+  })
+
+  test('outputs built from fragments, on the seed and path that once left a marker (#417)', async () => {
+    await fc.assert(
+      fc.asyncProperty(fragmentOutputs, (output) => hidesAtLeastTheOracle(output, FRAGMENT_KNOWN)),
+      {
+        seed: 1_744_443_877,
+        path: '4870:1:0:4:2:4:5:6:12:10:10:11:10:10:10:10:10:10:10:19:18:19:17:20:9:15:14:15:16:16:16:16:16:16:16:16',
+        endOnFailure: true,
+      },
+    )
+  })
+})
+
+/**
+ * A text masked by every function that masks text, at once and paced: none leaves a marker
+ * (`Sx<n>Zq`), and paced masking gives what masking at once gives.
+ */
+const leavesNoMarkerIn = async (text: string, known: ReadonlyArray<string>): Promise<void> => {
+  const forms = [
+    maskText(text, known),
+    maskRecord({ body: text }, known)['body'],
+    maskAction({ note: text }, known)?.['note'],
+    maskPrinted(text, known),
+    maskPrinted(JSON.stringify({ body: text }), known),
+    maskPrinted(JSON.stringify([text, { text }]), known),
+    await Effect.runPromise(maskTextPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(text, known, 0)),
+    await Effect.runPromise(maskPrintedPaced(JSON.stringify({ body: text }), known, 0)),
+  ]
+  for (const masked of forms) expect(masked, text).not.toMatch(/sx\d+zq/i)
+  expect(forms[6], text).toBe(forms[0])
+  expect(forms[7], text).toBe(forms[3])
+  expect(forms[8], text).toBe(forms[4])
+}
+
+/**
+ * An outer shape whose value runs on to a space or a quote: what stands before its value, and what
+ * it needs after it.
+ */
+const OUTERS: ReadonlyArray<readonly [head: string, tail: string]> = [
+  ['password=', ''],
+  ['DB_PASSWORD=', ''],
+  ['api_key: ', ''],
+  ['cookie=', ''],
+  ['Cookie: ', ''],
+  ['Authorization: ', ''],
+  ['set-cookie=', ''],
+  ['https://u:', '@h.test'],
+  ['git remote https://bob:', '@h.test/r'],
+]
+
+/** The names of an inner shape whose value is quoted: labels, and headers. */
+const INNER_NAMES = ['token', 'api_key', 'password', 'secret', 'cookie', 'Authorization'] as const
+
+/** Quoted values that hold a space, the other quote, or an escaped quote. */
+const QUOTED_VALUES = ['"a b"', "'a b'", `'a"b'`, String.raw`"a\"b c"`, `"a'b"`] as const
+
+/** A known value that holds a space, written over wherever it stands. */
+const SPACED_KNOWN = 'k n0wn'
+
+/** A private key block, which holds spaces and line ends. */
+const PEM = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
+
+/**
+ * What may stand in the outer value before the inner shape: nothing, a word, or a hidden stretch
+ * that holds a space, the inner name glued after it.
+ */
+const BEFORE_INNER = ['', 'pw-', 'a.', SPACED_KNOWN, PEM] as const
+
+/** What stands between the inner name and its quoted value. */
+const SEPARATORS = ['=', ':', ': ', ' = '] as const
+
+/** What may stand before the outer shape, taking its name in a value of its own. */
+const BEFORE_OUTER = ['', 'Bearer ', 'Basic '] as const
+
+/** An outer shape whose value holds an inner one with a quoted value, a marker glued after it. */
+const quotedInside = (
+  before: string,
+  outer: readonly [head: string, tail: string],
+  inValue: string,
+  name: string,
+  separator: string,
+  quoted: string,
+  mark: string,
+): string => `${before}${outer[0]}${inValue}${name}${separator}${quoted}${mark}${outer[1]}`
+
+describe('What follows a quoted value inside another value stays hidden', () => {
+  // A label's quoted value is hidden by itself; the outer value (a label's bare value, a header's,
+  // a URL's password) stopped at its quote or its space, and what follows it stayed readable.
+  const leaks: ReadonlyArray<readonly [string, string, string]> = [
+    ["a label's value through a quoted label value", 'password=token="a b"Sx6Zq', 'Sx6Zq'],
+    [
+      "a label's value through a quoted api key",
+      'DB_PASSWORD=api_key="x y"tailSECRET',
+      'tailSECRET',
+    ],
+    ["a URL's password through a quoted label value", 'https://u:token="a b"Sx7Zq@h.test', 'Sx7Zq'],
+    [
+      "a remote's password through a quoted label value",
+      'git remote https://bob:token="p q"S3cret@h.test/r',
+      'S3cret',
+    ],
+    ['a cookie through a label value quoted around a quote', `cookie=password='a"b'Sx8Zq`, 'Sx8Zq'],
+  ]
+  for (const [what, text, secret] of leaks) {
+    test(`${what}: ${text} leaves nothing of what follows it`, async () => {
+      const json = JSON.stringify({ body: text })
+      for (const masked of [
+        maskText(text, []),
+        maskShapes(text),
+        maskRecord({ body: text }, [])['body'],
+        maskAction({ note: text }, [])?.['note'],
+        maskPrinted(text, []),
+        maskPrinted(json, []),
+        await Effect.runPromise(maskTextPaced(text, [], 0)),
+        await Effect.runPromise(maskPrintedPaced(text, [], 0)),
+        await Effect.runPromise(maskPrintedPaced(json, [], 0)),
+      ]) {
+        expect(masked, text).toBeTypeOf('string')
+        expect(masked, text).not.toContain(secret)
+      }
+      await hidesAtLeastTheOracle(text, [])
+      await hidesAtLeastTheOracle(json, [])
+    })
+  }
+
+  test('a label after a Bearer or Basic credential reads on through a quoted value', async () => {
+    // The credential's value takes the label's name, and the label's value still reads on.
+    await leavesNoMarkerIn('Bearer password=token="a b"Sx1Zq', [])
+    await leavesNoMarkerIn('Basic password=token="a b"Sx2Zq', [])
+    await leavesNoMarkerIn('Bearer a/password=token="a b"Sx3Zq', [])
+  })
+
+  test('a private key or a known value after the quoted value is read through too', async () => {
+    // Each holds a space, and the value around them reads on through both.
+    const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'
+    await leavesNoMarkerIn(`password=token="a b"${pem}Sx1Zq`, [])
+    await hidesAtLeastTheOracle(`password=token="a b"${pem}Sx1Zq`, [])
+    await leavesNoMarkerIn('password=token="a b"k n0wnSx2Zq', ['k n0wn'])
+    await hidesAtLeastTheOracle('password=token="a b"k n0wnSx2Zq', ['k n0wn'])
+  })
+
+  test('a quoted value only the shapes in turn find is read through too', async () => {
+    // Glued to a known value, the header begins no word until the value is written over.
+    await leavesNoMarkerIn('Authorization: kn0wnCookie: "a b"Sx1Zq', ['kn0wn'])
+    await hidesAtLeastTheOracle('Authorization: kn0wnCookie: "a b"Sx1Zq', ['kn0wn'])
+  })
+
+  test('an inner name glued after a hidden stretch that holds a space stays readable', async () => {
+    // The outer value runs through the stretch and ends on the inner name: what is written over
+    // stops at the stretch's last space, and the inner label still reads its value.
+    const texts = [
+      `password=${SPACED_KNOWN}token: "a"Sx1Zq`,
+      `password=${PEM}token: "a"Sx3Zq`,
+      `password=${PEM}token = 'a b'Sx4Zq`,
+    ]
+    await Promise.all(
+      texts.map(async (text) => {
+        await leavesNoMarkerIn(text, [SPACED_KNOWN])
+        await hidesAtLeastTheOracle(text, [SPACED_KNOWN])
+      }),
+    )
+  })
+
+  test(
+    'every outer shape around every quoted inner one, at every position, leaves no marker',
+    { timeout: 600_000 },
+    async () => {
+      const texts = BEFORE_OUTER.flatMap((before) =>
+        OUTERS.flatMap((outer) =>
+          BEFORE_INNER.flatMap((inValue) =>
+            INNER_NAMES.flatMap((name) =>
+              SEPARATORS.flatMap((separator) =>
+                QUOTED_VALUES.map((quoted) =>
+                  quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+      // Run at once, the paced maskings take turns with one another.
+      await Promise.all(
+        texts.map(async (text) => {
+          await leavesNoMarkerIn(text, [SPACED_KNOWN])
+          await hidesAtLeastTheOracle(text, [SPACED_KNOWN])
+        }),
+      )
+    },
+  )
+
+  test(
+    'the same with quoted values and markers of any kind, 5,000 samples',
+    { timeout: 600_000 },
+    async () => {
+      const units = (quote: string) =>
+        quote === '"'
+          ? fc.constantFrom('a', ' ', "'", String.raw`\"`, '\\\\', '@', '/', ':', '=')
+          : fc.constantFrom('a', ' ', '"', '\\', '@', '/', ':', '=')
+      const quoted = fc
+        .constantFrom('"', "'")
+        .chain((quote) =>
+          fc
+            .array(units(quote), { maxLength: 6 })
+            .map((parts) => `${quote}${parts.join('')}${quote}`),
+        )
+      const mark = fc.nat({ max: 99_999 }).map((index) => `Sx${index}Zq`)
+      const after = fc.constantFrom('', ' and more', '\nnext', ';', ',x')
+      const text = fc
+        .tuple(
+          fc.constantFrom(...BEFORE_OUTER),
+          fc.constantFrom(...OUTERS),
+          fc.constantFrom(...BEFORE_INNER),
+          fc.constantFrom(...INNER_NAMES),
+          fc.constantFrom(...SEPARATORS),
+          quoted,
+          mark,
+          after,
+        )
+        .map(
+          ([before, outer, inValue, name, separator, value, marker, rest]) =>
+            `${quotedInside(before, outer, inValue, name, separator, value, marker)}${rest}`,
+        )
+      const known = ['kn0wnAAA1', SPACED_KNOWN]
+      await fc.assert(
+        fc.asyncProperty(text, async (written) => {
+          await leavesNoMarkerIn(written, known)
+          await hidesAtLeastTheOracle(written, known)
+        }),
+        { numRuns: 5_000 },
+      )
+    },
+  )
+})
+/**
+ * Where the JSON written in a masked text stands: it begins where the prose before it ends, and
+ * it parses up to one of the brackets that close it. The prose after it may have been masked.
+ */
+const embeddedParses = (masked: string, before: string): boolean => {
+  if (!masked.startsWith(before)) return false
+  for (let end = masked.length; end > before.length; end -= 1) {
+    if (!'}]"'.includes(masked.charAt(end - 1))) continue
+    if (parses(masked.slice(before.length, end))) return true
+  }
+  return false
+}
+
+/** Each function that masks a printed text, at once and paced, the paced ones all at once. */
+const printedForms = async (
+  texts: ReadonlyArray<string>,
+  known: ReadonlyArray<string>,
+): Promise<ReadonlyArray<string>> => {
+  const paced = await Effect.runPromise(
+    Effect.all(
+      texts.map((text) => maskPrintedPaced(text, known, 0)),
+      { concurrency: 'unbounded' },
+    ),
+  )
+  return texts.flatMap((text, index) => {
+    const now = maskPrinted(text, known)
+    expect(paced[index], text).toBe(now)
+    return [now]
+  })
+}
+
+describe('A JSON string written inside any text is masked as a JSON string (#401)', () => {
+  // A line was read as JSON only when it was JSON by itself: JSON written inside a text was read
+  // as text, where `\"` ends no quoted value and an escaped known value is not found.
+  const KNOWN = 'se"same-4417'
+  const reproductions: ReadonlyArray<
+    readonly [
+      what: string,
+      before: string,
+      json: string,
+      after: string,
+      secrets: ReadonlyArray<string>,
+    ]
+  > = [
+    [
+      'pretty JSON after a sentence',
+      'The user answered: ',
+      '{\n  "a": "password=\\"a b\\""\n}',
+      '',
+      ['a b'],
+    ],
+    [
+      'a pretty list after a sentence',
+      'The user answered: ',
+      '[\n  "password=\\"a b\\"",\n  "token: \\"c d\\""\n]',
+      '',
+      ['a b', 'c d'],
+    ],
+    [
+      'pretty JSON followed by a sentence',
+      '',
+      '{\n  "a": "password=\\"a b\\""\n}',
+      '\nthat is all',
+      ['a b'],
+    ],
+    [
+      'one-line JSON after a prefix',
+      'The user answered: ',
+      '{"a":"password=\\"a b\\""}',
+      '',
+      ['a b'],
+    ],
+    [
+      'a header whose value holds escaped quotes',
+      'Said: ',
+      '{\n  "h": "Authorization: Bearer \\"a b\\" tail"\n}',
+      '',
+      ['a b', 'tail'],
+    ],
+    [
+      'a known value holding a quote, on one line',
+      'Note: ',
+      '{"a":"x se\\"same-4417 y"}',
+      '',
+      [KNOWN],
+    ],
+    [
+      'a known value holding a quote, pretty',
+      'Note: ',
+      '{\n  "a": "x se\\"same-4417 y"\n}',
+      '',
+      [KNOWN, 'same-4417'],
+    ],
+    [
+      'a lone quote in the prose before, on the same line',
+      '5" tall, the user answered: ',
+      '{"a":"password=\\"a b\\""}',
+      '',
+      ['a b'],
+    ],
+    [
+      'a string literal alone in the prose',
+      'The user answered ',
+      '"password=\\"a b\\""',
+      ' and left',
+      ['a b'],
+    ],
+    [
+      'a string literal after a lone quote in the prose',
+      '5" tall, and ',
+      '"password=\\"a b\\""',
+      '',
+      ['a b'],
+    ],
+    [
+      'a header in a JSON string alone',
+      '',
+      '"Authorization: Bearer \\"a b\\" tail"',
+      '',
+      ['a b', 'tail'],
+    ],
+  ]
+  for (const [what, before, json, after, secrets] of reproductions) {
+    test(`${what}: nothing of the secret is left, and the JSON still parses`, async () => {
+      const text = `${before}${json}${after}`
+      for (const masked of await printedForms([text], [KNOWN])) {
+        for (const secret of secrets) expect(masked, text).not.toContain(secret)
+        expect(masked, text).toContain(MASK)
+        expect(embeddedParses(masked, before), masked).toBe(true)
+        expect(masked.endsWith(after), masked).toBe(true)
+      }
+      await hidesAtLeastTheOracle(text, [KNOWN])
+    })
+  }
+
+  test('a known value is matched in its JSON-escaped form, in any text', async () => {
+    const texts = ['Note: x se\\"same-4417 y', 'cut {"a":"x se\\"same-4417']
+    const masked = [
+      ...texts.map((text) => maskText(text, [KNOWN])),
+      ...(await printedForms(texts, [KNOWN])),
+      ...(await Effect.runPromise(
+        Effect.forEach(texts, (text) => maskTextPaced(text, [KNOWN], 0)),
+      )),
+    ]
+    for (const one of masked) expect(one).not.toContain('same-4417')
+  })
+
+  test('a string opened and never closed is read as a string to its end: more is masked, never less', async () => {
+    // Cut at the end of the text, or at a line break: what it holds is still read with its
+    // escapes, and masked as a string reads it.
+    const texts = [
+      'Note: {"a":"password=\\"a b\\"',
+      'Note: {"a":"password=\\"a b\\"\n}',
+      'Note: "password=\\"a b\\"\nand the next line',
+      '[1, {"a":"password=\\"a b\\""}, oops',
+    ]
+    for (const masked of await printedForms(texts, [])) expect(masked).not.toContain('a b')
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test('the complete JSON inside a broken one is still masked as JSON, and parses', async () => {
+    const text = '[1, {"a":"password=\\"a b\\""}, oops'
+    const [masked] = await printedForms([text], [])
+    expect(masked).toBe('[1, {"a":"password=•••"}, oops')
+  })
+
+  test('pretty JSON held by a bracket of the prose stays one JSON, its lines inside it', async () => {
+    // A line that is JSON by itself (an array's last string) gave way to nothing inside the held
+    // value: the held value was dropped, and the line was read alone.
+    const texts = [
+      `Items [ ${JSON.stringify({ user: 'ana', password: ['hunter2-Sx1Zq'] }, null, 2)}`,
+      `[ ${JSON.stringify({ a: 'x', token: ['y-Sx2Zq'] }, null, 2)}`,
+    ]
+    for (const [index, masked] of (await printedForms(texts, [])).entries()) {
+      expect(masked).not.toMatch(/sx\d+zq/i)
+      expect(embeddedParses(masked, index === 0 ? 'Items [ ' : '[ '), masked).toBe(true)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test('of two values read where the quotes pair two ways, the longer stays JSON', async () => {
+    // The prose's `{"[` holds a key that ends at the quote the JSON opens with: read that way, a
+    // key of four characters stood where the JSON did.
+    const json = JSON.stringify({
+      user: 'ana',
+      password: ['-----BEGIN RSA PRIVATE KEY-----\nMIIEbody\n-----END RSA PRIVATE KEY-----'],
+    })
+    const texts = [`{"[${json}`, `{"[ ${json}`]
+    for (const [index, masked] of (await printedForms(texts, [])).entries()) {
+      expect(masked).not.toContain('MIIEbody')
+      expect(embeddedParses(masked, index === 0 ? '{"[' : '{"[ '), masked).toBe(true)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test('a string line that holds braces stays one string, and NDJSON stays NDJSON', async () => {
+    const text = '{"id":1}\n"{} password=\\"a b\\" and [1]"\n{"id":2}'
+    const [masked] = await printedForms([text], [])
+    expect(masked).toBe('{"id":1}\n"{} password=••• and [1]"\n{"id":2}')
+  })
+
+  test('prose holding quotes, escapes and brackets is left as it is', async () => {
+    const texts = [
+      'He said "hello" and left.',
+      String.raw`A path C:\new\table and a regex \d+ "quoted \" text"`,
+      'Lists [1, 2] and {sets} and "strings with \\"escapes\\"" stay.',
+      '5" tall\n"open, never closed',
+    ]
+    expect(await printedForms(texts, [])).toEqual(texts)
+  })
+})
+
+/** Prose around the JSON: words, spaces, line ends, punctuation, quotes, escapes, brackets. */
+const prose = fc
+  .array(
+    fc.constantFrom(
+      'The',
+      'user',
+      'answered',
+      'see',
+      'it',
+      '5',
+      ' ',
+      '\n',
+      '\r\n',
+      '.',
+      ',',
+      ';',
+      ':',
+      '!',
+      '(',
+      ')',
+      '"',
+      "'",
+      '\\',
+      '{',
+      '}',
+      '[',
+      ']',
+    ),
+    { maxLength: 8 },
+  )
+  .map((parts) => parts.join(''))
+
+/**
+ * A text made by the generators of #391 and #396, in a JSON value that holds it. The last ends an
+ * array on a string: pretty, that string is a line that is JSON by itself.
+ */
+const asJson = (text: string, how: number): Schema.Json =>
+  [
+    { body: text },
+    [text, { text }],
+    { a: [{ note: text }], b: 1 },
+    { user: 'ana', password: [text] },
+  ][how % 4] ?? { body: text }
+
+describe('JSON made of every generated secret, written inside prose, keeps no marker and parses (#401)', () => {
+  const generated = (): ReadonlyArray<readonly [string, ReadonlyArray<string>]> => {
+    const indexes = writings('', '').map((_, index) => index)
+    const known = ['kn0wnSx1Zq', 'kn0wnSx2Zqx']
+    const nestedTexts = indexes.flatMap((outerAt) =>
+      indexes.flatMap((innerAt) =>
+        POSITIONS.flatMap((where) => {
+          const text = nested(outerAt, innerAt, where, 'Sx1Zq', 'Sx2Zq', known)
+          return text === undefined ? [] : [[text, known] as const]
+        }),
+      ),
+    )
+    const quotedTexts = BEFORE_OUTER.flatMap((before) =>
+      OUTERS.flatMap((outer) =>
+        BEFORE_INNER.flatMap((inValue) =>
+          INNER_NAMES.flatMap((name) =>
+            SEPARATORS.flatMap((separator) =>
+              QUOTED_VALUES.map(
+                (quoted) =>
+                  [
+                    quotedInside(before, outer, inValue, name, separator, quoted, 'Sx1Zq'),
+                    [SPACED_KNOWN],
+                  ] as const,
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+    return [...nestedTexts, ...quotedTexts]
+  }
+
+  /** Each text, prose then JSON then prose, masked at once and paced: no marker, and the JSON parses. */
+  const keepsNoMarker = async (
+    texts: ReadonlyArray<readonly [before: string, rest: string]>,
+    known: ReadonlyArray<string>,
+  ) => {
+    const masked = await printedForms(
+      texts.map(([before, rest]) => `${before}${rest}`),
+      known,
+    )
+    texts.forEach(([before, rest], index) => {
+      const one = masked[index] ?? ''
+      expect(one, rest).not.toMatch(/sx\d+zq/i)
+      expect(embeddedParses(one, before), one).toBe(true)
+    })
+  }
+
+  test(
+    'every generated text, as JSON pretty and not, between prose with a lone quote',
+    { timeout: 600_000 },
+    async () => {
+      const before = '5" tall, the user answered: '
+      const after = '\nthat is "all'
+      // Run at once, the paced maskings take turns with one another.
+      await Promise.all(
+        generated().map(([text, known], index) => {
+          const value = asJson(text, index)
+          return keepsNoMarker(
+            [
+              [before, `${JSON.stringify(value)}${after}`],
+              [before, `${JSON.stringify(value, null, 2)}${after}`],
+            ],
+            known,
+          )
+        }),
+      )
+    },
+  )
+
+  test(
+    'the same with any prose before and after, 5,000 samples',
+    { timeout: 600_000 },
+    async () => {
+      const all = generated()
+      await fc.assert(
+        fc.asyncProperty(
+          fc.nat({ max: all.length - 1 }),
+          fc.nat({ max: 3 }),
+          fc.boolean(),
+          prose,
+          prose,
+          async (at, how, pretty, before, after) => {
+            const [text, known] = all[at] ?? ['', []]
+            const value = asJson(text, how)
+            const json = pretty ? JSON.stringify(value, null, 2) : JSON.stringify(value)
+            await keepsNoMarker([[before, `${json}${after}`]], known)
+            await hidesAtLeastTheOracle(`${before}${json}${after}`, known)
+          },
+        ),
+        { numRuns: 5_000 },
+      )
+    },
+  )
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
-const timed = (work: () => string, times: number): number => {
+const timed = (work: () => void, times: number): number => {
   const start = performance.now()
   for (let run = 0; run < times; run += 1) work()
   return performance.now() - start
@@ -689,7 +1765,11 @@ const timed = (work: () => string, times: number): number => {
  * quadratic. The two sizes are timed in turn, seven times, each run long enough to be measured,
  * and each keeps its fastest: a load on the machine weighs on both alike.
  */
-const growth = (make: (size: number) => string, mask: (text: string) => string, size: number) => {
+const growth = <Input>(
+  make: (size: number) => Input,
+  mask: (input: Input) => void,
+  size: number,
+) => {
   const small = make(size)
   const large = make(16 * size)
   let times = 1
@@ -721,6 +1801,31 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     ['a run of eyJ-eyJ- (web tokens)', (size) => 'eyJ-'.repeat(size / 4), text, 4_000],
     ['a run of password-password-', (size) => 'password-'.repeat(size / 9), text, 270],
     ['a run of password_password_', (size) => 'password_'.repeat(size / 9), text, 270],
+    ['a run of password=password=', (size) => 'password='.repeat(size / 9), text, 4_000],
+    [
+      'labels nested in labels (password=a.token="b")',
+      (size) => 'password=a.token="b" '.repeat(size / 21),
+      text,
+      4_000,
+    ],
+    [
+      'labels read through quoted labels (password=token="a b"x)',
+      (size) => 'password=token="a b"x '.repeat(size / 22),
+      text,
+      4_000,
+    ],
+    [
+      'tokens with no space or quote between them',
+      (size) => `${token},`.repeat(size / 25),
+      text,
+      64_000,
+    ],
+    [
+      'a JSON string of URLs read through quoted labels',
+      (size) => JSON.stringify({ body: 'https://u:token="a b"x@h '.repeat(size / 25) }),
+      printed,
+      4_000,
+    ],
     [
       'a run of a-a-a- in a JSON string',
       (size) => JSON.stringify([{ body: 'a-'.repeat(size / 2) }]),
@@ -747,6 +1852,49 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
     ],
     ['lines of a diff', (size) => '-a\n'.repeat(size / 3), printed, 4_000],
     [
+      'prose of lone quotes and escapes (#401)',
+      (size) => 'he said "x \\" y\n'.repeat(size / 14),
+      printed,
+      4_000,
+    ],
+    ['openers that never close (#401)', (size) => '[{"a":[{"a":'.repeat(size / 12), printed, 4_000],
+    [
+      'JSON written after a sentence, line after line (#401)',
+      (size) => 'Said: {"a":"password=\\"b c\\""}\n'.repeat(size / 33),
+      printed,
+      4_000,
+    ],
+    [
+      'containers with no quote, a quote and a backslash at the end (#401)',
+      (size) => `${'[1]'.repeat(size / 3)}"\\`,
+      printed,
+      4_000,
+    ],
+    [
+      'string lines with no escape after a sentence (#401)',
+      (size) => `Said:\n${'"ab"\n'.repeat(size / 5)}`,
+      printed,
+      16_000,
+    ],
+    [
+      'arrays held by an array that never closes, a line of JSON in each (#401)',
+      (size) =>
+        `${'['.repeat(size / 10)}\n${'[1]\n,\n'.repeat(size / 10)}[1]\n${']'.repeat(size / 10 - 1)}`,
+      printed,
+      4_000,
+    ],
+    [
+      'pretty JSON in prose, a quoted label in each string (#401)',
+      (size) =>
+        `Said: ${JSON.stringify(
+          Array.from({ length: size / 24 }, () => 'token="a b"x'),
+          null,
+          2,
+        )}`,
+      printed,
+      4_000,
+    ],
+    [
       'NDJSON lines holding tokens',
       (size) => `{"t":"${token}"}\n`.repeat(size / 31),
       printed,
@@ -759,6 +1907,51 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
       { timeout: 600_000 },
       () => {
         expect(growth(make, mask, size)).toBeLessThan(64)
+      },
+    )
+  }
+})
+
+/**
+ * The most the live heap grew while a text was masked, paced, for each character of the text:
+ * collected and sampled between the steps, where the engine runs, so garbage not collected yet
+ * does not count.
+ */
+const heapPerCharacter = async (text: string): Promise<number> => {
+  setFlagsFromString('--expose-gc')
+  const gc = runInNewContext('gc')
+  const collect = () => {
+    if (Predicate.isFunction(gc)) gc()
+    return process.memoryUsage().heapUsed
+  }
+  // Warmed up, the heap holds nothing the first run allocates once.
+  await Effect.runPromise(maskPrintedPaced(text, []))
+  const floor = collect()
+  let peak = floor
+  const sample = setInterval(() => {
+    peak = Math.max(peak, collect())
+  }, 20)
+  await Effect.runPromise(maskPrintedPaced(text, []))
+  clearInterval(sample)
+  return (peak - floor) / text.length
+}
+
+describe('Masking a run of openers holds memory in proportion to the text (#401)', () => {
+  // A container read whole from every opener kept, for each reader that broke, its containers open
+  // to the end: hundreds of bytes for each opener, and 32 MB of them ran out of memory, which no
+  // mask can catch. The time stayed linear, so no ratio saw it. 4 MB of them grew the live heap by
+  // 110 to 270 bytes for each character; read as they should be, by none.
+  const runs: ReadonlyArray<readonly [what: string, unit: string]> = [
+    ['openers that hold nothing', '{'],
+    ['template braces', '{{x}}'],
+  ]
+  for (const [what, unit] of runs) {
+    test(
+      `${what}: the heap grows by less than 32 bytes for each character`,
+      { timeout: 120_000 },
+      async () => {
+        const text = unit.repeat(Math.ceil(4_000_000 / unit.length))
+        expect(await heapPerCharacter(text)).toBeLessThan(32)
       },
     )
   }
@@ -841,10 +2034,590 @@ describe('A mask that fails gives •••, never the text, and never fails', (
     expect(await Effect.runPromise(maskPrintedPaced(quoted, []))).toBe(MASK)
   })
 
+  test('a pattern that throws on a quoted value of megabytes read in a JSON string inside a text (#401)', async () => {
+    const said = `Said: ${JSON.stringify(quoted)} and more`
+    expect(maskPrinted(said, [])).toBe(MASK)
+    expect(await Effect.runPromise(maskPrintedPaced(said, []))).toBe(MASK)
+  })
+
   test('known values that throw as they are read', async () => {
     expect(maskText('a ghp_ text', unreadable)).toBe(MASK)
     expect(maskPrinted('{"a":"text"}', unreadable)).toBe(MASK)
     expect(await Effect.runPromise(maskTextPaced('a text', unreadable))).toBe(MASK)
     expect(await Effect.runPromise(maskPrintedPaced('{"a":"text"}', unreadable))).toBe(MASK)
+  })
+})
+
+/** A value of `levels` containers, one in another, `bottom` in the innermost: built with no recursion. */
+const deepValue = (
+  levels: number,
+  bottom: string,
+  container: 'object' | 'list' | 'both' = 'object',
+) => {
+  let value: Schema.Json = bottom
+  for (let level = 0; level < levels; level += 1) {
+    value =
+      container === 'object' || (container === 'both' && level % 2 === 0)
+        ? { next: value }
+        : [value]
+  }
+  return value
+}
+
+/** What a value holds, a list's items or a record's fields: nothing for a string or a number. */
+const childrenOf = (value: Schema.Json): ReadonlyArray<Schema.Json> =>
+  value === null ||
+  Predicate.isString(value) ||
+  Predicate.isNumber(value) ||
+  Predicate.isBoolean(value)
+    ? []
+    : Object.values(value)
+
+/** How many containers one in another a value has, counted with no recursion. */
+const depthOf = (value: Schema.Json): number => {
+  let depth = 0
+  const level: Schema.Json[] = [value]
+  let inLevel = level
+  while (inLevel.length > 0) {
+    const next: Schema.Json[] = []
+    for (const item of inLevel) {
+      next.push(...childrenOf(item))
+    }
+    if (next.length > 0) depth += 1
+    inLevel = next
+  }
+  return depth
+}
+
+const DEEP = 100_000
+
+describe('A value nested deeper than a call stack reaches is masked, and never fails the call', () => {
+  const known = ['known-value']
+
+  const SHAPES = { object: 'objects', list: 'lists', both: 'objects and lists' }
+  for (const container of ['object', 'list', 'both'] as const) {
+    test(`a record ${String(DEEP)} levels deep (${SHAPES[container]}) is masked below the limit, and the record can be written`, () => {
+      const masked = maskRecord(
+        { note: 'a known-value', deep: deepValue(DEEP, 'known-value', container) },
+        known,
+      )
+      expect(masked['note']).toBe(`a ${MASK}`)
+      expect(depthOf(masked)).toBeLessThanOrEqual(NESTING_LIMIT)
+      expect(JSON.stringify(masked)).not.toContain('known-value')
+      expect(JSON.stringify(masked)).toContain(MASK)
+    })
+
+    test(`an action ${String(DEEP)} levels deep (${SHAPES[container]}) is not sent`, () => {
+      expect(
+        maskAction({ tool: 'fs_write', arguments: deepValue(DEEP, 'plain', container) }, known),
+      ).toBeNull()
+    })
+  }
+
+  test('the limit is exact: a value of that many containers is masked in full, one more is cut', () => {
+    // The record itself is the first container.
+    const tail = `"next":"${MASK}"${'}'.repeat(NESTING_LIMIT)}`
+    const within = maskRecord({ deep: deepValue(NESTING_LIMIT - 1, 'known-value') }, known)
+    expect(depthOf(within)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(within).endsWith(tail)).toBe(true)
+    expect(maskAction({ deep: deepValue(NESTING_LIMIT - 1, 'plain') }, known)).not.toBeNull()
+    const over = maskRecord({ deep: deepValue(NESTING_LIMIT, 'plain') }, known)
+    expect(depthOf(over)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(over).endsWith(tail)).toBe(true)
+    expect(maskAction({ deep: deepValue(NESTING_LIMIT, 'plain') }, known)).toBeNull()
+  })
+
+  test('what stands above the depth is masked as ever, a credential field whole', () => {
+    const masked = maskRecord(
+      { password: deepValue(DEEP, 'x'), note: 'a known-value', deep: deepValue(DEEP, 'y') },
+      known,
+    )
+    expect(masked['password']).toBe(MASK)
+    expect(masked['note']).toBe(`a ${MASK}`)
+  })
+
+  test('a value that cannot be read gives a masked record, and no action', () => {
+    const unreadable = { note: 'text' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskRecord(unreadable, known)).toEqual({ note: MASK, broken: MASK })
+    expect(maskAction(unreadable, known)).toBeNull()
+  })
+
+  test('a tag that holds more than a name is masked like any value', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { _tag: { token: 'x', note: 'known-value' }, kept: { _tag: 'Name' } }
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- as above
+    const expected = { _tag: { token: MASK, note: MASK }, kept: { _tag: 'Name' } }
+    expect(maskRecord(tagged, known)).toEqual(expected)
+  })
+
+  test('fields keep their names and their order, a field named __proto__ among them', () => {
+    const value: Schema.JsonObject = JSON.parse(
+      '{"z":"known-value","__proto__":{"a":"known-value"},"a":["known-value",{"b":"known-value"}]}',
+    )
+    const masked = maskRecord(value, known)
+    expect(Object.keys(masked)).toEqual(['z', '__proto__', 'a'])
+    expect(JSON.stringify(masked)).toBe(
+      `{"z":"${MASK}","__proto__":{"a":"${MASK}"},"a":["${MASK}",{"b":"${MASK}"}]}`,
+    )
+  })
+
+  // A value of any shape, in the reach of the stack: fields named as a credential and as a tag among
+  // them.
+  const json: fc.Arbitrary<Schema.Json> = fc.letrec<{ value: Schema.Json }>((tie) => ({
+    value: fc.oneof(
+      { depthSize: 'small' },
+      fc.string({ maxLength: 12 }),
+      fc.constantFrom('known-value', 'a known-value b', 'ghp_Q1w2E3r4T5Q1w2E3r4T5'),
+      fc.integer(),
+      fc.boolean(),
+      fc.constant(null),
+      fc.array(tie('value'), { maxLength: 4 }),
+      fc.dictionary(
+        fc.constantFrom(
+          'a',
+          'b',
+          'password',
+          'apiKey',
+          '_tag',
+          'path',
+          'line',
+          '__proto__',
+          'known-value',
+          'a known-value',
+          MASK,
+          `${MASK} (2)`,
+        ),
+        tie('value'),
+        { maxKeys: 4 },
+      ),
+    ),
+  })).value
+
+  /**
+   * The names of a record as the rule keeps them (#404): each masked, a name masking left as it
+   * was unchanged, and a masked name already held numbered from 2, the first free one.
+   */
+  const named = (names: ReadonlyArray<string>): ReadonlyArray<string> => {
+    const masked = names.map((name) => maskText(name, known))
+    const held = names.filter((name, at) => masked[at] === name)
+    return masked.map((name, at): string => {
+      if (name === names[at]) return name
+      let free: string = name
+      for (let count = 2; held.includes(free); count += 1) free = `${name} (${String(count)})`
+      held.push(free)
+      return free
+    })
+  }
+
+  /**
+   * The walk as it was: in calls, one for each value. An agent's arguments have their names and
+   * tags masked too; a record the engine builds keeps both as they are (#404).
+   */
+  const walked = (value: Schema.Json, field: string, agent: boolean): Schema.Json => {
+    if (/api[_-]?key|password|passwd|secret|token|credential|authorization/i.test(field))
+      return MASK
+    if (Predicate.isString(value)) return maskText(value, known)
+    if (Array.isArray(value)) return value.map((item) => walked(item, field, agent))
+    if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return value
+    const entries = Object.entries(value)
+    const names = agent ? named(entries.map(([name]) => name)) : entries.map(([name]) => name)
+    return Object.fromEntries(
+      entries.map(([name, item], at) => [
+        names[at] ?? name,
+        !agent && name === '_tag' && Predicate.isString(item) ? item : walked(item, name, agent),
+      ]),
+    )
+  }
+
+  test('a value in the reach of the stack is masked as the walk in calls masked it, as a record and as arguments', () => {
+    fc.assert(
+      fc.property(
+        fc.dictionary(fc.constantFrom('a', 'b', 'password', '_tag', 'note'), json),
+        (record) => {
+          expect(maskRecord(record, known)).toEqual(walked(record, '', false))
+          expect(maskArguments(record, known)).toEqual(walked(record, '', true))
+        },
+      ),
+      { numRuns: 2_000 },
+    )
+  })
+})
+
+describe('Masking a structured value takes time in proportion to its size', () => {
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+  const wide = (width: number) => ({ items: Array.from({ length: width }, () => `a ${token} b`) })
+  const fields = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: width }, (_, index) => [`field${String(index)}`, `a ${token}`]),
+    )
+  const deep = (levels: number) => ({ deep: deepValue(levels, `a ${token}`) })
+
+  test(
+    '16 times as many items in a list takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(wide, (record) => maskRecord(record, []), 2_000)).toBeLessThan(64)
+      expect(growth(wide, (record) => maskAction(record, []), 2_000)).toBeLessThan(64)
+    },
+  )
+
+  test(
+    '16 times as many fields in a record takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(fields, (record) => maskRecord(record, []), 2_000)).toBeLessThan(64)
+      expect(growth(fields, (record) => maskAction(record, []), 2_000)).toBeLessThan(64)
+    },
+  )
+
+  test(
+    '16 times as many levels, up to the limit, takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growth(deep, (record) => maskRecord(record, []), 15)).toBeLessThan(64)
+      expect(growth(deep, (record) => maskAction(record, []), 15)).toBeLessThan(64)
+    },
+  )
+})
+
+describe("The record of an agent's arguments masks their tag and field names as text (#404)", () => {
+  const known = ['sesame-4417']
+  const token = `ghp_${'Q1w2E3r4T5'.repeat(2)}`
+  const secret = `sesame-4417 password=hunter2 ${token}`
+  const said = maskText(secret, known)
+
+  /** Whether a masked value keeps nothing of the known value, the password or the token. */
+  const keepsNothing = (masked: Schema.Json | null) => {
+    const text = JSON.stringify(masked)
+    for (const part of ['sesame-4417', 'hunter2', token]) expect(text).not.toContain(part)
+  }
+
+  test('the text a name or a tag is masked to hides each of the three', () => {
+    expect(said).toBe(`${MASK} password=${MASK} ${MASK}`)
+  })
+
+  test('a string tag holding a known value, a token and a password is masked, at the top level and nested', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { _tag: secret, nested: { list: [{ _tag: secret }] } }
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- as above
+    const expected = { _tag: said, nested: { list: [{ _tag: said }] } }
+    expect(maskArguments(tagged, known)).toEqual(expected)
+    keepsNothing(maskArguments(tagged, known))
+  })
+
+  test('a field name holding a known value, a token and a password is masked, at the top level and nested', () => {
+    const masked = maskArguments(
+      {
+        [secret]: 1,
+        kept: 'v',
+        nested: { list: [{ [secret]: 'x', [token]: { 'sesame-4417': 'y' } }] },
+      },
+      known,
+    )
+    // A name holding `password=` names a credential: its value is masked whole too.
+    expect(masked).toEqual({
+      [said]: MASK,
+      kept: 'v',
+      nested: { list: [{ [said]: MASK, [MASK]: { [MASK]: 'y' } }] },
+    })
+    keepsNothing(masked)
+  })
+
+  test('names masked alike are all kept, the later ones numbered in order, and no value is dropped', () => {
+    const masked = maskArguments(
+      { 'sesame-4417': 'a', [token]: 'b', 'password=hunter2': 'c', 'password=other1': 'd' },
+      known,
+    )
+    expect(Object.entries(masked)).toEqual([
+      [MASK, 'a'],
+      [`${MASK} (2)`, 'b'],
+      [`password=${MASK}`, MASK],
+      [`password=${MASK} (2)`, MASK],
+    ])
+  })
+
+  test('a name masking leaves as it was keeps its name, and a masked name it holds is numbered, wherever it stands', () => {
+    const masked = maskArguments({ 'sesame-4417': 'a', [MASK]: 'b', [`${MASK} (2)`]: 'c' }, known)
+    expect(Object.entries(masked)).toEqual([
+      [`${MASK} (3)`, 'a'],
+      [MASK, 'b'],
+      [`${MASK} (2)`, 'c'],
+    ])
+  })
+
+  test('a field whose name says it is a credential is masked whole, read as it was written', () => {
+    // Masked, the name no longer says `token`: its value is masked whole all the same.
+    expect(maskArguments({ 'sesame-token-4417': 'plain' }, ['sesame-token-4417'])).toEqual({
+      [MASK]: MASK,
+    })
+  })
+
+  test('a known value, a token and a password stand in no name nor tag, whatever surrounds them', () => {
+    fc.assert(
+      fc.property(secretValue, around, (value, words) => {
+        const masked = JSON.stringify(
+          maskArguments(
+            {
+              [`${words}${value}`]: 1,
+              // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+              nested: { _tag: `${words}${value}`, [`${value}${words}`]: [{ [value]: 'x' }] },
+            },
+            [value],
+          ),
+        )
+        expect(masked).not.toContain(value)
+      }),
+    )
+  })
+
+  test('masked names at every level down to the limit are masked, and nothing is cut', () => {
+    let value: Schema.Json = 'bottom'
+    for (let level = 1; level < NESTING_LIMIT; level += 1) value = { 'sesame-4417': value }
+    const masked = maskArguments({ 'sesame-4417': value }, known)
+    expect(depthOf(masked)).toBe(NESTING_LIMIT)
+    expect(JSON.stringify(masked)).toBe(
+      `${`{"${MASK}":`.repeat(NESTING_LIMIT)}"bottom"${'}'.repeat(NESTING_LIMIT)}`,
+    )
+  })
+
+  test('a record that cannot be read keeps none of its names in clear', () => {
+    const unreadable = { note: 'text', 'sesame-4417': 'v' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskArguments(unreadable, known)).toEqual({ note: MASK, [MASK]: MASK, broken: MASK })
+  })
+})
+
+describe('An action keeps the names the engine fixed, whatever value is known (#404)', () => {
+  // The shapes of what is sent to Jev and to the judge (`jevAction`): every name fixed by the engine.
+  const write = { tool: 'fs_write', path: '/work/notes.md', platform: 'linux', inside: true }
+  const run = {
+    tool: 'commands_run',
+    line: 'make test',
+    program: '/usr/bin/make',
+    args: ['test'],
+    shell: false,
+    platform: 'linux',
+    cwd: '/work',
+    inside: true,
+  }
+
+  test('a variable holding a name of the action, or a part of one, leaves the action as it is', () => {
+    const known = ['platform', 'inside', 'tool', 'program', 'shell']
+    expect(maskAction(write, known)).toEqual(write)
+    expect(Object.keys(maskAction(run, known) ?? {})).toEqual(Object.keys(run))
+    expect(maskAction(run, known)).toEqual(run)
+  })
+
+  test('a string tag is kept as it is too', () => {
+    // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- the field under test is named `_tag`
+    const tagged = { ...write, detail: { _tag: 'Write' } }
+    expect(maskAction(tagged, ['Write'])).toEqual(tagged)
+  })
+
+  test('its values are masked as ever, and one in a destination still refuses it', () => {
+    expect(maskAction({ ...write, note: 'a sesame-4417' }, ['sesame-4417'])).toEqual({
+      ...write,
+      note: `a ${MASK}`,
+    })
+    expect(maskAction({ ...write, path: '/work/sesame-4417/notes.md' }, ['sesame-4417'])).toBeNull()
+  })
+})
+
+/**
+ * As `growth`, but the larger input is run 16 times fewer times than the smaller, and the time of
+ * one call compared: a quadratic mask is caught in seconds rather than minutes.
+ */
+const growthPerCall = <Input>(
+  make: (size: number) => Input,
+  mask: (input: Input) => void,
+  size: number,
+) => {
+  const small = make(size)
+  const large = make(16 * size)
+  let times = 16
+  while (timed(() => mask(small), times) < 20) times *= 2
+  const fewer = times / 16
+  let fastestSmall = Number.POSITIVE_INFINITY
+  let fastestLarge = Number.POSITIVE_INFINITY
+  for (let round = 0; round < 7; round += 1) {
+    fastestSmall = Math.min(fastestSmall, timed(() => mask(small), times) / times)
+    fastestLarge = Math.min(fastestLarge, timed(() => mask(large), fewer) / fewer)
+  }
+  return fastestLarge / fastestSmall
+}
+
+describe('Masking the names of a record takes time in proportion to its size (#404)', () => {
+  /** A record whose every name is a different token: all masked alike, each numbered. */
+  const alike = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: width }, (_, index) => [
+        `ghp_${String(index).padStart(20, 'Q')}`,
+        index,
+      ]),
+    )
+  /** A record whose names are long, a token in each. */
+  const long = (width: number) =>
+    Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => [
+        `${String(index)} ${`a ghp_${'Q1w2E3r4T5'.repeat(2)} b `.repeat(width)}`,
+        index,
+      ]),
+    )
+
+  test('every name masked alike: the record is kept whole', () => {
+    const masked = maskArguments(alike(3), [])
+    expect(Object.entries(masked)).toEqual([
+      [MASK, 0],
+      [`${MASK} (2)`, 1],
+      [`${MASK} (3)`, 2],
+    ])
+  })
+
+  test(
+    '16 times as many names masked alike takes less than 64 times as long',
+    { timeout: 600_000 },
+    () => {
+      expect(growthPerCall(alike, (record) => maskArguments(record, []), 500)).toBeLessThan(64)
+    },
+  )
+
+  test('names 16 times as long take less than 64 times as long', { timeout: 600_000 }, () => {
+    expect(growth(long, (record) => maskArguments(record, []), 500)).toBeLessThan(64)
+  })
+})
+
+describe('A record the engine builds keeps its names and tags, whatever value is known (#404)', () => {
+  const readNeed = Schema.decodeUnknownOption(Schema.fromJsonString(NeedFields))
+  const cases: ReadonlyArray<readonly [string, NeedFields, string]> = [
+    [
+      'an error need, `output`',
+      ErrorFields.make({
+        failed: 'the build',
+        attempts: [{ what: 'pnpm build', output: 'exit 1' }],
+        proposals: ['retry'],
+      }),
+      'output',
+    ],
+    [
+      'a decision need, `options`',
+      DecisionFields.make({ question: 'Which?', options: ['a', 'b'], recommended: null }),
+      'options',
+    ],
+    [
+      'an environment need, `action`',
+      EnvironmentFields.make({ missing: 'gh', action: 'Install gh', settingsSection: null }),
+      'action',
+    ],
+    [
+      'a permission need, `hemera` in `hemeraReason`',
+      PermissionFields.make({
+        call: 'fs_write notes.md',
+        agentReason: 'to write',
+        hemeraReason: 'a write',
+        sensitive: false,
+      }),
+      'hemera',
+    ],
+    [
+      'a permission need, `settings` in `settingsSection`',
+      PermissionFields.make({
+        call: 'fs_write notes.md',
+        agentReason: 'to write',
+        hemeraReason: 'a write',
+        sensitive: false,
+        settingsSection: 'auto',
+      }),
+      'settings',
+    ],
+    [
+      'a decision need, its tag',
+      DecisionFields.make({ question: 'Which?', options: ['a'], recommended: null }),
+      'Decision',
+    ],
+  ]
+  for (const [label, fields, known] of cases) {
+    test(`${label} known: the need is read back as it was`, () => {
+      expect(readNeed(maskedJson(maskRecord(fields, [known])))).toEqual(Option.some(fields))
+    })
+  }
+
+  test('a record that cannot be read keeps its names, masking only its values', () => {
+    const unreadable = { options: 'a' }
+    Object.defineProperty(unreadable, 'broken', {
+      enumerable: true,
+      get: () => {
+        throw new Error('the value cannot be read')
+      },
+    })
+    expect(maskRecord(unreadable, ['options'])).toEqual({ options: MASK, broken: MASK })
+  })
+
+  /** Every name of a value and every string tag, in order: its shape, as a schema reads it. */
+  const shapeOf = (value: Schema.Json): ReadonlyArray<string> => {
+    const shape: string[] = []
+    const left: Schema.Json[] = [value]
+    for (let item = left.pop(); item !== undefined; item = left.pop()) {
+      if (Array.isArray(item)) left.push(...item)
+      else if (
+        item !== null &&
+        !Predicate.isString(item) &&
+        !Predicate.isNumber(item) &&
+        !Predicate.isBoolean(item)
+      ) {
+        for (const [name, held] of Object.entries(item)) {
+          shape.push(name)
+          if (name === '_tag' && Predicate.isString(held)) shape.push(`=${held}`)
+          else left.push(held)
+        }
+      }
+    }
+    return shape
+  }
+
+  /** Names as a schema writes them: words, never one that says credential. */
+  const name = fc
+    .stringMatching(/^[a-zA-Z]{1,14}$/)
+    .filter(
+      (word) => !/api[_-]?key|password|passwd|secret|token|credential|authorization/i.test(word),
+    )
+  const shaped: fc.Arbitrary<Schema.Json> = fc.letrec<{ value: Schema.Json }>((tie) => ({
+    value: fc.oneof(
+      { depthSize: 'small' },
+      fc.string({ maxLength: 12 }),
+      fc.integer(),
+      fc.array(tie('value'), { maxLength: 3 }),
+      fc.dictionary(fc.oneof(name, fc.constant('_tag')), tie('value'), { maxKeys: 4 }),
+    ),
+  })).value
+
+  test('any value keeps every name and tag when a known value is one of them, or a part of one', () => {
+    fc.assert(
+      fc.property(
+        fc.dictionary(name, shaped, { minKeys: 1, maxKeys: 4 }),
+        fc.nat(),
+        fc.nat(),
+        fc.nat(),
+        (record, pick, from, length) => {
+          const parts = shapeOf(record).map((part) => part.replace(/^=/, ''))
+          const whole = parts[pick % parts.length] ?? ''
+          if (whole === '') return
+          const start = from % whole.length
+          const known = [whole, whole.slice(start, start + 1 + (length % whole.length))]
+          expect(shapeOf(maskRecord(record, known))).toEqual(shapeOf(record))
+        },
+      ),
+      { numRuns: 2_000 },
+    )
   })
 })

@@ -41,10 +41,11 @@ import { getCommand } from '../catalogue.ts'
 import { getProject } from '../projects.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
-import { type NeedService, createNeedIn, getNeed, reviseNeedIn } from '../needs.ts'
+import { DeliveryFailed, type NeedService, createNeedIn, getNeed, reviseNeedIn } from '../needs.ts'
 import { Git } from '../git.ts'
 import { resourcesOf } from '../resources/declarations.ts'
 import { Secrets } from '../secrets.ts'
+import { storeDeliveryIn } from '../sessions/deliveries.ts'
 import { SessionPost } from '../sessions/post.ts'
 import { assignWorkIn } from '../sessions/leases.ts'
 import { type RoleSession, getSession, sessionsIn, sessionsOfLineage } from '../sessions/store.ts'
@@ -76,7 +77,7 @@ import {
   recordWriteIn,
   writesIn,
 } from './attempts.ts'
-import { checkAttempt, keepCheckResult } from './checks.ts'
+import { checkAttempt, keepCheckResultIn } from './checks.ts'
 import { documentationAttemptIn } from './documenter-store.ts'
 import { type WriteInProgress, type WriteLock, type WriteLocks, waitingSaid } from './locks.ts'
 import { OutsideChanges } from './outside.ts'
@@ -121,7 +122,15 @@ export interface LoopParts {
   readonly locks: WriteLocks
   readonly said: (line: string) => Effect.Effect<void>
   readonly hold: (
-    at: 'starting' | 'finishing' | 'judging' | 'locked' | 'committing' | 'mid-commit' | 'cutting',
+    at:
+      | 'starting'
+      | 'finishing'
+      | 'judging'
+      | 'locked'
+      | 'committing'
+      | 'mid-commit'
+      | 'cutting'
+      | 'telling',
   ) => Effect.Effect<void>
   /** A delivery to a lineage of the mission, or to its Builder; under `id` when one is given. */
   readonly deliver: (
@@ -950,16 +959,20 @@ export const buildingLoop = (parts: LoopParts) => {
       }
     })
 
-  /** The three failures an error need carries: each attempt's red checks, files and runner. */
+  /**
+   * The three failures an error need carries: each attempt's red checks, files and runner, read in
+   * the transaction that raises it when there is one.
+   */
   const failuresOf = (
     attempts: ReadonlyArray<{
       readonly id: string
       readonly number: number
       readonly runner: string
     }>,
+    reader: Reader | null = null,
   ) =>
     Effect.gen(function* () {
-      const database = yield* Database
+      const database = reader ?? (yield* Database)
       const secrets = yield* Secrets
       const failures: Array<{ what: string; output: string }> = []
       for (const attempt of attempts) {
@@ -1424,7 +1437,20 @@ export const buildingLoop = (parts: LoopParts) => {
       const at = now()
       const attemptId = crypto.randomUUID()
       const number = all.length + 1
-      yield* mutate('opening an attempt on a proof', (transaction) =>
+      const kept = { ...result, place: '', verdict: 'red' as const }
+      const target = builder === null ? { role: 'builder' } : { lineage: builder }
+      const label = `${scenario}'s proof`
+      const judgedRed = [
+        ...all.filter((one) => one.counted && one.verdict === 'red'),
+        { id: attemptId, number, runner: builder ?? 'builder' },
+      ]
+      const third = judgedRed.length >= REDS_BEFORE_A_NEED
+      const { owner } = yield* ownerOf(building, null)
+      const question = `${label}: three red attempts`
+      const redWords = yield* redSaid(label, [kept], next)
+      // The attempt, its red and what the Builder is told, or the third red's need, in one
+      // transaction: a stop never leaves the attempt with nobody told of it (#378).
+      const told = yield* mutate('opening an attempt on a proof', (transaction) =>
         Effect.gen(function* () {
           yield* transaction
             .update(buildingAttempts)
@@ -1458,68 +1484,62 @@ export const buildingLoop = (parts: LoopParts) => {
               outside: '[]',
             })
             .pipe(Effect.mapError(refusedWhile('opening the attempt')))
-          return {
-            result: undefined,
-            events: [
-              buildingEvent(missionId, 'building.attempt_red', {
-                scope: 'proof',
-                subject: scenario,
-                check: result.name,
-                place: null,
-              }),
-            ],
-          }
+          yield* keepCheckResultIn(transaction, attemptId, kept)
+          const red = buildingEvent(missionId, 'building.attempt_red', {
+            scope: 'proof',
+            subject: scenario,
+            check: result.name,
+            place: null,
+          })
+          const asked = third
+            ? yield* Effect.gen(function* () {
+                const failures = yield* failuresOf(
+                  judgedRed.slice(-REDS_BEFORE_A_NEED),
+                  transaction,
+                )
+                const write = yield* createNeedIn(
+                  parts.needs,
+                  owner,
+                  ErrorFields.make({ failed: question, attempts: failures, proposals: [] }),
+                )
+                const made = yield* hemeraNeedIn(transaction, building, write, {
+                  kind: 'error',
+                  tasks: [],
+                  question,
+                  options: [],
+                  proposer: builder,
+                  scope: { scope: 'proof', subject: scenario },
+                })
+                return {
+                  kind: 'propose',
+                  body: `${label} is red for the third time: Hemera asks the user. Fill what you propose with need_propose (need ${made.needId}): your options, the one you recommend and why.`,
+                  events: [
+                    buildingEvent(missionId, 'building.three_reds', {
+                      scope: 'proof',
+                      subject: scenario,
+                      need: made.needId,
+                    }),
+                    ...made.events,
+                  ],
+                }
+              })
+            : { kind: 'red', body: redWords, events: [] }
+          const id = yield* storeDeliveryIn(transaction, {
+            owner: { kind: 'mission', missionId },
+            target,
+            kind: asked.kind,
+            body: asked.body,
+          }).pipe(
+            Effect.catchTag('DeliveryKindRefused', (refused) =>
+              Effect.fail(new DeliveryFailed({ reason: refused.message })),
+            ),
+          )
+          return { result: { ...asked, id }, events: [red, ...asked.events] }
         }),
       )
-      const kept = { ...result, place: '', verdict: 'red' as const }
-      yield* keepCheckResult(attemptId, kept)
-      const target = builder === null ? { role: 'builder' } : { lineage: builder }
-      const label = `${scenario}'s proof`
-      const judgedRed = [
-        ...all.filter((one) => one.counted && one.verdict === 'red'),
-        { id: attemptId, number, runner: builder ?? 'builder' },
-      ]
-      if (judgedRed.length >= REDS_BEFORE_A_NEED) {
-        const failures = yield* failuresOf(judgedRed.slice(-REDS_BEFORE_A_NEED))
-        const { owner } = yield* ownerOf(building, null)
-        const question = `${label}: three red attempts`
-        const write = yield* createNeedIn(
-          parts.needs,
-          owner,
-          ErrorFields.make({ failed: question, attempts: failures, proposals: [] }),
-        )
-        const needId = yield* mutate('stopping a proof after three reds', (transaction) =>
-          Effect.gen(function* () {
-            const made = yield* hemeraNeedIn(transaction, building, write, {
-              kind: 'error',
-              tasks: [],
-              question,
-              options: [],
-              proposer: builder,
-              scope: { scope: 'proof', subject: scenario },
-            })
-            return {
-              result: made.needId,
-              events: [
-                buildingEvent(missionId, 'building.three_reds', {
-                  scope: 'proof',
-                  subject: scenario,
-                  need: made.needId,
-                }),
-                ...made.events,
-              ],
-            }
-          }),
-        )
-        yield* deliver(
-          building,
-          target,
-          'propose',
-          `${label} is red for the third time: Hemera asks the user. Fill what you propose with need_propose (need ${needId}): your options, the one you recommend and why.`,
-        )
-        return
-      }
-      yield* deliver(building, target, 'red', yield* redSaid(label, [kept], next))
+      yield* hold('telling')
+      // Stored with the attempt: only handed over here.
+      yield* deliver(building, target, told.kind, told.body, told.id)
     })
 
   // ---- need_propose.

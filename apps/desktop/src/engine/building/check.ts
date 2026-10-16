@@ -271,9 +271,12 @@ const filesMoved = (
         patches.push({
           repository: base.repository,
           path: change.path,
+          // Masked in slices of time: a large file's diff does not hold the engine (#402).
           patch: sensitive
             ? ''
-            : secrets.mask(yield* git.diffBetween(folder, base.frozen, base.commit, change.path)),
+            : yield* secrets.maskPaced(
+                yield* git.diffBetween(folder, base.frozen, base.commit, change.path),
+              ),
           withheld: sensitive ? SENSITIVE_WITHHELD : null,
         })
       }

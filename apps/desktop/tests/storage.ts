@@ -3,7 +3,7 @@
  * layers, and removed afterwards. No test opens the Profile of this machine.
  */
 
-import type { ChildProcess } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -119,6 +119,66 @@ export async function endChild(child: ChildProcess): Promise<void> {
   const gone = once(child, 'exit')
   child.kill('SIGKILL')
   await gone
+}
+
+/**
+ * Answers once a child a test started writes its first line, and fails, naming what it wrote on
+ * its errors, when it has not within `bound` ms or ends first. A wait on a child without a bound
+ * hangs its test when the child is slow to start: PowerShell took seconds to on a loaded runner.
+ */
+export function readyWithin(child: ChildProcess, bound: number): Promise<void> {
+  let errors = ''
+  const onErrors = (chunk: Buffer): void => {
+    errors += chunk.toString()
+  }
+  child.stderr?.on('data', onErrors)
+  return new Promise<void>((resolve, reject) => {
+    const settle = (failure?: Error): void => {
+      clearTimeout(timer)
+      child.stdout?.off('data', onReady)
+      child.off('exit', onExit)
+      child.stderr?.off('data', onErrors)
+      if (failure === undefined) resolve()
+      else reject(failure)
+    }
+    const onReady = (): void => settle()
+    const onExit = (code: number | null): void =>
+      settle(new Error(`the child ended (${code}) before it was ready: ${errors}`))
+    const timer = setTimeout(
+      () => settle(new Error(`the child was not ready after ${bound} ms: ${errors}`)),
+      bound,
+    )
+    child.stdout?.once('data', onReady)
+    child.once('exit', onExit)
+  })
+}
+
+/** How long a child a test starts has to say it is ready. */
+export const READY_WITHIN = 10_000
+
+/**
+ * Starts a process that holds a file open until `endChild` ends it, and answers once it does, or
+ * fails within `READY_WITHIN`. On Windows a file held open cannot be replaced, as when an editor or
+ * an antivirus holds it; elsewhere an open file never stops a rename. The holder is this Node: it
+ * starts in a fraction of a second where PowerShell took seconds on a loaded runner.
+ */
+export async function holdFile(file: string): Promise<ChildProcess> {
+  const holder = spawn(
+    process.execPath,
+    [
+      '-e',
+      "require('node:fs').openSync(process.argv[1], 'r'); console.log('held'); setInterval(() => {}, 1000)",
+      file,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  try {
+    await readyWithin(holder, READY_WITHIN)
+  } catch (failure) {
+    await endChild(holder)
+    throw failure
+  }
+  return holder
 }
 
 export type Storage = Database | SqliteClient | DomainEvents
