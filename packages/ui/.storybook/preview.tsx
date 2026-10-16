@@ -70,9 +70,6 @@ const diag = (message: string): void => {
 }
 if ('__vitest_browser__' in globalThis) {
   diag(`preview loaded ${document.documentElement.className}`)
-  import.meta.hot?.on('vite:beforeFullReload', () => {
-    diag('vite full reload')
-  })
   window.addEventListener('beforeunload', () => {
     diag('beforeunload')
   })
