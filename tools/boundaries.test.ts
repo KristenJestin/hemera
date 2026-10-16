@@ -1,9 +1,16 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { analyze, importsOf, refusalsOf, storageRefusalsOf } from './boundaries.ts'
+import {
+  analyze,
+  askedRefusalsOf,
+  importsOf,
+  readRefusalsOf,
+  refusalsOf,
+  storageRefusalsOf,
+} from './boundaries.ts'
 
 const repository = resolve(import.meta.dirname, '..')
 
@@ -88,5 +95,64 @@ describe('The storage layer stays in the engine', () => {
   test('a folder that only starts like the engine is not the engine', () => {
     const source = "import { eq } from 'drizzle-orm'\n"
     expect(storageRefusalsOf('apps/desktop/src/engine-old/x.ts', source)).toHaveLength(1)
+  })
+})
+
+describe('A file tool reads a file for an agent through the judged open only (#392)', () => {
+  const TOOL = 'apps/desktop/src/engine/tools/new-tool.ts'
+
+  test.each([
+    ['readFile from node:fs/promises', "import { readFile } from 'node:fs/promises'\n"],
+    ['readFileSync from node:fs', "import { readFileSync, statSync } from 'node:fs'\n"],
+    ['a read stream', "import { createReadStream } from 'fs'\n"],
+    ['an open renamed', "import { open as openFile } from 'node:fs/promises'\n"],
+    ['the whole module', "import * as fs from 'node:fs'\n"],
+    ['its default', "import fs from 'node:fs'\n"],
+    ['a require', "const { readFileSync } = require('node:fs')\n"],
+  ])('a planted raw read in a file tool is refused: %s', (_, source) => {
+    expect(readRefusalsOf(TOOL, source)).toHaveLength(1)
+  })
+
+  test('what reads no content is not refused: a stat, a listing, a type', () => {
+    const source = [
+      "import { type BigIntStats, type Dirent, constants } from 'node:fs'",
+      "import { lstat, readdir, realpath, stat } from 'node:fs/promises'",
+      "import type { FileHandle } from 'node:fs/promises'",
+    ].join('\n')
+    expect(readRefusalsOf(TOOL, source)).toEqual([])
+  })
+
+  test('the judged open reads, and the fingerprint of a file is read without handing its content', () => {
+    const read = "import { open, readFile } from 'node:fs/promises'\n"
+    expect(readRefusalsOf('apps/desktop/src/engine/tools/judged.ts', read)).toEqual([])
+    const fingerprint = "import { type FileHandle, open } from 'node:fs/promises'\n"
+    expect(readRefusalsOf('apps/desktop/src/engine/tools/read.ts', fingerprint)).toEqual([])
+    expect(readRefusalsOf('apps/desktop/src/engine/tools/read.ts', read)).toHaveLength(1)
+  })
+
+  test('outside the file tools, a read is not this rule’s', () => {
+    const source = "import { readFile } from 'node:fs/promises'\n"
+    expect(readRefusalsOf('apps/desktop/src/engine/storage/database.ts', source)).toEqual([])
+  })
+
+  test('the exception for a judged call’s own file is made by the gate only', () => {
+    const source = 'const withholding = yield* Withholding.asked(judged)\n'
+    expect(askedRefusalsOf('apps/desktop/src/engine/tools/gate.ts', source)).toEqual([])
+    expect(askedRefusalsOf(TOOL, source)).toHaveLength(1)
+    expect(askedRefusalsOf('apps/desktop/src/engine/building/new-tool.ts', source)).toHaveLength(1)
+  })
+
+  test('a raw read planted in a file tool of the repository fails the check', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-boundaries-'))
+    try {
+      const tools = join(root, 'apps', 'desktop', 'src', 'engine', 'tools')
+      mkdirSync(tools, { recursive: true })
+      writeFileSync(join(tools, 'planted.ts'), "import { readFile } from 'node:fs/promises'\n")
+      expect(analyze(root)).toMatchObject([
+        { file: 'apps/desktop/src/engine/tools/planted.ts', found: 'readFile' },
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
