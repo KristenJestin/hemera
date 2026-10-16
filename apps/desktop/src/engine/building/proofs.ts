@@ -54,6 +54,7 @@ import {
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import { Effect, Option, Predicate, Result, Semaphore } from 'effect'
+import { lstat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { Git } from '../git.ts'
@@ -86,7 +87,7 @@ import { type Grant, ToolAccess } from '../tools/access.ts'
 import type { WrittenFile } from '../tools/ports.ts'
 import { actionDone, actionFailed, beginAction } from '../tools/actions.ts'
 import { answered, attempt as onDisk, refusal, replaceFile } from '../tools/files.ts'
-import { readJudged } from '../tools/judged.ts'
+import { NotJudged, THROUGH_A_LINK, readJudged } from '../tools/judged.ts'
 import { fingerprintOf } from '../tools/read.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn } from './attempts.ts'
@@ -720,13 +721,19 @@ export const buildingProofs = (parts: ProofParts) => {
    * A file of the Workspace as it is now, read only if it is the regular file at its real path, with
    * a single name (`../tools/judged.ts`, as `fs_write` reads before it writes): never what a link
    * planted there leads to, and never waiting on a pipe. Null when there is none; fails with why it
-   * is refused.
+   * is refused. A name that is there but leads nowhere is a link to a missing file: refused too,
+   * where the platform's open follows it rather than saying so (Windows).
    */
   const currentOf = (path: string) =>
     onDisk(() =>
       readJudged(path, { oneNameFor: 'write' }).catch((cause: Error) => {
-        if (Predicate.hasProperty(cause, 'code') && cause.code === 'ENOENT') return null
-        throw cause
+        if (!Predicate.hasProperty(cause, 'code') || cause.code !== 'ENOENT') throw cause
+        return lstat(path).then(
+          () => {
+            throw new NotJudged(THROUGH_A_LINK)
+          },
+          () => null,
+        )
       }),
     )
 
