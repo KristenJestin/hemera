@@ -1,0 +1,18 @@
+FAIL ./helper.test.js
+  ✕ saves (3 ms)
+  ✓ saves (1 ms)
+
+  ● saves
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+      1 | exports.failingTest = (name) => test(name, () => { expect(1).toBe(2) })
+        |                                                             ^
+
+      at Object.toBe (helpers.js:1:61)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total

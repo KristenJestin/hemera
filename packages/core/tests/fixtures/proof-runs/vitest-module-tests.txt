@@ -1,0 +1,32 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ binding.test.ts (2 tests | 1 failed) 15ms
+   × saves 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  binding.test.ts > saves
+AssertionError: expected [ 'csv', 'md' ] to have a length of 3 but got 2
+
+- Expected
++ Received
+
+- 3
++ 2
+
+ ❯ kinds.ts:4:37
+      2|
+      3| export const kinds = ['csv', 'md']
+      4| test('saves', () => { expect(kinds).toHaveLength(3) })
+       |                                     ^
+      5|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  16:29:38
+   Duration  270ms (transform 54%, import 24%, tests 16%, worker 6%)
+

@@ -1,0 +1,41 @@
+EFFE
+======================================================================
+ERROR: test_sub (test_ut2.Export.test_sub) (i=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut2.py", line 7, in test_sub
+    to_markdown([])
+    ^^^^^^^^^^^
+NameError: name 'to_markdown' is not defined
+
+======================================================================
+ERROR: test_teardown (test_ut2.Export.test_teardown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut2.py", line 10, in <lambda>
+    self.addCleanup(lambda: to_markdown([]))
+                            ^^^^^^^^^^^
+NameError: name 'to_markdown' is not defined
+
+======================================================================
+FAIL: test_sub (test_ut2.Export.test_sub) (i=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut2.py", line 8, in test_sub
+    self.assertEqual(i, 5)
+    ~~~~~~~~~~~~~~~~^^^^^^
+AssertionError: 1 != 5
+
+======================================================================
+FAIL: test_teardown (test_ut2.Export.test_teardown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut2.py", line 11, in test_teardown
+    self.assertEqual(1, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^
+AssertionError: 1 != 2
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+FAILED (failures=2, errors=2)

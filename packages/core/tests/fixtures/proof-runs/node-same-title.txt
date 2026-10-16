@@ -1,0 +1,44 @@
+▶ export
+  ✖ saves (0.485882ms)
+✖ export (1.152606ms)
+▶ import
+  ✖ saves (0.628346ms)
+✖ import (0.756537ms)
+ℹ tests 2
+ℹ suites 2
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.52739
+
+✖ failing tests:
+
+test at b.test.mjs:3:28
+✖ saves (0.485882ms)
+  'not implemented'
+
+test at b.test.mjs:4:28
+✖ saves (0.628346ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///work/acme/api/b.test.mjs:4:57)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.start (node:internal/test_runner/test:1177:17)
+      at node:internal/test_runner/test:1769:71
+      at node:internal/per_context/primordials:466:82
+      at new Promise (<anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:435:3)
+      at node:internal/per_context/primordials:466:9
+      at Array.map (<anonymous>) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

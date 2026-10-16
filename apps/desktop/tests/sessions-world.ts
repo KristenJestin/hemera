@@ -168,6 +168,8 @@ export const sessionsEngine = (
     readonly testClock?: boolean
     /** The machine's processes as the supervisor sees them, when a suite answers for some. */
     readonly hostProcesses?: ProfileParts['hostProcesses']
+    /** Who answers a command marked "ask before running", when a suite watches what it is asked. */
+    readonly askBeforeRunning?: ProfileParts['askBeforeRunning']
   } = {},
 ) => {
   const world: World = { agents: [], pids: [], children: [] }
@@ -229,11 +231,15 @@ export const sessionsEngine = (
     options.runs === undefined ? withDatabase : { ...withDatabase, runs: options.runs }
   const withSecrets =
     options.secrets === undefined ? withRuns : { ...withRuns, secrets: options.secrets }
+  const withAsk =
+    options.askBeforeRunning === undefined
+      ? withSecrets
+      : { ...withSecrets, askBeforeRunning: options.askBeforeRunning }
   const run = commandsEngine(
     data,
     options.reconciliationSteps === undefined
-      ? withSecrets
-      : { ...withSecrets, reconciliationSteps: options.reconciliationSteps },
+      ? withAsk
+      : { ...withAsk, reconciliationSteps: options.reconciliationSteps },
     options.testClock,
   )
   return { world, run }

@@ -1,0 +1,20 @@
+✖ saves (0.550742ms)
+✖ saves (0.541705ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.011721
+
+✖ failing tests:
+
+test at tests/object.test.mjs:3:1
+✖ saves (0.550742ms)
+  "{\n  name: 'AssertionError',\n  message: 'x',\n  toString: [Function: toString]\n}"
+
+test at tests/string.test.mjs:3:1
+✖ saves (0.541705ms)
+  'AssertionError [ERR_ASSERTION]: Expected values to be strictly equal'

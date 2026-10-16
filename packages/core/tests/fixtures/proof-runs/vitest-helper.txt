@@ -1,0 +1,35 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ helper.test.ts (2 tests | 1 failed) 6ms
+   × saves 5ms
+   ✓ saves 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  helper.test.ts > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ helpers.ts:3:75
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| export const failingTest = (name: string) => test(name, () => { expect…
+       |                                                                           ^
+      4|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  10:17:49
+   Duration  112ms (transform 50%, import 23%, tests 18%, worker 9%)
+
+JSON report written to /work/acme/api/report.json
+JUNIT report written to /work/acme/api/report.xml
