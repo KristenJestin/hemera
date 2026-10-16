@@ -3,8 +3,17 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../../components/button/button.tsx'
-import { EDITOR_LOADED, settled } from '../../blocks/planning/planning-play.ts'
+import { settled } from '../../blocks/planning/planning-play.ts'
+import { loadMentionEditor } from '../../components/mention-field/load-mention-editor.ts'
 import { type MomentName, PlanningScreen } from './planning-screen-fixture.tsx'
+
+/**
+ * Its answers and discussions are mention fields, so the editor is there before the first play. It
+ * is fetched while the file is collected, where a page is waited for however long it takes: as a
+ * loader it was part of the first story's thirty seconds, and the first story, which draws no
+ * field at all, timed out waiting for it on a busy Windows runner (#428).
+ */
+await loadMentionEditor()
 
 /**
  * The Planning page of a mission, the base of its frame while the Spec is written with the user,
@@ -22,8 +31,6 @@ const meta = {
   title: 'Surfaces/Planning',
   component: PlanningScreen,
   parameters: { layout: 'fullscreen' },
-  // Its answers and discussions are mention fields: the editor is there before the first play.
-  loaders: EDITOR_LOADED,
   args: {
     moment: 'questionsWaiting',
     onAnswer: fn(() => Promise.resolve()),
