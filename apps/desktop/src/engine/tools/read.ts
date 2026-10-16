@@ -16,6 +16,8 @@
 import { createHash } from 'node:crypto'
 import { type FileHandle, open } from 'node:fs/promises'
 
+import { openJudged } from './judged.ts'
+
 /** The bytes a page covers, and where the next one starts. */
 export interface ReadRange {
   /** The first byte of the page. */
@@ -125,9 +127,12 @@ async function newlinesBefore(handle: FileHandle, upTo: number, from = 0): Promi
   return found + (await newlinesBefore(handle, upTo, from + bytesRead))
 }
 
-/** One page of a file, from a byte, at most `limit` bytes long. */
+/**
+ * One page of a file, from a byte, at most `limit` bytes long: of the file at that very path,
+ * opened once and checked (`./judged.ts`), never of one a link planted since leads to.
+ */
 export async function readPage(path: string, offset: number, limit: number): Promise<Page> {
-  const handle = await open(path, 'r')
+  const handle = await openJudged(path)
   try {
     const { size } = await handle.stat()
     const from = Math.min(offset, size)
