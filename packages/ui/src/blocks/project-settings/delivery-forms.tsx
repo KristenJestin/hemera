@@ -445,6 +445,165 @@ export interface StepFormProps {
   refused?: string | undefined
 }
 
+/** The fields of a bump: how the version is moved, and the catalogue command when it is one. */
+function BumpFields({
+  config,
+  set,
+  commandItems,
+}: {
+  config: Extract<StepConfig, { kind: 'bump' }>
+  set: (next: StepConfig) => void
+  commandItems: { value: string; label: string }[]
+}): ReactNode {
+  return (
+    <div className="flex items-start gap-3">
+      <Labelled<'command' | 'agent'>
+        label="Moved by"
+        value={config.how}
+        onChange={(how) => set({ ...config, how })}
+        items={[
+          { value: 'command', label: 'A catalogue command' },
+          { value: 'agent', label: 'The agent' },
+        ]}
+      />
+      {config.how === 'command' && (
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className={LABEL} aria-hidden="true">
+            Command
+          </span>
+          <Select<string>
+            label="Command"
+            className="w-full"
+            value={config.command}
+            placeholder="Choose a command"
+            onValueChange={(command) => set({ ...config, command })}
+            items={commandItems}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The fields of a published step: how the version is found, and the tag or package it looks for. */
+function PublishedFields({
+  config,
+  set,
+  refused,
+}: {
+  config: Extract<StepConfig, { kind: 'published' }>
+  set: (next: StepConfig) => void
+  refused: string | undefined
+}): ReactNode {
+  return (
+    <div className="flex items-start gap-3">
+      <Labelled<PublishedBy>
+        label="Found by"
+        value={config.by}
+        onChange={(by) => set({ ...config, by })}
+        items={[
+          { value: 'tag', label: 'A tag' },
+          { value: 'registry', label: 'The version on a registry' },
+          { value: 'confirm', label: 'Your confirmation' },
+        ]}
+      />
+      {config.by !== 'confirm' && (
+        <Input
+          label={config.by === 'tag' ? 'Tag pattern' : 'Package'}
+          className="min-w-0 flex-1"
+          placeholder={config.by === 'tag' ? 'v*' : '@acme/shared'}
+          value={config.pattern}
+          error={refused}
+          onValueChange={(pattern) => set({ ...config, pattern })}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The fields of a step's own kind, whichever it is. */
+function KindFields({
+  config,
+  set,
+  commandItems,
+  refused,
+}: {
+  config: StepConfig
+  set: (next: StepConfig) => void
+  commandItems: { value: string; label: string }[]
+  refused: string | undefined
+}): ReactNode {
+  switch (config.kind) {
+    case 'bump':
+      return <BumpFields config={config} set={set} commandItems={commandItems} />
+    case 'merge':
+      return (
+        <Labelled<MergeMethod>
+          label="Method"
+          value={config.method}
+          onChange={(method) => set({ ...config, method })}
+          items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
+            value: method,
+            label: MERGE_WORDS[method],
+          }))}
+        />
+      )
+    case 'remote-action':
+      return (
+        <Input
+          label="Workflow or pipeline"
+          placeholder="release.yml"
+          value={config.action}
+          error={refused}
+          onValueChange={(action) => set({ ...config, action })}
+        />
+      )
+    case 'published':
+      return <PublishedFields config={config} set={set} refused={refused} />
+    case 'command':
+      return (
+        <div className="flex flex-col gap-1">
+          <span className={LABEL} aria-hidden="true">
+            Command
+          </span>
+          <Select<string>
+            label="Command"
+            className="w-full"
+            value={config.command === '' ? null : config.command}
+            placeholder="Choose a command"
+            onValueChange={(command) => set({ ...config, command })}
+            items={commandItems}
+          />
+        </div>
+      )
+    case 'agent':
+      return (
+        <Textarea
+          label="Task"
+          rows={3}
+          value={config.task}
+          error={refused}
+          onValueChange={(task) => set({ ...config, task })}
+        />
+      )
+    case 'confirm':
+      return (
+        <Input
+          label="What you confirm"
+          placeholder="The release is announced"
+          value={config.what}
+          error={refused}
+          onValueChange={(what) => set({ ...config, what })}
+        />
+      )
+    case 'push':
+    case 'pull-request':
+    case 'ci':
+    case 'local-merge':
+      return null
+  }
+}
+
 /** A step: its kind when it is new, where it goes, how it starts, and the fields of its kind. */
 export function StepForm({ draft, onChange, adding, commands, refused }: StepFormProps): ReactNode {
   const { config } = draft
@@ -470,111 +629,7 @@ export function StepForm({ draft, onChange, adding, commands, refused }: StepFor
           )}
         </div>
       )}
-      {config.kind === 'bump' && (
-        <div className="flex items-start gap-3">
-          <Labelled<'command' | 'agent'>
-            label="Moved by"
-            value={config.how}
-            onChange={(how) => set({ ...config, how })}
-            items={[
-              { value: 'command', label: 'A catalogue command' },
-              { value: 'agent', label: 'The agent' },
-            ]}
-          />
-          {config.how === 'command' && (
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className={LABEL} aria-hidden="true">
-                Command
-              </span>
-              <Select<string>
-                label="Command"
-                className="w-full"
-                value={config.command}
-                placeholder="Choose a command"
-                onValueChange={(command) => set({ ...config, command })}
-                items={commandItems}
-              />
-            </div>
-          )}
-        </div>
-      )}
-      {config.kind === 'merge' && (
-        <Labelled<MergeMethod>
-          label="Method"
-          value={config.method}
-          onChange={(method) => set({ ...config, method })}
-          items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
-            value: method,
-            label: MERGE_WORDS[method],
-          }))}
-        />
-      )}
-      {config.kind === 'remote-action' && (
-        <Input
-          label="Workflow or pipeline"
-          placeholder="release.yml"
-          value={config.action}
-          error={refused}
-          onValueChange={(action) => set({ ...config, action })}
-        />
-      )}
-      {config.kind === 'published' && (
-        <div className="flex items-start gap-3">
-          <Labelled<PublishedBy>
-            label="Found by"
-            value={config.by}
-            onChange={(by) => set({ ...config, by })}
-            items={[
-              { value: 'tag', label: 'A tag' },
-              { value: 'registry', label: 'The version on a registry' },
-              { value: 'confirm', label: 'Your confirmation' },
-            ]}
-          />
-          {config.by !== 'confirm' && (
-            <Input
-              label={config.by === 'tag' ? 'Tag pattern' : 'Package'}
-              className="min-w-0 flex-1"
-              placeholder={config.by === 'tag' ? 'v*' : '@acme/shared'}
-              value={config.pattern}
-              error={refused}
-              onValueChange={(pattern) => set({ ...config, pattern })}
-            />
-          )}
-        </div>
-      )}
-      {config.kind === 'command' && (
-        <div className="flex flex-col gap-1">
-          <span className={LABEL} aria-hidden="true">
-            Command
-          </span>
-          <Select<string>
-            label="Command"
-            className="w-full"
-            value={config.command === '' ? null : config.command}
-            placeholder="Choose a command"
-            onValueChange={(command) => set({ ...config, command })}
-            items={commandItems}
-          />
-        </div>
-      )}
-      {config.kind === 'agent' && (
-        <Textarea
-          label="Task"
-          rows={3}
-          value={config.task}
-          error={refused}
-          onValueChange={(task) => set({ ...config, task })}
-        />
-      )}
-      {config.kind === 'confirm' && (
-        <Input
-          label="What you confirm"
-          placeholder="The release is announced"
-          value={config.what}
-          error={refused}
-          onValueChange={(what) => set({ ...config, what })}
-        />
-      )}
+      <KindFields config={config} set={set} commandItems={commandItems} refused={refused} />
       {writesToNetwork(config) && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <IconWorld size="sm" aria-hidden="true" />
