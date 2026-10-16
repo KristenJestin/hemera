@@ -98,7 +98,7 @@ import { attributedIn } from './attempts.ts'
 import { type Loop, lineageIn, runningOf, taskOfFile } from './loop.ts'
 import { fileOf } from './place.ts'
 import { OutsideChanges } from './outside.ts'
-import { type ProofRun, ProofRunner } from './proof-runner.ts'
+import { type ProofRun, ProofRunner, TEST_CAP, type TestRead } from './proof-runner.ts'
 import {
   type ScenarioProofRow,
   currentTreesIn,
@@ -205,6 +205,8 @@ export interface ProofParts {
   readonly hold: (
     at:
       | 'placed'
+      | 'test-reading'
+      | 'test-read'
       | 'greening'
       | 'handing'
       | 'greens-due'
@@ -542,10 +544,36 @@ export const buildingProofs = (parts: ProofParts) => {
       return [...found]
     })
 
+  /**
+   * A proof's test file as its run records it (#434), read right before the run as `inPlace` reads
+   * it: at its judged path, through a handle that never waits on a pipe, a regular file of at most
+   * `TEST_CAP`; else why it was not read. Null for a proof with no test file in the Workspace.
+   */
+  const testOf = (building: BuildingRow, proof: Proof) =>
+    Effect.gen(function* () {
+      const test = proof.test
+      if (test === undefined) return null
+      const folder = folderOf(building, test.repository)
+      if (folder === null) return null
+      yield* parts.hold('test-reading')
+      const read = yield* realPathIn(building, folder, test.path).pipe(
+        Effect.flatMap(({ path, withholding }) =>
+          onDisk(() => readJudged(path, { withholding, cap: TEST_CAP })),
+        ),
+        Effect.result,
+      )
+      yield* parts.hold('test-read')
+      const found: TestRead = Result.isSuccess(read)
+        ? { bytes: read.success }
+        : { refused: Predicate.isString(read.failure) ? read.failure : read.failure.message }
+      return found
+    })
+
   /** A scenario's proof run, on the repositories it is fresh on. */
   const runOf = (building: BuildingRow, scenario: string, phase: ProofPhase, proof: Proof) =>
     Effect.gen(function* () {
       const repositories = yield* repositoriesOf(building, scenario, proof)
+      const testFile = yield* testOf(building, proof)
       const run = yield* ProofRunner.use((runner) =>
         runner.run({
           missionId: building.missionId,
@@ -554,6 +582,7 @@ export const buildingProofs = (parts: ProofParts) => {
           phase,
           proof,
           repositories,
+          testFile,
         }),
       )
       return Object.assign({}, run, { landed: yield* landedDuring(building, run) })
