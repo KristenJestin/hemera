@@ -12,7 +12,6 @@
  * done, R6 the preparation at its first push or pull request, S1 the waves and the End at Ship. A copy is resolved for the Project as it
  * is, written once with the version it was copied at and a `delivery.rules_copied` event, and
  * never rewritten: asking for it again answers the same copy, whatever the Project changed since.
- * A document stored before committing was an action (#422) reads upgraded, its bytes unchanged.
  */
 
 import { readFileSync } from 'node:fs'
@@ -29,7 +28,7 @@ import {
   ROOT_REPOSITORY,
   SectionCopyJson,
   decodeDeliveryRules,
-  decodeSectionCopies,
+  decodeSectionCopy,
   dependencyProblems,
   defaultDeliveryRules,
   effectiveRepositories,
@@ -47,7 +46,7 @@ import {
   type Project,
 } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
-import { Effect, Option, Result, Schema } from 'effect'
+import { Effect, Result, Schema } from 'effect'
 
 import { listCommands } from './catalogue.ts'
 import { ForgePort } from './forges/port.ts'
@@ -265,28 +264,25 @@ const copiesIn = (reader: EngineTransaction, projectId: string, missionId: strin
     .where(eq(deliveryRuleCopies.missionId, missionId))
     .pipe(
       Effect.mapError(refusedWhile('reading the delivery rules copies')),
-      Effect.flatMap((rows) => {
-        const ordered = DELIVERY_SECTIONS.flatMap((section) =>
-          rows.filter((row) => row.section === section),
-        )
-        // Read together: a copy of the shape before hands its pushes after Ship to the waves.
-        const read = decodeSectionCopies(ordered.map((row) => row.document))
-        return Effect.forEach(ordered, (row, index) =>
-          Option.match(read[index] ?? Option.none(), {
-            onSome: (copy) => Effect.succeed(copy),
-            onNone: () =>
-              Effect.fail(
-                new DeliveryRulesUnreadable({
-                  projectId,
-                  document: 'copy',
-                  missionId,
-                  section: DELIVERY_SECTIONS.find((one) => one === row.section) ?? null,
-                  version: row.version,
-                }),
-              ),
-          }),
-        )
-      }),
+      Effect.flatMap((rows) =>
+        Effect.forEach(
+          DELIVERY_SECTIONS.flatMap((section) => rows.filter((row) => row.section === section)),
+          (row) =>
+            Result.match(decodeSectionCopy(row.document), {
+              onSuccess: (copy) => Effect.succeed(copy),
+              onFailure: () =>
+                Effect.fail(
+                  new DeliveryRulesUnreadable({
+                    projectId,
+                    document: 'copy',
+                    missionId,
+                    section: DELIVERY_SECTIONS.find((one) => one === row.section) ?? null,
+                    version: row.version,
+                  }),
+                ),
+            }),
+        ),
+      ),
     )
 
 /**

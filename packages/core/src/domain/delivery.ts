@@ -30,8 +30,9 @@
  *
  * The rules and the copies are stored documents, read strictly: a field added later (S2's manifest
  * path, S4's ref and variables) is a `Schema.optionalKey` with a default, so what was stored still
- * reads; a field renamed, removed or made required changes the shape of the documents, and the
- * shape before it keeps reading, upgraded as it is read, for both tables (`delivery-documents.ts`).
+ * reads; a document of another shape is refused, never guessed. #340's shape, with who commits
+ * apart and the push steps placed, was never released, so no profile holds it and there is no
+ * migration from it. From now on, a change of shape ships a migration of both tables.
  */
 
 import { Option, Schema } from 'effect'
@@ -1593,8 +1594,21 @@ export function validateCopies(copies: {
 
 // ——— The stored documents ———
 
-/** The rules as one stored document; `delivery-documents.ts` reads it, of either shape. */
+const strict = { onExcessProperty: 'error', errors: 'all' } as const
+
+/** The rules as one stored document. */
 export const DeliveryRulesJson = Schema.fromJsonString(DeliveryRules)
 
 /** A copy as one stored document. */
 export const SectionCopyJson = Schema.fromJsonString(SectionCopy)
+
+/**
+ * Rules read from their document: a key the model does not have (one trying to remove Closing, or
+ * #340's `commitRule`) is refused, not dropped.
+ */
+export const decodeDeliveryRules = (document: string) =>
+  Schema.decodeUnknownResult(DeliveryRulesJson)(document, strict)
+
+/** A copy read from its document, as strictly as the rules. */
+export const decodeSectionCopy = (document: string) =>
+  Schema.decodeUnknownResult(SectionCopyJson)(document, strict)

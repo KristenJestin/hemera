@@ -4,7 +4,7 @@
  * proposed from `package.json` files, and the sections a mission copies.
  */
 
-import { Arbitrary, Effect, Option, Predicate, Result, Schema } from 'effect'
+import { Arbitrary, Effect, Predicate, Result, Schema } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -33,7 +33,7 @@ import {
   proposeDependencies,
   renderTemplate,
   rowsOf,
-  decodeSectionCopies,
+  decodeSectionCopy,
   sectionOf,
   stepsOfRepository,
   validateCopies,
@@ -1262,173 +1262,31 @@ const V1_RULES = {
   },
 }
 
-const readV1 = (document: string) => {
-  const read = decodeDeliveryRules(document)
-  if (Result.isFailure(read)) throw new Error(String(read.failure))
-  return read.success
+/** A copy of the preparation as #340 stored it: its push steps placed, no commit before them. */
+const V1_PREPARATION_COPY = {
+  section: 'preparation',
+  version: 1,
+  copiedAt: '2026-10-14T10:00:00.000Z',
+  reviewDrafts: false,
+  repositories: [
+    {
+      repositoryId: 'api',
+      name: 'api',
+      commitTemplate: '{key}: {title}',
+      pullRequestTitle: '{key}: {title}',
+      pullRequestBody: '{summary}',
+      reviewers: [],
+      requireApproval: false,
+      pushSteps: [{ id: 'push', kind: 'push', mode: 'click', placement: 'review' }],
+    },
+  ],
 }
 
-describe('Stored rules still read: who commits becomes commit actions', () => {
-  test('at-push becomes Hemera commits right before the push, in the push’s moment', () => {
-    // The defaults as #340 stored them read as the defaults of today.
-    expect(readV1(JSON.stringify(V1_RULES))).toEqual({
-      ...defaultDeliveryRules(),
-      version: 3,
-      savedAt: '2026-10-14T10:00:00.000Z',
-    })
-    // Pushed after Ship: the commit goes before the push, in the waves.
-    const late = readV1(
-      JSON.stringify({
-        ...V1_RULES,
-        preparation: {
-          ...V1_RULES.preparation,
-          pushSteps: V1_RULES.preparation.pushSteps.map((step) => ({
-            ...step,
-            placement: 'waves',
-          })),
-        },
-      }),
-    )
-    expect(late.preparation.presets).toEqual({ library: [], application: [], local: [] })
-    expect(kinds(late.waves.presets.application)).toEqual([
-      'commit-by-hemera',
-      'push',
-      'pull-request',
-      'bump',
-      'merge',
-      'ci',
-    ])
-    // Local has no push: its commit goes before its local merge.
-    expect(late.waves.presets.local).toEqual([COMMIT, LOCAL_MERGE])
-    expect(late.tasks.presets).toEqual({ library: [], application: [], local: [] })
-    expect(sentences(late)).toEqual([])
-  })
-
-  test('after-each-task becomes Hemera commits in After each task', () => {
-    const rules = readV1(JSON.stringify({ ...V1_RULES, commitRule: 'after-each-task' }))
-    expect(rules.tasks.presets).toEqual({
-      library: [COMMIT],
-      application: [COMMIT],
-      local: [COMMIT],
-    })
-    expect(kinds(rules.preparation.presets.library)).toEqual(['push', 'pull-request'])
-    expect(rules.waves.presets.local).toEqual([LOCAL_MERGE])
-    expect(sentences(rules)).toEqual([])
-  })
-
-  test('a repository’s own push steps keep their moment, with Hemera’s commit before its push', () => {
-    const rules = readV1(
-      JSON.stringify({
-        ...V1_RULES,
-        preparation: {
-          ...V1_RULES.preparation,
-          repositories: [
-            {
-              repositoryId: 'api',
-              commitTemplate: '{key}: {title}',
-              pullRequestTitle: '{title}',
-              pullRequestBody: '{summary}',
-              reviewers: ['acme/api'],
-              requireApproval: false,
-              pushSteps: {
-                off: ['pull-request'],
-                changed: [{ id: 'push', kind: 'push', mode: 'auto', placement: 'waves' }],
-                added: [
-                  {
-                    after: 'push',
-                    step: {
-                      id: 'late-pr',
-                      kind: 'pull-request',
-                      mode: 'click',
-                      placement: 'waves',
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      }),
-    )
-    expect(rules.preparation.repositories[0]?.steps).toEqual({
-      off: ['pull-request', 'push', 'commit'],
-      changed: [],
-      added: [],
-    })
-    const api = effectiveOf(rules, only(repository('api')), 'api')
-    expect(api.stacks.preparation).toEqual([])
-    expect(api.stacks.waves.map((step) => [step.id, step.kind])).toEqual([
-      ['commit-push', 'commit-by-hemera'],
-      ['push', 'push'],
-      ['late-pr', 'pull-request'],
-      ['merge', 'merge'],
-      ['ci', 'ci'],
-    ])
-    expect(api.preparation.reviewers).toEqual(['acme/api'])
-  })
-
-  test('a document of either shape with a key the model does not have is refused', () => {
-    expect(
-      Result.isFailure(decodeDeliveryRules(JSON.stringify({ ...V1_RULES, removeClosing: true }))),
-    ).toBe(true)
-    expect(
-      Result.isFailure(decodeDeliveryRules(JSON.stringify({ ...V1_RULES, commitRule: 'never' }))),
-    ).toBe(true)
-  })
-
-  test('a mission’s stored copies still read, with Hemera’s commit before the push', () => {
-    const fields = { version: 1, copiedAt: '2026-10-14T10:00:00.000Z' }
-    const preparation = {
-      section: 'preparation',
-      ...fields,
-      reviewDrafts: false,
-      repositories: [
-        {
-          repositoryId: 'api',
-          name: 'api',
-          commitTemplate: '{key}: {title}',
-          pullRequestTitle: '{key}: {title}',
-          pullRequestBody: '{summary}',
-          reviewers: [],
-          requireApproval: false,
-          pushSteps: [
-            { id: 'push', kind: 'push', mode: 'click', placement: 'review' },
-            { id: 'pull-request', kind: 'pull-request', mode: 'click', placement: 'waves' },
-          ],
-        },
-      ],
-    }
-    const wavesCopy = {
-      section: 'waves',
-      ...fields,
-      repositories: [
-        {
-          repositoryId: 'api',
-          name: 'api',
-          preset: 'application',
-          steps: [{ id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' }],
-          deliversAfter: [],
-        },
-      ],
-    }
-    const end = { section: 'end', ...fields, closing: 'merge-spec', cleanup: V1_RULES.end.cleanup }
-    const [prepared, waved, ended, broken] = decodeSectionCopies(
-      [preparation, wavesCopy, end, { ...end, closing: null }].map((one) => JSON.stringify(one)),
-    )
-    expect(
-      prepared?.pipe(
-        Option.map(
-          (copy) => copy.section === 'preparation' && kinds(copy.repositories[0]?.steps ?? []),
-        ),
-      ),
-    ).toEqual(Option.some(['commit-by-hemera', 'push']))
-    expect(
-      waved?.pipe(
-        Option.map((copy) => copy.section === 'waves' && kinds(copy.repositories[0]?.steps ?? [])),
-      ),
-    ).toEqual(Option.some(['pull-request', 'merge']))
-    expect(ended?.pipe(Option.map((copy) => copy.section))).toEqual(Option.some('end'))
-    expect(broken).toEqual(Option.none())
+describe('A stored document of another shape is refused, never guessed', () => {
+  // #340's shape was never released: no profile holds it, so nothing upgrades it.
+  test('rules and a copy of the shape before committing was an action are refused, not misread', () => {
+    expect(Result.isFailure(decodeDeliveryRules(JSON.stringify(V1_RULES)))).toBe(true)
+    expect(Result.isFailure(decodeSectionCopy(JSON.stringify(V1_PREPARATION_COPY)))).toBe(true)
   })
 })
 
