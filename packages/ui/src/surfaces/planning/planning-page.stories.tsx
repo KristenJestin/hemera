@@ -90,10 +90,12 @@ const inView = (element: Element): boolean => {
 export const Loading: Story = {
   args: { moment: 'loading' },
   play: async ({ canvasElement }) => {
+    console.log(`DIAG ${performance.now().toFixed(0)} loading play start`)
     await expect(page(canvasElement).getByRole('region', { name: 'Spec' })).toHaveAttribute(
       'aria-busy',
       'true',
     )
+    console.log(`DIAG ${performance.now().toFixed(0)} loading play end`)
   },
 }
 

@@ -65,13 +65,36 @@ const RESULT_TYPES =
     ? ['violations']
     : ['violations', 'incomplete', 'passes', 'inapplicable']
 
+const diag = (message: string): void => {
+  console.log(`DIAG ${performance.now().toFixed(0)} ${message}`)
+}
+if ('__vitest_browser__' in globalThis) {
+  diag(`preview loaded ${document.documentElement.className}`)
+  import.meta.hot?.on('vite:beforeFullReload', () => {
+    diag('vite full reload')
+  })
+  window.addEventListener('beforeunload', () => {
+    diag('beforeunload')
+  })
+  window.addEventListener('error', (event) => {
+    diag(`window error ${event.message}`)
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    diag(`unhandled rejection ${String(event.reason)}`)
+  })
+}
+
 const preview: Preview = {
   decorators: [withTooltips, withMotion, withTheme],
+  afterEach: (context) => {
+    diag(`afterEach ${context.id}`)
+  },
   /**
    * How long a play waits for the state it asked for: a loaded CI machine takes seconds to paint
    * what a developer machine paints in frames.
    */
-  beforeEach: () => {
+  beforeEach: (context) => {
+    diag(`beforeEach ${context.id}`)
     configure({ asyncUtilTimeout: 10_000 })
   },
   initialGlobals: { theme: 'light' },
