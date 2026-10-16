@@ -8,10 +8,11 @@
  * The dependencies between repositories are proposed from their `package.json` files at each read
  * and saved only once the user accepts them.
  *
- * A mission copies each section when it starts acting (CT-47): R6 the preparation at its first
- * push or pull request, S1 the waves and the End at Ship. A copy is resolved for the Project as it
+ * A mission copies each section when it starts acting (CT-47): After each task at its first task
+ * done, R6 the preparation at its first push or pull request, S1 the waves and the End at Ship. A copy is resolved for the Project as it
  * is, written once with the version it was copied at and a `delivery.rules_copied` event, and
  * never rewritten: asking for it again answers the same copy, whatever the Project changed since.
+ * A document stored before committing was an action (#422) reads upgraded, its bytes unchanged.
  */
 
 import { readFileSync } from 'node:fs'
@@ -26,8 +27,9 @@ import {
   type DeliveryRulesDraft,
   type DeliverySection,
   ROOT_REPOSITORY,
-  SectionCopy,
+  SectionCopyJson,
   decodeDeliveryRules,
+  decodeSectionCopies,
   dependencyProblems,
   defaultDeliveryRules,
   effectiveRepositories,
@@ -45,7 +47,7 @@ import {
   type Project,
 } from '@hemera/ipc'
 import { eq } from 'drizzle-orm'
-import { Effect, Result, Schema } from 'effect'
+import { Effect, Option, Result, Schema } from 'effect'
 
 import { listCommands } from './catalogue.ts'
 import { ForgePort } from './forges/port.ts'
@@ -57,9 +59,7 @@ import { deliveryRuleCopies, deliveryRules } from './storage/schema.ts'
 import { StaleVersion, mutate } from './transaction.ts'
 
 const writeRules = Schema.encodeSync(DeliveryRulesJson)
-const SectionCopyJson = Schema.fromJsonString(SectionCopy)
 const writeCopy = Schema.encodeSync(SectionCopyJson)
-const readCopy = Schema.decodeUnknownEffect(SectionCopyJson)
 
 /** The repositories' names in the sentences: their path, the Project's name for its root. */
 const nameOf = (project: Project, path: string) => (path === ROOT_REPOSITORY ? project.name : path)
@@ -265,24 +265,28 @@ const copiesIn = (reader: EngineTransaction, projectId: string, missionId: strin
     .where(eq(deliveryRuleCopies.missionId, missionId))
     .pipe(
       Effect.mapError(refusedWhile('reading the delivery rules copies')),
-      Effect.flatMap((rows) =>
-        Effect.forEach(
-          DELIVERY_SECTIONS.flatMap((section) => rows.filter((row) => row.section === section)),
-          (row) =>
-            readCopy(row.document).pipe(
-              Effect.mapError(
-                () =>
-                  new DeliveryRulesUnreadable({
-                    projectId,
-                    document: 'copy',
-                    missionId,
-                    section: DELIVERY_SECTIONS.find((one) => one === row.section) ?? null,
-                    version: row.version,
-                  }),
+      Effect.flatMap((rows) => {
+        const ordered = DELIVERY_SECTIONS.flatMap((section) =>
+          rows.filter((row) => row.section === section),
+        )
+        // Read together: a copy of the shape before hands its pushes after Ship to the waves.
+        const read = decodeSectionCopies(ordered.map((row) => row.document))
+        return Effect.forEach(ordered, (row, index) =>
+          Option.match(read[index] ?? Option.none(), {
+            onSome: (copy) => Effect.succeed(copy),
+            onNone: () =>
+              Effect.fail(
+                new DeliveryRulesUnreadable({
+                  projectId,
+                  document: 'copy',
+                  missionId,
+                  section: DELIVERY_SECTIONS.find((one) => one === row.section) ?? null,
+                  version: row.version,
+                }),
               ),
-            ),
-        ),
-      ),
+          }),
+        )
+      }),
     )
 
 /**

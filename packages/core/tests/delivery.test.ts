@@ -4,7 +4,7 @@
  * proposed from `package.json` files, and the sections a mission copies.
  */
 
-import { Arbitrary, Effect, Predicate, Result, Schema } from 'effect'
+import { Arbitrary, Effect, Option, Predicate, Result, Schema } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -12,9 +12,14 @@ import {
   type DeliveryRepository,
   DeliveryRules,
   type DeliveryRulesDraft,
+  ACTION_KINDS,
+  ACTION_RETRIES,
+  type ActionKind,
+  DELIVERY_MOMENTS,
+  DeliveryAction,
+  type DeliveryMoment,
   type Overrides,
   type RepositoryWaves,
-  WaveStep,
   applyOverrides,
   approvalsRequired,
   changesOf,
@@ -28,6 +33,7 @@ import {
   proposeDependencies,
   renderTemplate,
   rowsOf,
+  decodeSectionCopies,
   sectionOf,
   stepsOfRepository,
   validateCopies,
@@ -112,10 +118,47 @@ const preparedWith = (
         pullRequestBody: '{summary}\n\n{images}',
         reviewers: [],
         requireApproval: false,
-        pushSteps: { off: [], changed: [], added: [] },
+        steps: { off: [], changed: [], added: [] },
         ...over,
       },
     ],
+  },
+})
+
+/** Hemera's commit, as the presets place it. */
+const COMMIT: DeliveryAction = { id: 'commit', kind: 'commit-by-hemera', mode: 'auto' }
+const LOCAL_MERGE: DeliveryAction = { id: 'merge', kind: 'merge', mode: 'auto', method: 'local' }
+
+/** A repository's push and pull request moved from Review into its waves, first. */
+const movedToWaves = (rules: DeliveryRulesDraft, repositoryId: string): DeliveryRulesDraft => ({
+  ...rules,
+  preparation: {
+    ...rules.preparation,
+    repositories: rules.preparation.repositories.map((one) =>
+      one.repositoryId === repositoryId
+        ? { ...one, steps: { ...one.steps, off: ['push', 'pull-request'] } }
+        : one,
+    ),
+  },
+  waves: {
+    ...rules.waves,
+    repositories: rules.waves.repositories.map((one) =>
+      one.repositoryId === repositoryId
+        ? {
+            ...one,
+            steps: {
+              ...one.steps,
+              added: [
+                { after: null, step: { id: 'late-push', kind: 'push', mode: 'click' } },
+                {
+                  after: 'late-push',
+                  step: { id: 'late-pull-request', kind: 'pull-request', mode: 'click' },
+                },
+              ],
+            },
+          }
+        : one,
+    ),
   },
 })
 
@@ -131,8 +174,8 @@ describe('Each preset validates clean', () => {
     expect(sentences(local, notes)).toEqual([])
 
     const effective = effectiveOf(local, notes, 'notes')
-    expect(effective.pushSteps).toEqual([])
-    expect(effective.steps).toEqual([{ id: 'merge', kind: 'merge', mode: 'auto', method: 'local' }])
+    expect(effective.stacks.preparation).toEqual([])
+    expect(effective.stacks.waves).toEqual([COMMIT, LOCAL_MERGE])
   })
 
   test('a repository given no rules takes Local without a forge and Application with one', () => {
@@ -143,21 +186,26 @@ describe('Each preset validates clean', () => {
     expect(effectiveOf(rules, project, 'api').preset).toBe('application')
   })
 
-  test('Library and Application push and open the pull request in Review, on a click', () => {
+  test('Library and Application commit, push and open the pull request in Review, the push on a click', () => {
     const shared = effectiveOf(ACME_CHAIN, ACME, 'shared')
-    expect(shared.pushSteps).toEqual([
-      { id: 'push', kind: 'push', mode: 'click', placement: 'review' },
-      { id: 'pull-request', kind: 'pull-request', mode: 'click', placement: 'review' },
+    expect(shared.stacks.preparation).toEqual([
+      COMMIT,
+      { id: 'push', kind: 'push', mode: 'click' },
+      { id: 'pull-request', kind: 'pull-request', mode: 'click' },
     ])
     // shared depends on nothing: the preset's bump is not there.
-    expect(kinds(shared.steps)).toEqual(['merge', 'ci', 'published-version'])
-    expect(kinds(effectiveOf(ACME_CHAIN, ACME, 'api').steps)).toEqual([
+    expect(kinds(shared.stacks.waves)).toEqual(['merge', 'ci', 'published-version'])
+    expect(kinds(effectiveOf(ACME_CHAIN, ACME, 'api').stacks.waves)).toEqual([
       'bump',
       'merge',
       'ci',
       'published-version',
     ])
-    expect(kinds(effectiveOf(ACME_CHAIN, ACME, 'web').steps)).toEqual(['bump', 'merge', 'ci'])
+    expect(kinds(effectiveOf(ACME_CHAIN, ACME, 'web').stacks.waves)).toEqual([
+      'bump',
+      'merge',
+      'ci',
+    ])
   })
 
   test('the End is Closing, then the four Cleanup steps', () => {
@@ -171,9 +219,8 @@ describe('Each preset validates clean', () => {
     ])
   })
 
-  test('the default templates and who commits', () => {
+  test('the default templates', () => {
     const rules = defaultDeliveryRules()
-    expect(rules.commitRule).toBe('at-push')
     expect(rules.preparation.reviewDrafts).toBe(false)
     expect(effectiveOf(rules, ACME, 'api').preparation).toEqual({
       commitTemplate: '{key}: {title}',
@@ -197,7 +244,7 @@ describe('A repository overrides its preset', () => {
       }),
     ])
     const project = only(repository('shared'))
-    expect(effectiveOf(rules, project, 'shared').steps).toEqual([
+    expect(effectiveOf(rules, project, 'shared').stacks.waves).toEqual([
       { id: 'merge', kind: 'merge', mode: 'click', method: 'rebase' },
       { id: 'ci', kind: 'ci', mode: 'auto' },
       {
@@ -212,12 +259,12 @@ describe('A repository overrides its preset', () => {
   })
 
   test('a step left out, a step changed and steps of its own after an anchor, in order', () => {
-    const base: WaveStep[] = [
+    const base: DeliveryAction[] = [
       { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' },
       { id: 'ci', kind: 'ci', mode: 'auto' },
       { id: 'tag', kind: 'confirm', mode: 'click', what: 'the tag is pushed' },
     ]
-    const overrides: Overrides<WaveStep> = {
+    const overrides: Overrides<DeliveryAction> = {
       off: ['ci'],
       changed: [{ id: 'tag', kind: 'confirm', mode: 'auto', what: 'the release is out' }],
       added: [
@@ -246,7 +293,7 @@ describe('A repository overrides its preset', () => {
   })
 
   test('any one step changed leaves every other step of the base where it was', async () => {
-    const steps = Arbitrary.array(Arbitrary.schema(WaveStep), {
+    const steps = Arbitrary.array(Arbitrary.schema(DeliveryAction), {
       maxLength: 8,
     })
     const result = await Effect.runPromise(
@@ -255,7 +302,7 @@ describe('A repository overrides its preset', () => {
         if (base.length === 0) return true
         const target = base[Math.floor(base.length / 2)]
         if (target === undefined) return true
-        const changed: WaveStep = { id: target.id, kind: 'ci', mode: 'click' }
+        const changed: DeliveryAction = { id: target.id, kind: 'ci', mode: 'click' }
         const effective = applyOverrides(base, { off: [], changed: [changed], added: [] })
         return (
           effective.length === base.length &&
@@ -287,7 +334,7 @@ describe('A repository overrides its preset', () => {
       }),
       waves('web', 'application', { deliversAfter: ['api'] }),
     ])
-    const rows = rowsOf(rules, ACME, 'library')
+    const rows = rowsOf(rules, ACME, 'library', 'waves')
     expect(
       rows.map((row) => [row.step.id, row.owner, row.cells.map((cell) => cell.origin)]),
     ).toEqual([
@@ -298,8 +345,9 @@ describe('A repository overrides its preset', () => {
       ['published-version', null, ['inherited', 'inherited']],
     ])
     expect(rows[0]?.cells.map((cell) => cell.repositoryId)).toEqual(['shared', 'api'])
-    // What one repository runs: its push steps, then its recipe.
+    // What one repository runs: its moments, in the order they happen.
     expect(stepsOfRepository(effectiveOf(rules, ACME, 'api')).map((step) => step.id)).toEqual([
+      'commit',
       'push',
       'pull-request',
       'bump',
@@ -346,7 +394,7 @@ describe('A repository overrides its preset', () => {
 describe('Inconsistent rules are refused with their reason', () => {
   test('a merge without a pull request is refused', () => {
     const rules = preparedWith(ACME_CHAIN, 'api', {
-      pushSteps: { off: ['pull-request'], changed: [], added: [] },
+      steps: { off: ['pull-request'], changed: [], added: [] },
     })
     expect(validateRules(rules, ACME)).toEqual([
       {
@@ -360,11 +408,7 @@ describe('Inconsistent rules are refused with their reason', () => {
 
   test('a pull request without a push before it is refused', () => {
     const rules = preparedWith(ACME_CHAIN, 'api', {
-      pushSteps: {
-        off: [],
-        changed: [{ id: 'push', kind: 'push', mode: 'click', placement: 'waves' }],
-        added: [],
-      },
+      steps: { off: ['push'], changed: [], added: [] },
     })
     expect(validateRules(rules, ACME)).toEqual([
       {
@@ -425,22 +469,12 @@ describe('Inconsistent rules are refused with their reason', () => {
   })
 
   test('approvals required before Ship while the pull request opens after Ship are refused', () => {
-    const rules = preparedWith(ACME_CHAIN, 'api', {
-      requireApproval: true,
-      pushSteps: {
-        off: [],
-        changed: [
-          { id: 'push', kind: 'push', mode: 'click', placement: 'waves' },
-          { id: 'pull-request', kind: 'pull-request', mode: 'click', placement: 'waves' },
-        ],
-        added: [],
-      },
-    })
+    const rules = movedToWaves(preparedWith(ACME_CHAIN, 'api', { requireApproval: true }), 'api')
     expect(validateRules(rules, ACME)).toEqual([
       {
         code: 'approval-after-ship',
         repositoryId: 'api',
-        stepId: 'pull-request',
+        stepId: 'late-pull-request',
         sentence:
           'api requires team approval before Ship, but its pull request is opened after Ship.',
       },
@@ -592,7 +626,7 @@ describe('Inconsistent rules are refused with their reason', () => {
         waves('api', 'library', { deliversAfter: ['shared'] }),
       ]),
       'api',
-      { commitTemplate: '{ticket}', pushSteps: { off: ['pull-request'], changed: [], added: [] } },
+      { commitTemplate: '{ticket}', steps: { off: ['pull-request'], changed: [], added: [] } },
     )
     expect(
       validateRules(broken, only(repository('shared'), repository('api'))).map((one) => one.code),
@@ -623,7 +657,7 @@ describe('Inconsistent rules are refused with their reason', () => {
 })
 
 describe('Steps are addressed by their id', () => {
-  const adding = (repositoryId: string, added: Overrides<WaveStep>['added']) =>
+  const adding = (repositoryId: string, added: Overrides<DeliveryAction>['added']) =>
     rulesWith([waves(repositoryId, 'application', { steps: { off: [], changed: [], added } })])
 
   test('an added step placed after itself is refused, never thrown', () => {
@@ -672,16 +706,19 @@ describe('Steps are addressed by their id', () => {
       ...base,
       preparation: {
         ...base.preparation,
-        pushSteps: [
-          ...base.preparation.pushSteps,
-          { id: 'push', kind: 'push', mode: 'auto', placement: 'waves' },
-        ],
+        presets: {
+          ...base.preparation.presets,
+          application: [
+            ...base.preparation.presets.application,
+            { id: 'push', kind: 'push', mode: 'auto' },
+          ],
+        },
       },
       waves: {
         ...base.waves,
         presets: {
           ...base.waves.presets,
-          application: [...base.waves.presets.application, { id: 'ci', kind: 'ci', mode: 'auto' }],
+          library: [...base.waves.presets.library, { id: 'ci', kind: 'ci', mode: 'auto' }],
         },
         repositories: [
           waves('web', 'local', {
@@ -716,12 +753,12 @@ describe('Steps are addressed by their id', () => {
       [
         'duplicate-step-id',
         null,
-        'The push steps have two steps with the id “push”: each step needs its own.',
+        'The Library preset has two steps with the id “ci”: each step needs its own.',
       ],
       [
         'duplicate-step-id',
         null,
-        'The Application preset has two steps with the id “ci”: each step needs its own.',
+        'The Application preset has two steps with the id “push”: each step needs its own.',
       ],
       [
         'duplicate-step-id',
@@ -898,7 +935,7 @@ describe('The two copies a mission holds at Ship are checked together', () => {
     const copied = sectionOf(rules, ACME, 'waves', at)
     if (preparation.section !== 'preparation' || copied.section !== 'waves')
       throw new Error('section')
-    expect(validateCopies(preparation, copied)).toEqual([])
+    expect(validateCopies({ tasks: null, preparation, waves: copied })).toEqual([])
   })
 
   test('a preparation copied under Local and waves copied under Application: a merge without a pull request across both is refused', () => {
@@ -909,7 +946,7 @@ describe('The two copies a mission holds at Ship are checked together', () => {
     const copied = sectionOf(application, project, 'waves', at)
     if (preparation.section !== 'preparation' || copied.section !== 'waves')
       throw new Error('section')
-    expect(validateCopies(preparation, copied)).toEqual([
+    expect(validateCopies({ tasks: null, preparation, waves: copied })).toEqual([
       {
         code: 'merge-without-pull-request',
         repositoryId: 'api',
@@ -922,7 +959,7 @@ describe('The two copies a mission holds at Ship are checked together', () => {
   test('a pull request copied in the waves without its push is refused across both', () => {
     const rules = {
       ...preparedWith(rulesWith([waves('api', 'application')]), 'api', {
-        pushSteps: { off: ['push'], changed: [], added: [] },
+        steps: { off: ['push'], changed: [], added: [] },
       }),
       version: 1,
       savedAt: null,
@@ -932,8 +969,487 @@ describe('The two copies a mission holds at Ship are checked together', () => {
     const copied = sectionOf(rules, project, 'waves', at)
     if (preparation.section !== 'preparation' || copied.section !== 'waves')
       throw new Error('section')
-    expect(validateCopies(preparation, copied).map((one) => one.code)).toEqual([
-      'pull-request-without-push',
+    expect(
+      validateCopies({ tasks: null, preparation, waves: copied }).map((one) => one.code),
+    ).toEqual(['pull-request-without-push'])
+  })
+})
+
+/** An action of each kind, as a user adds it. */
+function sample(kind: ActionKind, id: string): DeliveryAction {
+  switch (kind) {
+    case 'bump':
+      return { id, kind, mode: 'auto', how: { by: 'agent' } }
+    case 'merge':
+      return { id, kind, mode: 'auto', method: 'squash' }
+    case 'remote-action':
+      return {
+        id,
+        kind,
+        mode: 'click',
+        action: { type: 'run-workflow', workflow: 'release.yml', inputs: {} },
+      }
+    case 'published-version':
+      return { id, kind, mode: 'auto', detect: { by: 'tag', pattern: 'v*' } }
+    case 'command':
+      return { id, kind, mode: 'auto', commandId: 'changeset' }
+    case 'agent':
+      return { id, kind, mode: 'auto', task: 'Write the release notes' }
+    case 'confirm':
+      return { id, kind, mode: 'click', what: 'the docs are published' }
+    case 'commit-by-hemera':
+    case 'commit-by-me':
+    case 'commit-by-agent':
+    case 'push':
+    case 'pull-request':
+    case 'ci':
+    case 'pull-main-checkout':
+    case 'stop-services':
+    case 'remove-worktrees':
+    case 'remove-workspace':
+      return { id, kind, mode: 'auto' }
+  }
+}
+
+/** What an action needs before it for its check to hold: a commit, a push, a pull request. */
+const NEEDS: Partial<Record<ActionKind, ReadonlyArray<ActionKind>>> = {
+  push: ['commit-by-hemera'],
+  'pull-request': ['commit-by-hemera', 'push'],
+  merge: ['commit-by-hemera', 'push', 'pull-request'],
+}
+
+/** The actions given, in order, first in api's stack of a moment, or last in Cleanup. */
+function withActions(
+  rules: DeliveryRulesDraft,
+  moment: DeliveryMoment | 'cleanup',
+  actions: ReadonlyArray<DeliveryAction>,
+): DeliveryRulesDraft {
+  if (moment === 'cleanup') {
+    return { ...rules, end: { ...rules.end, cleanup: [...rules.end.cleanup, ...actions] } }
+  }
+  const added = actions.map((step, index) => ({ after: actions[index - 1]?.id ?? null, step }))
+  const steps = { off: [], changed: [], added }
+  switch (moment) {
+    case 'tasks':
+      return { ...rules, tasks: { ...rules.tasks, repositories: [{ repositoryId: 'api', steps }] } }
+    case 'preparation':
+      return preparedWith(rules, 'api', { steps })
+    case 'waves':
+      return {
+        ...rules,
+        waves: {
+          ...rules.waves,
+          repositories: rules.waves.repositories.map((one) =>
+            one.repositoryId === 'api' ? { ...one, steps } : one,
+          ),
+        },
+      }
+  }
+}
+
+describe('The moments of a delivery', () => {
+  const SHARED_AND_API = only(repository('shared'), repository('api'))
+  const CHAIN = rulesWith([
+    waves('shared', 'library'),
+    waves('api', 'library', { deliversAfter: ['shared'] }),
+  ])
+
+  test('After each task, Preparation and the waves hold a stack each, then the End', () => {
+    expect(DELIVERY_MOMENTS).toEqual(['tasks', 'preparation', 'waves'])
+    const rules = defaultDeliveryRules()
+    expect(rules.tasks.presets).toEqual({ library: [], application: [], local: [] })
+    expect(effectiveOf(ACME_CHAIN, ACME, 'api').stacks.tasks).toEqual([])
+    expect(rules.end.closing).toBe('merge-spec')
+  })
+
+  test('every catalogue action is accepted in every moment, when its check holds', () => {
+    const refused = ACTION_KINDS.flatMap((kind) =>
+      (['tasks', 'preparation', 'waves', 'cleanup'] as const).flatMap((moment) => {
+        const before = (NEEDS[kind] ?? []).map((need) => sample(need, `before-${need}`))
+        const rules = withActions(CHAIN, moment, [...before, sample(kind, `added-${kind}`)])
+        const document = JSON.stringify(
+          Schema.encodeSync(DeliveryRules)({ ...rules, version: 1, savedAt: null }),
+        )
+        const read = Result.isSuccess(decodeDeliveryRules(document))
+        const problems = validateRules(rules, SHARED_AND_API).map((one) => one.sentence)
+        return read && problems.length === 0 ? [] : [{ kind, moment, read, problems }]
+      }),
+    )
+    expect(refused).toEqual([])
+  })
+
+  test('a refused action stays in its stack: the check explains, nothing is taken away', () => {
+    const rules = withActions(CHAIN, 'tasks', [sample('pull-request', 'early-pull-request')])
+    expect(validateRules(rules, SHARED_AND_API)).toEqual([
+      {
+        code: 'pull-request-without-push',
+        repositoryId: 'api',
+        stepId: 'early-pull-request',
+        sentence: 'A pull request needs a push: api has no push step before its pull request step.',
+      },
+    ])
+    expect(effectiveOf(rules, SHARED_AND_API, 'api').stacks.tasks).toEqual([
+      sample('pull-request', 'early-pull-request'),
+    ])
+  })
+})
+
+describe('Committing is an action', () => {
+  test('Hemera commits, I commit myself and an agent commits are three actions of the catalogue', () => {
+    const commits = ['commit-by-hemera', 'commit-by-me', 'commit-by-agent'] as const
+    expect(commits.every((kind) => ACTION_KINDS.includes(kind))).toBe(true)
+    expect(commits.map((kind) => partsOf(sample(kind, 'commit')))).toEqual([
+      { what: 'Commit', on: 'by Hemera' },
+      { what: 'Commit', on: 'by me' },
+      { what: 'Commit', on: 'by an agent' },
+    ])
+    // An agent commits under the permission rules: it may write to the network, as any agent.
+    expect(commits.map((kind) => mayWriteToNetwork(sample(kind, 'commit')))).toEqual([
+      false,
+      false,
+      true,
+    ])
+  })
+
+  test('a push with no commit action before it is refused', () => {
+    const rules = preparedWith(ACME_CHAIN, 'api', {
+      steps: { off: ['commit'], changed: [], added: [] },
+    })
+    expect(validateRules(rules, ACME)).toEqual([
+      {
+        code: 'push-without-commit',
+        repositoryId: 'api',
+        stepId: 'push',
+        sentence: 'A push needs a commit: api has no commit action before its push.',
+      },
+    ])
+  })
+
+  test('a commit after each task is a commit before the push', () => {
+    const rules = withActions(
+      preparedWith(ACME_CHAIN, 'api', { steps: { off: ['commit'], changed: [], added: [] } }),
+      'tasks',
+      [sample('commit-by-me', 'mine')],
+    )
+    expect(validateRules(rules, ACME)).toEqual([])
+    expect(kinds(stepsOfRepository(effectiveOf(rules, ACME, 'api')))).toEqual([
+      'commit-by-me',
+      'push',
+      'pull-request',
+      'bump',
+      'merge',
+      'ci',
+      'published-version',
+    ])
+  })
+})
+
+describe('Each action type declares whether it is safe to run again', () => {
+  test('every action type declares retry safety and a post-condition', () => {
+    expect(Object.keys(ACTION_RETRIES).toSorted()).toEqual([...ACTION_KINDS].toSorted())
+    for (const kind of ACTION_KINDS) {
+      const { safeToRunAgain, postCondition } = ACTION_RETRIES[kind]
+      expect([true, false]).toContain(safeToRunAgain)
+      expect(postCondition === null || postCondition.endsWith('.')).toBe(true)
+    }
+  })
+
+  test('a push is safe to run again: it is done when the remote head equals the local head', () => {
+    expect(ACTION_RETRIES.push).toEqual({
+      safeToRunAgain: true,
+      postCondition: 'The remote head equals the local head.',
+    })
+  })
+
+  test('a remote action that cannot be checked is not safe to run again', () => {
+    expect(ACTION_RETRIES['remote-action']).toEqual({ safeToRunAgain: false, postCondition: null })
+  })
+})
+
+describe('Presets are starting stacks', () => {
+  test('presets give the expected stacks', () => {
+    const rules = defaultDeliveryRules()
+    const stacks = (preset: 'library' | 'application' | 'local') =>
+      DELIVERY_MOMENTS.map((moment) => kinds(rules[moment].presets[preset]))
+    expect(stacks('library')).toEqual([
+      [],
+      ['commit-by-hemera', 'push', 'pull-request'],
+      ['bump', 'merge', 'ci', 'published-version'],
+    ])
+    expect(stacks('application')).toEqual([
+      [],
+      ['commit-by-hemera', 'push', 'pull-request'],
+      ['bump', 'merge', 'ci'],
+    ])
+    expect(stacks('local')).toEqual([[], [], ['commit-by-hemera', 'merge']])
+  })
+
+  test('a repository keeps only what it changes of its preset, in each moment', () => {
+    const rules = withActions(
+      preparedWith(rulesWith([waves('web', 'application')]), 'web', {
+        steps: { off: ['commit'], changed: [], added: [] },
+      }),
+      'tasks',
+      [],
+    )
+    const mine = {
+      ...rules,
+      tasks: {
+        ...rules.tasks,
+        repositories: [
+          {
+            repositoryId: 'web',
+            steps: {
+              off: [],
+              changed: [],
+              added: [{ after: null, step: sample('commit-by-agent', 'agent-commit') }],
+            },
+          },
+        ],
+      },
+    }
+    const web = effectiveOf(mine, only(repository('web')), 'web')
+    expect(kinds(web.stacks.tasks)).toEqual(['commit-by-agent'])
+    expect(kinds(web.stacks.preparation)).toEqual(['push', 'pull-request'])
+    expect(web.changes).toBe(2)
+    expect(validateRules(mine, only(repository('web')))).toEqual([])
+  })
+})
+
+/** The rules as #340 stored them, before the moments held any action: `commitRule` beside them. */
+const V1_RULES = {
+  version: 3,
+  savedAt: '2026-10-14T10:00:00.000Z',
+  commitRule: 'at-push',
+  preparation: {
+    reviewDrafts: false,
+    pushSteps: [
+      { id: 'push', kind: 'push', mode: 'click', placement: 'review' },
+      { id: 'pull-request', kind: 'pull-request', mode: 'click', placement: 'review' },
+    ],
+    repositories: [],
+  },
+  waves: {
+    presets: {
+      library: [
+        { id: 'bump', kind: 'bump', mode: 'auto', how: { by: 'agent' } },
+        { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' },
+        { id: 'ci', kind: 'ci', mode: 'auto' },
+        {
+          id: 'published-version',
+          kind: 'published-version',
+          mode: 'auto',
+          detect: { by: 'registry', packageName: null },
+        },
+      ],
+      application: [
+        { id: 'bump', kind: 'bump', mode: 'auto', how: { by: 'agent' } },
+        { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' },
+        { id: 'ci', kind: 'ci', mode: 'auto' },
+      ],
+      local: [{ id: 'merge', kind: 'merge', mode: 'auto', method: 'local' }],
+    },
+    repositories: [],
+  },
+  end: {
+    closing: 'merge-spec',
+    cleanup: [
+      { id: 'pull-main-checkout', kind: 'pull-main-checkout', mode: 'auto' },
+      { id: 'stop-services', kind: 'stop-services', mode: 'auto' },
+      { id: 'remove-worktrees', kind: 'remove-worktrees', mode: 'auto' },
+      { id: 'remove-workspace', kind: 'remove-workspace', mode: 'auto' },
+    ],
+  },
+}
+
+const readV1 = (document: string) => {
+  const read = decodeDeliveryRules(document)
+  if (Result.isFailure(read)) throw new Error(String(read.failure))
+  return read.success
+}
+
+describe('Stored rules still read: who commits becomes commit actions', () => {
+  test('at-push becomes Hemera commits right before the push, in the push’s moment', () => {
+    // The defaults as #340 stored them read as the defaults of today.
+    expect(readV1(JSON.stringify(V1_RULES))).toEqual({
+      ...defaultDeliveryRules(),
+      version: 3,
+      savedAt: '2026-10-14T10:00:00.000Z',
+    })
+    // Pushed after Ship: the commit goes before the push, in the waves.
+    const late = readV1(
+      JSON.stringify({
+        ...V1_RULES,
+        preparation: {
+          ...V1_RULES.preparation,
+          pushSteps: V1_RULES.preparation.pushSteps.map((step) => ({
+            ...step,
+            placement: 'waves',
+          })),
+        },
+      }),
+    )
+    expect(late.preparation.presets).toEqual({ library: [], application: [], local: [] })
+    expect(kinds(late.waves.presets.application)).toEqual([
+      'commit-by-hemera',
+      'push',
+      'pull-request',
+      'bump',
+      'merge',
+      'ci',
+    ])
+    // Local has no push: its commit goes before its local merge.
+    expect(late.waves.presets.local).toEqual([COMMIT, LOCAL_MERGE])
+    expect(late.tasks.presets).toEqual({ library: [], application: [], local: [] })
+    expect(sentences(late)).toEqual([])
+  })
+
+  test('after-each-task becomes Hemera commits in After each task', () => {
+    const rules = readV1(JSON.stringify({ ...V1_RULES, commitRule: 'after-each-task' }))
+    expect(rules.tasks.presets).toEqual({
+      library: [COMMIT],
+      application: [COMMIT],
+      local: [COMMIT],
+    })
+    expect(kinds(rules.preparation.presets.library)).toEqual(['push', 'pull-request'])
+    expect(rules.waves.presets.local).toEqual([LOCAL_MERGE])
+    expect(sentences(rules)).toEqual([])
+  })
+
+  test('a repository’s own push steps keep their moment, with Hemera’s commit before its push', () => {
+    const rules = readV1(
+      JSON.stringify({
+        ...V1_RULES,
+        preparation: {
+          ...V1_RULES.preparation,
+          repositories: [
+            {
+              repositoryId: 'api',
+              commitTemplate: '{key}: {title}',
+              pullRequestTitle: '{title}',
+              pullRequestBody: '{summary}',
+              reviewers: ['acme/api'],
+              requireApproval: false,
+              pushSteps: {
+                off: ['pull-request'],
+                changed: [{ id: 'push', kind: 'push', mode: 'auto', placement: 'waves' }],
+                added: [
+                  {
+                    after: 'push',
+                    step: {
+                      id: 'late-pr',
+                      kind: 'pull-request',
+                      mode: 'click',
+                      placement: 'waves',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    )
+    expect(rules.preparation.repositories[0]?.steps).toEqual({
+      off: ['pull-request', 'push', 'commit'],
+      changed: [],
+      added: [],
+    })
+    const api = effectiveOf(rules, only(repository('api')), 'api')
+    expect(api.stacks.preparation).toEqual([])
+    expect(api.stacks.waves.map((step) => [step.id, step.kind])).toEqual([
+      ['commit-push', 'commit-by-hemera'],
+      ['push', 'push'],
+      ['late-pr', 'pull-request'],
+      ['merge', 'merge'],
+      ['ci', 'ci'],
+    ])
+    expect(api.preparation.reviewers).toEqual(['acme/api'])
+  })
+
+  test('a document of either shape with a key the model does not have is refused', () => {
+    expect(
+      Result.isFailure(decodeDeliveryRules(JSON.stringify({ ...V1_RULES, removeClosing: true }))),
+    ).toBe(true)
+    expect(
+      Result.isFailure(decodeDeliveryRules(JSON.stringify({ ...V1_RULES, commitRule: 'never' }))),
+    ).toBe(true)
+  })
+
+  test('a mission’s stored copies still read, with Hemera’s commit before the push', () => {
+    const fields = { version: 1, copiedAt: '2026-10-14T10:00:00.000Z' }
+    const preparation = {
+      section: 'preparation',
+      ...fields,
+      reviewDrafts: false,
+      repositories: [
+        {
+          repositoryId: 'api',
+          name: 'api',
+          commitTemplate: '{key}: {title}',
+          pullRequestTitle: '{key}: {title}',
+          pullRequestBody: '{summary}',
+          reviewers: [],
+          requireApproval: false,
+          pushSteps: [
+            { id: 'push', kind: 'push', mode: 'click', placement: 'review' },
+            { id: 'pull-request', kind: 'pull-request', mode: 'click', placement: 'waves' },
+          ],
+        },
+      ],
+    }
+    const wavesCopy = {
+      section: 'waves',
+      ...fields,
+      repositories: [
+        {
+          repositoryId: 'api',
+          name: 'api',
+          preset: 'application',
+          steps: [{ id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' }],
+          deliversAfter: [],
+        },
+      ],
+    }
+    const end = { section: 'end', ...fields, closing: 'merge-spec', cleanup: V1_RULES.end.cleanup }
+    const [prepared, waved, ended, broken] = decodeSectionCopies(
+      [preparation, wavesCopy, end, { ...end, closing: null }].map((one) => JSON.stringify(one)),
+    )
+    expect(
+      prepared?.pipe(
+        Option.map(
+          (copy) => copy.section === 'preparation' && kinds(copy.repositories[0]?.steps ?? []),
+        ),
+      ),
+    ).toEqual(Option.some(['commit-by-hemera', 'push']))
+    expect(
+      waved?.pipe(
+        Option.map((copy) => copy.section === 'waves' && kinds(copy.repositories[0]?.steps ?? [])),
+      ),
+    ).toEqual(Option.some(['pull-request', 'merge']))
+    expect(ended?.pipe(Option.map((copy) => copy.section))).toEqual(Option.some('end'))
+    expect(broken).toEqual(Option.none())
+  })
+})
+
+describe('After each task is copied when the first task is done', () => {
+  test('the copy of After each task holds each repository’s stack and its commit template', () => {
+    const rules = withActions({ ...ACME_CHAIN }, 'tasks', [
+      sample('commit-by-hemera', 'commit-task'),
+    ])
+    const copy = sectionOf(
+      { ...rules, version: 2, savedAt: null },
+      ACME,
+      'tasks',
+      '2026-10-14T10:00:00.000Z',
+    )
+    if (copy.section !== 'tasks') throw new Error('section')
+    expect(
+      copy.repositories.map((one) => [one.repositoryId, one.commitTemplate, kinds(one.steps)]),
+    ).toEqual([
+      ['shared', '{key}: {title}', []],
+      ['api', '{key}: {title}', ['commit-by-hemera']],
+      ['web', '{key}: {title}', []],
     ])
   })
 })
@@ -941,7 +1457,7 @@ describe('The two copies a mission holds at Ship are checked together', () => {
 /** Rules drawn at random, put on Acme's repositories and on a few step ids, so overrides meet. */
 function onAcme(rules: DeliveryRules): DeliveryRules {
   const ids = ACME.repositories.map((one) => one.id)
-  const STEP_IDS = ['merge', 'ci', 'bump', 'push', 'pull-request', 'a', 'b']
+  const STEP_IDS = ['commit', 'merge', 'ci', 'bump', 'push', 'pull-request', 'a', 'b']
   const pick = (text: string, from: ReadonlyArray<string>) => from[text.length % from.length] ?? ''
   const repo = (id: string) => pick(id, ids)
   const step = <S extends { readonly id: string }>(one: S): S => ({
@@ -958,12 +1474,20 @@ function onAcme(rules: DeliveryRules): DeliveryRules {
   })
   return {
     ...rules,
+    tasks: {
+      ...rules.tasks,
+      repositories: rules.tasks.repositories.map((one) => ({
+        ...one,
+        repositoryId: repo(one.repositoryId),
+        steps: overrides(one.steps),
+      })),
+    },
     preparation: {
       ...rules.preparation,
       repositories: rules.preparation.repositories.map((one) => ({
         ...one,
         repositoryId: repo(one.repositoryId),
-        pushSteps: overrides(one.pushSteps),
+        steps: overrides(one.steps),
       })),
     },
     waves: {

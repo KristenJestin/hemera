@@ -1,59 +1,56 @@
 /**
- * A Project's delivery rules (#340): how a mission's work leaves its Workspace and how a mission
- * ends, as data. Running them is other tickets' work; this is the model, its presets, the
- * validation that refuses inconsistent rules, the templates, and the sections a mission copies
- * when they start acting.
+ * A Project's delivery rules (#340, #422): how a mission's work leaves its Workspace and how a
+ * mission ends, as data. Running them is other tickets' work; this is the model, its presets, the
+ * checks that refuse inconsistent rules, the templates, and the sections a mission copies when
+ * they start acting.
  *
- * The rules come in three sections:
+ * The rules come in moments, each a free stack of actions taken from one catalogue, or nothing:
  *
- * - **the preparation**: per repository, the templates of the commit and of the pull request, its
- *   reviewers and whether team approval is required before Ship; whether the drafts are reviewed;
- *   and the push steps, `push` and `pull-request`, each placed in Review (before Ship) or in the
- *   waves (after it);
- * - **the waves**: per repository, its preset, what it changes of the preset's base recipe, and the
- *   repositories it delivers after;
- * - **the End**: Closing, fixed (the model has no way to remove it), then Cleanup, a list.
+ * - **after each task**, during Building;
+ * - **the preparation**, in Review, before Ship; with it, per repository, the templates of the
+ *   commit and of the pull request, its reviewers and whether team approval is required before
+ *   Ship, and whether the drafts are reviewed;
+ * - **the waves**, per repository, after Ship, in the order the dependencies give: its preset and
+ *   the repositories it delivers after;
+ * - **the End**: Closing, fixed (the model has no way to remove it), then Cleanup, a stack.
  *
- * The Project keeps a base recipe per preset; a repository takes a preset and keeps only what it
- * changes: a step left out (`off`), a step changed (`changed`), a step of its own inserted after
- * another (`added`). The push steps are the same for every repository (none under Local) unless
- * the repository overrides them the same way. The effective recipe of a repository is computed,
- * never stored twice. A repository the rules do not name yet takes the defaults: Local when it has
- * no forge, Application otherwise.
+ * Every moment accepts every action of the catalogue, committing included: "Hemera commits", "I
+ * commit myself" and "an agent commits" are three actions, placed where the user wants them. The
+ * checks explain what does not hold (a pull request with no push before it, a merge with no pull
+ * request); they never take an action away from the catalogue.
+ *
+ * The Project keeps a starting stack per preset in each moment of a repository; a repository takes
+ * a preset and keeps only what it changes in each moment: an action left out (`off`), an action
+ * changed (`changed`), an action of its own inserted after another (`added`). Cleanup is the
+ * Project's, for every repository. The effective stacks of a repository are computed, never stored
+ * twice. A repository the rules do not name yet takes the defaults: Local when it has no forge,
+ * Application otherwise.
  *
  * Pure rules: the engine stores them, reads the forges and the catalogue, and copies the sections.
  *
  * The rules and the copies are stored documents, read strictly: a field added later (S2's manifest
  * path, S4's ref and variables) is a `Schema.optionalKey` with a default, so what was stored still
- * reads; a field renamed, removed or made required ships a data migration of both tables.
+ * reads; a field renamed, removed or made required changes the shape of the documents, and the
+ * shape before it keeps reading, upgraded as it is read, for both tables (`delivery-documents.ts`).
  */
 
 import { Option, Schema } from 'effect'
 
 // ——— The values ———
 
-/** How a step starts: by itself, or on a click, which is then a decision need. */
+/** How an action starts: by itself, or on a click, which is then a decision need. */
 export const STEP_MODES = ['auto', 'click'] as const
 export const StepMode = Schema.Literals(STEP_MODES)
 export type StepMode = typeof StepMode.Type
-
-/** Where a push step runs: in Review, before Ship, or in the waves, after it. */
-export const PUSH_PLACEMENTS = ['review', 'waves'] as const
-export const PushPlacement = Schema.Literals(PUSH_PLACEMENTS)
-export type PushPlacement = typeof PushPlacement.Type
 
 /** What a repository delivers as: a library others depend on, an application, or local work. */
 export const DELIVERY_PRESETS = ['library', 'application', 'local'] as const
 export const DeliveryPreset = Schema.Literals(DELIVERY_PRESETS)
 export type DeliveryPreset = typeof DeliveryPreset.Type
 
-/**
- * Who commits and when (open question 26): Hemera when it pushes, or Hemera when each task is
- * done. No value lets an agent run `git commit` itself.
- */
-export const COMMIT_RULES = ['at-push', 'after-each-task'] as const
-export const CommitRule = Schema.Literals(COMMIT_RULES)
-export type CommitRule = typeof CommitRule.Type
+/** The moments of a repository, in the order they happen; the End follows, the Project's. */
+export const DELIVERY_MOMENTS = ['tasks', 'preparation', 'waves'] as const
+export type DeliveryMoment = (typeof DELIVERY_MOMENTS)[number]
 
 /** How a merge is made: through the pull request, or `local` (the Local preset only). */
 export const MERGE_METHODS = ['squash', 'merge', 'rebase', 'local'] as const
@@ -71,7 +68,7 @@ export const IMAGES_SLOT = '{images}'
 export const CLOSING = 'merge-spec'
 
 /** The sections of the rules, each copied into a mission when it starts acting (CT-47). */
-export const DELIVERY_SECTIONS = ['preparation', 'waves', 'end'] as const
+export const DELIVERY_SECTIONS = ['tasks', 'preparation', 'waves', 'end'] as const
 export const DeliverySection = Schema.Literals(DELIVERY_SECTIONS)
 export type DeliverySection = typeof DeliverySection.Type
 
@@ -93,32 +90,37 @@ const FORGE_NAMES: Readonly<Record<DeliveryForge, string>> = {
   unknown: 'an unknown forge',
 }
 
-// ——— The steps ———
+// ——— The catalogue ———
 
 const stepFields = { id: Schema.String, mode: StepMode }
 
-/** Pushes the mission's branch to the repository's delivery remote. */
-export const PushStep = Schema.Struct({
-  ...stepFields,
-  kind: Schema.Literal('push'),
-  placement: PushPlacement,
-})
-export type PushStep = typeof PushStep.Type
+/** The actions with nothing to configure but how they start. */
+const PLAIN_KINDS = [
+  /** Hemera commits what the Workspace holds, with the repository's commit template. */
+  'commit-by-hemera',
+  /** Hemera waits for the user's click, then checks that a new commit exists on the branch. */
+  'commit-by-me',
+  /**
+   * An agent step allowed to run `git commit` in the mission's Workspace, under the permission
+   * rules, with the repository's commit template.
+   */
+  'commit-by-agent',
+  /** Pushes the mission's branch to the repository's delivery remote. */
+  'push',
+  /**
+   * Opens the pull request, into the repository's base branch, with the templates and reviewers
+   * of the preparation.
+   */
+  'pull-request',
+  /** Waits for the checks of the pushed commit. */
+  'ci',
+  'pull-main-checkout',
+  'stop-services',
+  'remove-worktrees',
+  'remove-workspace',
+] as const
 
-/**
- * Opens the pull request, into the repository's base branch, with the templates and reviewers of
- * the preparation.
- */
-export const PullRequestStep = Schema.Struct({
-  ...stepFields,
-  kind: Schema.Literal('pull-request'),
-  placement: PushPlacement,
-})
-export type PullRequestStep = typeof PullRequestStep.Type
-
-/** A push step of the preparation. */
-export const PreparationStep = Schema.Union([PushStep, PullRequestStep])
-export type PreparationStep = typeof PreparationStep.Type
+const PlainAction = Schema.Struct({ ...stepFields, kind: Schema.Literals(PLAIN_KINDS) })
 
 /** How dependency versions are moved: by a catalogue command, or by the agent. */
 export const BumpHow = Schema.Union([
@@ -139,8 +141,6 @@ export const MergeStep = Schema.Struct({
   kind: Schema.Literal('merge'),
   method: MergeMethod,
 })
-
-export const CiStep = Schema.Struct({ ...stepFields, kind: Schema.Literal('ci') })
 
 /** What Hemera triggers on the remote, through the forge's CLI, when the forge allows it. */
 export const RemoteAction = Schema.Union([
@@ -197,20 +197,49 @@ export const ConfirmStep = Schema.Struct({
   what: Schema.String,
 })
 
-/** A step of a repository's recipe, in the waves. */
-export const WaveStep = Schema.Union([
+/** An action of the catalogue: any of them stands in any moment. */
+export const DeliveryAction = Schema.Union([
+  PlainAction,
   BumpStep,
   MergeStep,
-  CiStep,
   RemoteActionStep,
   PublishedVersionStep,
   CommandStep,
   AgentStep,
   ConfirmStep,
 ])
-export type WaveStep = typeof WaveStep.Type
+export type DeliveryAction = typeof DeliveryAction.Type
+export type ActionKind = DeliveryAction['kind']
 
-/** The Cleanup steps Hemera knows, beside a catalogue command. */
+/** Every action of the catalogue, by kind, in the order the catalogue offers them. */
+export const ACTION_KINDS: ReadonlyArray<ActionKind> = [
+  'commit-by-hemera',
+  'commit-by-me',
+  'commit-by-agent',
+  'push',
+  'pull-request',
+  'bump',
+  'merge',
+  'ci',
+  'remote-action',
+  'published-version',
+  'command',
+  'agent',
+  'confirm',
+  'pull-main-checkout',
+  'stop-services',
+  'remove-worktrees',
+  'remove-workspace',
+]
+
+/** The actions that commit, whoever commits. */
+export const COMMIT_KINDS: ReadonlyArray<ActionKind> = [
+  'commit-by-hemera',
+  'commit-by-me',
+  'commit-by-agent',
+]
+
+/** The Cleanup actions Hemera knows, beside a catalogue command. */
 export const CLEANUP_KINDS = [
   'pull-main-checkout',
   'stop-services',
@@ -218,35 +247,74 @@ export const CLEANUP_KINDS = [
   'remove-workspace',
 ] as const
 
-/** A step of Cleanup, the configurable part of the End. */
-export const CleanupStep = Schema.Union([
-  Schema.Struct({ ...stepFields, kind: Schema.Literals(CLEANUP_KINDS) }),
-  CommandStep,
-])
-export type CleanupStep = typeof CleanupStep.Type
+/** Whether an action may write to the network whatever it is told: a command, an agent (CT-50). */
+export const mayWriteToNetwork = (step: DeliveryAction): boolean =>
+  step.kind === 'command' || step.kind === 'agent' || step.kind === 'commit-by-agent'
 
-/** A step of any section. */
-export type DeliveryStep = PreparationStep | WaveStep | CleanupStep
+/**
+ * Whether an action is safe to run again after a stop halfway, and the post-condition that says it
+ * is done, null when Hemera cannot check it. On a restart, an action with no outcome is checked
+ * against its post-condition; one neither safe to run again nor checkable comes back to the user as
+ * a decision, never as a blind retry. Running this is the delivery tickets' work.
+ */
+export interface RetryDeclaration {
+  readonly safeToRunAgain: boolean
+  readonly postCondition: string | null
+}
 
-/** Whether a step may write to the network whatever it is told: a command, an agent (CT-50). */
-export const mayWriteToNetwork = (step: DeliveryStep): boolean =>
-  step.kind === 'command' || step.kind === 'agent'
+export const ACTION_RETRIES: Readonly<Record<ActionKind, RetryDeclaration>> = {
+  'commit-by-hemera': {
+    safeToRunAgain: true,
+    postCondition: 'The Workspace has no uncommitted change.',
+  },
+  'commit-by-me': {
+    safeToRunAgain: true,
+    postCondition: 'A new commit exists on the branch since the action started.',
+  },
+  // An agent does more than commit: run again, it may do it twice.
+  'commit-by-agent': {
+    safeToRunAgain: false,
+    postCondition: 'A new commit exists on the branch since the action started.',
+  },
+  push: { safeToRunAgain: true, postCondition: 'The remote head equals the local head.' },
+  'pull-request': {
+    safeToRunAgain: false,
+    postCondition: 'A pull request from the branch into the base branch is open.',
+  },
+  bump: {
+    safeToRunAgain: false,
+    postCondition: 'The manifests name the versions the upstream repositories published.',
+  },
+  merge: { safeToRunAgain: false, postCondition: 'The branch is merged into the base branch.' },
+  ci: { safeToRunAgain: true, postCondition: 'The checks of the pushed commit are green.' },
+  'remote-action': { safeToRunAgain: false, postCondition: null },
+  'published-version': { safeToRunAgain: true, postCondition: 'The version is seen published.' },
+  command: { safeToRunAgain: false, postCondition: null },
+  agent: { safeToRunAgain: false, postCondition: null },
+  confirm: { safeToRunAgain: true, postCondition: 'The user confirmed it.' },
+  'pull-main-checkout': {
+    safeToRunAgain: true,
+    postCondition: 'The main checkout’s base branch equals its remote’s.',
+  },
+  'stop-services': { safeToRunAgain: true, postCondition: 'No service of the mission runs.' },
+  'remove-worktrees': {
+    safeToRunAgain: true,
+    postCondition: 'The mission’s worktrees are gone.',
+  },
+  'remove-workspace': { safeToRunAgain: true, postCondition: 'The mission’s Workspace is gone.' },
+}
 
 // ——— Base and overrides ———
 
-/** What a repository changes of a base list of steps. */
-const overridesOf = <S extends Schema.Top>(step: S) =>
-  Schema.Struct({
-    /** The base steps it leaves out, by id. */
-    off: Schema.Array(Schema.String),
-    /** The base steps it changes, each as it is here, by id. */
-    changed: Schema.Array(step),
-    /** Its own steps, each after the step it follows (of the base or its own), null for first. */
-    added: Schema.Array(Schema.Struct({ after: Schema.NullOr(Schema.String), step })),
-  })
-
-export const PreparationOverrides = overridesOf(PreparationStep)
-export const WaveOverrides = overridesOf(WaveStep)
+/** What a repository changes of a moment's starting stack. */
+export const ActionOverrides = Schema.Struct({
+  /** The actions of the base it leaves out, by id. */
+  off: Schema.Array(Schema.String),
+  /** The actions of the base it changes, each as it is here, by id. */
+  changed: Schema.Array(DeliveryAction),
+  /** Its own actions, each after the one it follows (of the base or its own), null for first. */
+  added: Schema.Array(Schema.Struct({ after: Schema.NullOr(Schema.String), step: DeliveryAction })),
+})
 
 /** What a repository changes, whatever the steps. */
 export interface Overrides<S extends { readonly id: string }> {
@@ -256,6 +324,21 @@ export interface Overrides<S extends { readonly id: string }> {
 }
 
 const NO_OVERRIDES = { off: [], changed: [], added: [] }
+
+/** The starting stack of each preset, in one moment. */
+export const PresetStacks = Schema.Struct({
+  library: Schema.Array(DeliveryAction),
+  application: Schema.Array(DeliveryAction),
+  local: Schema.Array(DeliveryAction),
+})
+export type PresetStacks = typeof PresetStacks.Type
+
+/** What one repository changes after each task. */
+export const RepositoryTasks = Schema.Struct({
+  repositoryId: Schema.String,
+  steps: ActionOverrides,
+})
+export type RepositoryTasks = typeof RepositoryTasks.Type
 
 /** The preparation of one repository. */
 export const RepositoryPreparation = Schema.Struct({
@@ -267,43 +350,41 @@ export const RepositoryPreparation = Schema.Struct({
   reviewers: Schema.Array(Schema.String),
   /** Whether team approval is required before Ship. */
   requireApproval: Schema.Boolean,
-  /** What it changes of the Project's push steps. */
-  pushSteps: PreparationOverrides,
+  /** What it changes of its preset's preparation. */
+  steps: ActionOverrides,
 })
 export type RepositoryPreparation = typeof RepositoryPreparation.Type
 
 /** The waves of one repository: its preset, what it changes of it, and what it delivers after. */
 export const RepositoryWaves = Schema.Struct({
   repositoryId: Schema.String,
+  /** The preset of every moment of the repository. */
   preset: DeliveryPreset,
-  steps: WaveOverrides,
+  steps: ActionOverrides,
   /** The repositories it depends on, by id: it leaves only once they have published. */
   deliversAfter: Schema.Array(Schema.String),
 })
 export type RepositoryWaves = typeof RepositoryWaves.Type
 
 const draftFields = {
-  commitRule: CommitRule,
+  tasks: Schema.Struct({
+    presets: PresetStacks,
+    repositories: Schema.Array(RepositoryTasks),
+  }),
   preparation: Schema.Struct({
-    /** When on, the push steps wait for a click that shows the rendered pull requests. */
+    /** When on, the pushes wait for a click that shows the rendered pull requests. */
     reviewDrafts: Schema.Boolean,
-    /** The push steps of every repository (none under Local), unless it overrides them. */
-    pushSteps: Schema.Array(PreparationStep),
+    presets: PresetStacks,
     repositories: Schema.Array(RepositoryPreparation),
   }),
   waves: Schema.Struct({
-    /** The base recipe of each preset. */
-    presets: Schema.Struct({
-      library: Schema.Array(WaveStep),
-      application: Schema.Array(WaveStep),
-      local: Schema.Array(WaveStep),
-    }),
+    presets: PresetStacks,
     repositories: Schema.Array(RepositoryWaves),
   }),
   end: Schema.Struct({
     /** Fixed: the model has no way to remove it. */
     closing: Schema.Literal(CLOSING),
-    cleanup: Schema.Array(CleanupStep),
+    cleanup: Schema.Array(DeliveryAction),
   }),
 }
 
@@ -320,28 +401,20 @@ export const DeliveryRules = Schema.Struct({
 })
 export type DeliveryRules = typeof DeliveryRules.Type
 
-const strict = { onExcessProperty: 'error', errors: 'all' } as const
-
-/** The rules as one stored document. */
-export const DeliveryRulesJson = Schema.fromJsonString(DeliveryRules)
-
-/**
- * Rules read from their document: a key the model does not have (one trying to remove Closing) is
- * refused, not dropped.
- */
-export const decodeDeliveryRules = (document: string) =>
-  Schema.decodeUnknownResult(DeliveryRulesJson)(document, strict)
-
 // ——— The presets ———
 
-const PUSH_STEPS: ReadonlyArray<PreparationStep> = [
-  { id: 'push', kind: 'push', mode: 'click', placement: 'review' },
-  { id: 'pull-request', kind: 'pull-request', mode: 'click', placement: 'review' },
+/** Hemera's commit, as the presets place it before a push or a local merge. */
+const COMMIT: DeliveryAction = { id: 'commit', kind: 'commit-by-hemera', mode: 'auto' }
+
+const PUSH_STEPS: ReadonlyArray<DeliveryAction> = [
+  COMMIT,
+  { id: 'push', kind: 'push', mode: 'click' },
+  { id: 'pull-request', kind: 'pull-request', mode: 'click' },
 ]
 
-const BUMP: WaveStep = { id: 'bump', kind: 'bump', mode: 'auto', how: { by: 'agent' } }
-const SQUASH: WaveStep = { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' }
-const CI: WaveStep = { id: 'ci', kind: 'ci', mode: 'auto' }
+const BUMP: DeliveryAction = { id: 'bump', kind: 'bump', mode: 'auto', how: { by: 'agent' } }
+const SQUASH: DeliveryAction = { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' }
+const CI: DeliveryAction = { id: 'ci', kind: 'ci', mode: 'auto' }
 
 /** The template defaults. */
 export const DEFAULT_COMMIT_TEMPLATE = '{key}: {title}'
@@ -351,8 +424,12 @@ export const DEFAULT_PULL_REQUEST_BODY = '{summary}\n\n{images}'
 /** The rules of a Project that never saved any. */
 export function defaultDeliveryRules(): DeliveryRulesDraft {
   return {
-    commitRule: 'at-push',
-    preparation: { reviewDrafts: false, pushSteps: PUSH_STEPS, repositories: [] },
+    tasks: { presets: { library: [], application: [], local: [] }, repositories: [] },
+    preparation: {
+      reviewDrafts: false,
+      presets: { library: PUSH_STEPS, application: PUSH_STEPS, local: [] },
+      repositories: [],
+    },
     waves: {
       presets: {
         library: [
@@ -367,7 +444,7 @@ export function defaultDeliveryRules(): DeliveryRulesDraft {
           },
         ],
         application: [BUMP, SQUASH, CI],
-        local: [{ id: 'merge', kind: 'merge', mode: 'auto', method: 'local' }],
+        local: [COMMIT, { id: 'merge', kind: 'merge', mode: 'auto', method: 'local' }],
       },
       repositories: [],
     },
@@ -378,7 +455,7 @@ export function defaultDeliveryRules(): DeliveryRulesDraft {
   }
 }
 
-// ——— The effective recipe ———
+// ——— The effective stacks ———
 
 /** A repository of the Project, as the rules read it: its forge and what the forge allows. */
 export interface DeliveryRepository {
@@ -439,6 +516,14 @@ export function applyOverrides<S extends { readonly id: string }>(
 export const changesOf = <S extends { readonly id: string }>(overrides: Overrides<S>): number =>
   overrides.off.length + overrides.changed.length + overrides.added.length
 
+/** A repository's stack in each of its moments. */
+export const MomentStacks = Schema.Struct({
+  tasks: Schema.Array(DeliveryAction),
+  preparation: Schema.Array(DeliveryAction),
+  waves: Schema.Array(DeliveryAction),
+})
+export type MomentStacks = typeof MomentStacks.Type
+
 /** One repository's rules, resolved: what a section copies and what an executor reads. */
 export const EffectiveRepository = Schema.Struct({
   repositoryId: Schema.String,
@@ -451,12 +536,10 @@ export const EffectiveRepository = Schema.Struct({
     reviewers: Schema.Array(Schema.String),
     requireApproval: Schema.Boolean,
   }),
-  /** Its push steps, in order: those placed in Review run before Ship. */
-  pushSteps: Schema.Array(PreparationStep),
-  /** Its recipe in the waves, in order. */
-  steps: Schema.Array(WaveStep),
+  /** Its stack in each moment, in order. */
+  stacks: MomentStacks,
   deliversAfter: Schema.Array(Schema.String),
-  /** What it changes of its preset and of the push steps. */
+  /** What it changes of its preset, in every moment. */
   changes: Schema.Number,
 })
 export type EffectiveRepository = typeof EffectiveRepository.Type
@@ -480,8 +563,37 @@ const preparationOf = (rules: DeliveryRulesDraft, repositoryId: string): Reposit
     pullRequestBody: DEFAULT_PULL_REQUEST_BODY,
     reviewers: [],
     requireApproval: false,
-    pushSteps: NO_OVERRIDES,
+    steps: NO_OVERRIDES,
   }
+
+/** What a repository changes of its preset in each moment. */
+const overridesOf = (
+  rules: DeliveryRulesDraft,
+  repository: DeliveryRepository,
+): Record<DeliveryMoment, Overrides<DeliveryAction>> => ({
+  tasks:
+    rules.tasks.repositories.find((one) => one.repositoryId === repository.id)?.steps ??
+    NO_OVERRIDES,
+  preparation: preparationOf(rules, repository.id).steps,
+  waves: wavesOf(rules, repository).steps,
+})
+
+const stacksOf = (rules: DeliveryRulesDraft, repository: DeliveryRepository): MomentStacks => {
+  const { preset } = wavesOf(rules, repository)
+  const overrides = overridesOf(rules, repository)
+  return {
+    tasks: applyOverrides(rules.tasks.presets[preset], overrides.tasks),
+    preparation: applyOverrides(rules.preparation.presets[preset], overrides.preparation),
+    waves: applyOverrides(rules.waves.presets[preset], overrides.waves),
+  }
+}
+
+/** A repository's actions in the order its moments happen. */
+const inSequence = (stacks: MomentStacks): DeliveryAction[] => [
+  ...stacks.tasks,
+  ...stacks.preparation,
+  ...stacks.waves,
+]
 
 /**
  * Every repository of the Project, resolved, in the Project's order. A preset's bump stays only
@@ -492,26 +604,29 @@ export function effectiveRepositories(
   rules: DeliveryRulesDraft,
   project: DeliveryProject,
 ): EffectiveRepository[] {
-  const recipes = new Map(
-    project.repositories.map((repository) => {
-      const waves = wavesOf(rules, repository)
-      return [repository.id, applyOverrides(rules.waves.presets[waves.preset], waves.steps)]
-    }),
+  const stacks = new Map(
+    project.repositories.map((repository) => [repository.id, stacksOf(rules, repository)]),
   )
-  const publishes = (id: string) =>
-    recipes.get(id)?.some((step) => step.kind === 'published-version') ?? false
+  const publishes = (id: string) => {
+    const found = stacks.get(id)
+    return (
+      found !== undefined && inSequence(found).some((step) => step.kind === 'published-version')
+    )
+  }
   return project.repositories.map((repository) => {
     const waves = wavesOf(rules, repository)
     const preparation = preparationOf(rules, repository.id)
+    const overrides = overridesOf(rules, repository)
     const fed = waves.deliversAfter.some(publishes)
-    const own = new Set([
-      ...waves.steps.changed.map((step) => step.id),
-      ...waves.steps.added.map((one) => one.step.id),
-    ])
-    const steps = (recipes.get(repository.id) ?? []).filter(
-      (step) => fed || step.kind !== 'bump' || own.has(step.id),
+    const own = new Set(
+      DELIVERY_MOMENTS.flatMap((moment) => [
+        ...overrides[moment].changed.map((step) => step.id),
+        ...overrides[moment].added.map((one) => one.step.id),
+      ]),
     )
-    const pushBase = waves.preset === 'local' ? [] : rules.preparation.pushSteps
+    const kept = (steps: ReadonlyArray<DeliveryAction>) =>
+      steps.filter((step) => fed || step.kind !== 'bump' || own.has(step.id))
+    const resolved = stacks.get(repository.id) ?? { tasks: [], preparation: [], waves: [] }
     return {
       repositoryId: repository.id,
       name: repository.name,
@@ -523,18 +638,20 @@ export function effectiveRepositories(
         reviewers: preparation.reviewers,
         requireApproval: preparation.requireApproval,
       },
-      pushSteps: applyOverrides(pushBase, preparation.pushSteps),
-      steps,
+      stacks: {
+        tasks: kept(resolved.tasks),
+        preparation: kept(resolved.preparation),
+        waves: kept(resolved.waves),
+      },
       deliversAfter: waves.deliversAfter,
-      changes: changesOf(waves.steps) + changesOf(preparation.pushSteps),
+      changes: DELIVERY_MOMENTS.reduce((sum, moment) => sum + changesOf(overrides[moment]), 0),
     }
   })
 }
 
-/** The steps one repository runs, in order: its push steps, then its recipe. */
-export const stepsOfRepository = (
-  repository: EffectiveRepository,
-): ReadonlyArray<PreparationStep | WaveStep> => [...repository.pushSteps, ...repository.steps]
+/** The actions one repository runs, in order: after each task, the preparation, the waves. */
+export const stepsOfRepository = (repository: EffectiveRepository): ReadonlyArray<DeliveryAction> =>
+  inSequence(repository.stacks)
 
 /**
  * The repositories in the order they deliver: each after those it delivers after, otherwise in
@@ -558,32 +675,36 @@ export function inOrder<
   return placed
 }
 
-/** One row of the table of a preset's recipes: a step, and where it stands in each repository. */
+/** One row of the table of a preset's stack: an action, and where it stands in each repository. */
 export interface RuleRow {
-  readonly step: WaveStep
-  /** The repository whose own step it is, or null for a step of the preset's base. */
+  readonly step: DeliveryAction
+  /** The repository whose own action it is, or null for an action of the preset's base. */
   readonly owner: string | null
   readonly cells: ReadonlyArray<{
     readonly repositoryId: string
     /** Where it comes from there, or null where it is not. */
     readonly origin: 'inherited' | 'changed' | 'added' | 'off' | null
-    readonly step: WaveStep | null
+    readonly step: DeliveryAction | null
   }>
 }
 
 /**
- * The base of a preset and the steps of each repository taking it, as one table, its columns in
- * delivery order.
+ * The base of a preset in one moment and the actions of each repository taking it, as one table,
+ * its columns in delivery order.
  */
 export function rowsOf(
   rules: DeliveryRulesDraft,
   project: DeliveryProject,
   preset: DeliveryPreset,
+  moment: DeliveryMoment,
 ): RuleRow[] {
   const repositories = inOrder(
-    project.repositories.map((repository) => wavesOf(rules, repository)),
+    project.repositories.map((repository) => ({
+      ...wavesOf(rules, repository),
+      steps: overridesOf(rules, repository)[moment],
+    })),
   ).filter((one) => one.preset === preset)
-  const base = rules.waves.presets[preset]
+  const base = rules[moment].presets[preset]
   const ownRows = (anchor: string | null): RuleRow[] => {
     const rows: RuleRow[] = []
     for (const owner of repositories) {
@@ -629,12 +750,18 @@ export interface StepParts {
   readonly on: string
 }
 
-export function partsOf(step: DeliveryStep): StepParts {
+export function partsOf(step: DeliveryAction): StepParts {
   switch (step.kind) {
+    case 'commit-by-hemera':
+      return { what: 'Commit', on: 'by Hemera' }
+    case 'commit-by-me':
+      return { what: 'Commit', on: 'by me' }
+    case 'commit-by-agent':
+      return { what: 'Commit', on: 'by an agent' }
     case 'push':
-      return { what: 'Push', on: step.placement === 'review' ? 'in Review' : 'after Ship' }
+      return { what: 'Push', on: 'the branch' }
     case 'pull-request':
-      return { what: 'Pull request', on: step.placement === 'review' ? 'in Review' : 'after Ship' }
+      return { what: 'Pull request', on: 'into the base branch' }
     case 'bump':
       return { what: 'Bump', on: step.how.by === 'command' ? step.how.commandId : 'agent' }
     case 'merge':
@@ -800,6 +927,7 @@ export function withDependencies(
 export const DELIVERY_PROBLEM_CODES = [
   'merge-without-pull-request',
   'pull-request-without-push',
+  'push-without-commit',
   'dependency-cycle',
   'bump-without-publisher',
   'approval-after-ship',
@@ -882,52 +1010,54 @@ const REMOTE_ACTIONS: Readonly<
   },
 }
 
-/** Refusals 1 and 2 of one repository, apart, so each list keeps the order of the refusals. */
+/** The refusals of one repository's sequence, apart, so each list keeps the order of the refusals. */
 interface SequenceProblems {
   readonly merge: DeliveryProblem[]
   readonly push: DeliveryProblem[]
+  readonly commit: DeliveryProblem[]
 }
 
-/** Refusals 1 and 2 for one repository's push steps and recipe, wherever they were read from. */
+/**
+ * A merge through a pull request needs one before it, a pull request a push before it, and a push
+ * a commit before it, in the order the actions run, wherever they were read from.
+ */
 function sequenceProblems(
   repositoryId: string,
   name: string,
-  pushSteps: ReadonlyArray<PreparationStep>,
-  steps: ReadonlyArray<WaveStep>,
+  all: ReadonlyArray<DeliveryAction>,
 ): SequenceProblems {
-  // Review runs before the waves, whatever the order of the list.
-  const all = [
-    ...pushSteps.filter((step) => step.placement === 'review'),
-    ...pushSteps.filter((step) => step.placement === 'waves'),
-    ...steps,
-  ]
-  const merging = steps.find((step) => step.kind === 'merge' && step.method !== 'local')
-  const pullRequest = all.find((step) => step.kind === 'pull-request')
+  const merging = all.findIndex((step) => step.kind === 'merge' && step.method !== 'local')
+  const pullRequest = all.findIndex((step) => step.kind === 'pull-request')
+  const pushed = all.findIndex((step) => step.kind === 'push')
+  const committed = all.findIndex((step) => COMMIT_KINDS.includes(step.kind))
   const merge: DeliveryProblem[] = []
   const push: DeliveryProblem[] = []
-  if (merging !== undefined) {
-    const at = pullRequest === undefined ? -1 : all.indexOf(pullRequest)
-    if (at === -1 || at > all.indexOf(merging)) {
-      merge.push({
-        code: 'merge-without-pull-request',
-        repositoryId,
-        stepId: merging.id,
-        sentence: `Merge needs a pull request: ${name} has no pull request step.`,
-      })
-    }
+  const commit: DeliveryProblem[] = []
+  if (merging !== -1 && (pullRequest === -1 || pullRequest > merging)) {
+    merge.push({
+      code: 'merge-without-pull-request',
+      repositoryId,
+      stepId: all[merging]?.id ?? null,
+      sentence: `Merge needs a pull request: ${name} has no pull request step.`,
+    })
   }
-  if (pullRequest !== undefined) {
-    const pushed = all.findIndex((step) => step.kind === 'push')
-    if (pushed === -1 || pushed > all.indexOf(pullRequest)) {
-      push.push({
-        code: 'pull-request-without-push',
-        repositoryId,
-        stepId: pullRequest.id,
-        sentence: `A pull request needs a push: ${name} has no push step before its pull request step.`,
-      })
-    }
+  if (pullRequest !== -1 && (pushed === -1 || pushed > pullRequest)) {
+    push.push({
+      code: 'pull-request-without-push',
+      repositoryId,
+      stepId: all[pullRequest]?.id ?? null,
+      sentence: `A pull request needs a push: ${name} has no push step before its pull request step.`,
+    })
   }
-  return { merge, push }
+  if (pushed !== -1 && (committed === -1 || committed > pushed)) {
+    commit.push({
+      code: 'push-without-commit',
+      repositoryId,
+      stepId: all[pushed]?.id ?? null,
+      sentence: `A push needs a commit: ${name} has no commit action before its push.`,
+    })
+  }
+  return { merge, push, commit }
 }
 
 /** The ids met more than once, each once, in the order first met. */
@@ -973,18 +1103,31 @@ const PRESET_NAMES: Readonly<Record<DeliveryPreset, string>> = {
   local: 'Local',
 }
 
+/** The command an action names, null when it names none. */
+const commandOf = (step: DeliveryAction): string | null =>
+  step.kind === 'command'
+    ? step.commandId
+    : step.kind === 'bump' && step.how.by === 'command'
+      ? step.how.commandId
+      : null
+
 /**
  * Every reason the rules cannot be saved, by refusal in the order of the ticket, then by
  * repository in the Project's order. Pure: the forges and the catalogue come with the Project.
+ * Cleanup is the Project's: its actions are checked in every repository's sequence, after the
+ * waves, except a bump, which, as a preset's, acts only where an upstream published.
  */
 export function validateRules(
   rules: DeliveryRulesDraft,
   project: DeliveryProject,
 ): DeliveryProblem[] {
   const effective = effectiveRepositories(rules, project)
+  const cleanup = rules.end.cleanup
   const facts = project.repositories.flatMap((repository) => {
     const resolved = effective.find((one) => one.repositoryId === repository.id)
-    return resolved === undefined ? [] : [{ repository, resolved }]
+    if (resolved === undefined) return []
+    const own = stepsOfRepository(resolved)
+    return [{ repository, resolved, own, all: [...own, ...cleanup] }]
   })
   const problem = (
     code: DeliveryProblem['code'],
@@ -993,18 +1136,19 @@ export function validateRules(
     sentence: string,
   ): DeliveryProblem => ({ code, repositoryId, stepId, sentence })
   const publishes = (id: string) =>
-    effective
-      .find((one) => one.repositoryId === id)
-      ?.steps.some((step) => step.kind === 'published-version') ?? false
+    facts
+      .find((one) => one.repository.id === id)
+      ?.own.some((step) => step.kind === 'published-version') ?? false
   const known = (commandId: string) => project.commandIds.includes(commandId)
 
   const problems: DeliveryProblem[] = []
-  // 1 and 2. A merge through a pull request needs one, and a pull request a push before it.
-  const sequences = facts.map(({ repository, resolved }) =>
-    sequenceProblems(repository.id, repository.name, resolved.pushSteps, resolved.steps),
+  // 1 and 2. A merge through a pull request needs one, a pull request a push, a push a commit.
+  const sequences = facts.map(({ repository, all }) =>
+    sequenceProblems(repository.id, repository.name, all),
   )
   problems.push(...sequences.flatMap((one) => one.merge))
   problems.push(...sequences.flatMap((one) => one.push))
+  problems.push(...sequences.flatMap((one) => one.commit))
   // 3. No cycle between repositories.
   const names = new Map(project.repositories.map((one) => [one.id, one.name]))
   for (const cycle of cyclesOf(effective)) {
@@ -1019,8 +1163,8 @@ export function validateRules(
     )
   }
   // 4. A bump needs an upstream that publishes.
-  for (const { repository, resolved } of facts) {
-    const bump = resolved.steps.find((step) => step.kind === 'bump')
+  for (const { repository, resolved, own } of facts) {
+    const bump = own.find((step) => step.kind === 'bump')
     if (bump === undefined || resolved.deliversAfter.some(publishes)) continue
     problems.push(
       problem(
@@ -1032,9 +1176,12 @@ export function validateRules(
     )
   }
   // 5. Approvals before Ship need the pull request opened before Ship (CT-56).
-  for (const { repository, resolved } of facts) {
-    const pullRequest = resolved.pushSteps.find((step) => step.kind === 'pull-request')
-    if (!resolved.preparation.requireApproval || pullRequest?.placement !== 'waves') continue
+  for (const { repository, resolved, all } of facts) {
+    if (!resolved.preparation.requireApproval) continue
+    const beforeShip = [...resolved.stacks.tasks, ...resolved.stacks.preparation]
+    if (beforeShip.some((step) => step.kind === 'pull-request')) continue
+    const pullRequest = all.find((step) => step.kind === 'pull-request')
+    if (pullRequest === undefined) continue
     problems.push(
       problem(
         'approval-after-ship',
@@ -1045,9 +1192,9 @@ export function validateRules(
     )
   }
   // 6. A forge step needs a forge.
-  for (const { repository, resolved } of facts) {
+  for (const { repository, all } of facts) {
     if (repository.forge !== 'none') continue
-    for (const step of stepsOfRepository(resolved)) {
+    for (const step of all) {
       const what =
         step.kind === 'pull-request'
           ? 'have a pull request step'
@@ -1068,9 +1215,9 @@ export function validateRules(
     }
   }
   // 7. A remote action the forge can do.
-  for (const { repository, resolved } of facts) {
+  for (const { repository, all } of facts) {
     if (repository.forge === 'none') continue
-    for (const step of resolved.steps) {
+    for (const step of all) {
       if (step.kind !== 'remote-action') continue
       const action = REMOTE_ACTIONS[step.action.type]
       if (action.allowed(repository)) continue
@@ -1099,14 +1246,9 @@ export function validateRules(
     }
   }
   // 9. A command named exists in the catalogue.
-  for (const { repository, resolved } of facts) {
-    for (const step of resolved.steps) {
-      const commandId =
-        step.kind === 'command'
-          ? step.commandId
-          : step.kind === 'bump' && step.how.by === 'command'
-            ? step.how.commandId
-            : null
+  for (const { repository, own } of facts) {
+    for (const step of own) {
+      const commandId = commandOf(step)
       if (commandId === null || known(commandId)) continue
       problems.push(
         problem(
@@ -1118,8 +1260,9 @@ export function validateRules(
       )
     }
   }
-  for (const step of rules.end.cleanup) {
-    if (step.kind !== 'command' || known(step.commandId)) continue
+  for (const step of cleanup) {
+    const commandId = commandOf(step)
+    if (commandId === null || known(commandId)) continue
     problems.push(
       problem(
         'unknown-command',
@@ -1130,9 +1273,9 @@ export function validateRules(
     )
   }
   // 10. A local merge only under the Local preset.
-  for (const { repository, resolved } of facts) {
+  for (const { repository, resolved, all } of facts) {
     if (resolved.preset === 'local') continue
-    const local = resolved.steps.find((step) => step.kind === 'merge' && step.method === 'local')
+    const local = all.find((step) => step.kind === 'merge' && step.method === 'local')
     if (local === undefined) continue
     problems.push(
       problem(
@@ -1146,26 +1289,26 @@ export function validateRules(
   // 11. Each step has an id of its own: overrides and plans address steps by id.
   const twice = (where: string, id: string) =>
     `${where} two steps with the id “${id}”: each step needs its own.`
-  for (const id of duplicated(rules.preparation.pushSteps.map((step) => step.id))) {
-    problems.push(problem('duplicate-step-id', null, id, twice('The push steps have', id)))
-  }
   for (const preset of DELIVERY_PRESETS) {
-    for (const id of duplicated(rules.waves.presets[preset].map((step) => step.id))) {
+    const ids = DELIVERY_MOMENTS.flatMap((moment) =>
+      rules[moment].presets[preset].map((step) => step.id),
+    )
+    for (const id of duplicated(ids)) {
       problems.push(
         problem('duplicate-step-id', null, id, twice(`The ${PRESET_NAMES[preset]} preset has`, id)),
       )
     }
   }
   for (const { repository, resolved } of facts) {
-    const waves = wavesOf(rules, repository)
-    const preparation = preparationOf(rules, repository.id)
-    const pushBase = resolved.preset === 'local' ? [] : rules.preparation.pushSteps
-    // A base's own duplicates are said once, above; here what the repository adds meets.
+    const overrides = overridesOf(rules, repository)
+    // A preset's own duplicates are said once, above; here what the repository adds meets.
     const ids = [
-      ...new Set(pushBase.map((step) => step.id)),
-      ...preparation.pushSteps.added.map((one) => one.step.id),
-      ...new Set(rules.waves.presets[waves.preset].map((step) => step.id)),
-      ...waves.steps.added.map((one) => one.step.id),
+      ...new Set(
+        DELIVERY_MOMENTS.flatMap((moment) =>
+          rules[moment].presets[resolved.preset].map((step) => step.id),
+        ),
+      ),
+      ...DELIVERY_MOMENTS.flatMap((moment) => overrides[moment].added.map((one) => one.step.id)),
     ]
     for (const id of duplicated(ids)) {
       problems.push(
@@ -1173,18 +1316,15 @@ export function validateRules(
       )
     }
   }
-  for (const id of duplicated(rules.end.cleanup.map((step) => step.id))) {
+  for (const id of duplicated(cleanup.map((step) => step.id))) {
     problems.push(problem('duplicate-step-id', null, id, twice('Cleanup has', id)))
   }
   // 12. An added step is placed after something that is not itself.
   for (const { repository, resolved } of facts) {
-    const waves = wavesOf(rules, repository)
-    const preparation = preparationOf(rules, repository.id)
-    const pushBase = resolved.preset === 'local' ? [] : rules.preparation.pushSteps
-    const loops = [
-      ...anchorLoops(pushBase, preparation.pushSteps),
-      ...anchorLoops(rules.waves.presets[waves.preset], waves.steps),
-    ]
+    const overrides = overridesOf(rules, repository)
+    const loops = DELIVERY_MOMENTS.flatMap((moment) =>
+      anchorLoops(rules[moment].presets[resolved.preset], overrides[moment]),
+    )
     for (const loop of loops) {
       problems.push(
         problem(
@@ -1237,10 +1377,28 @@ const EffectivePreparation = Schema.Struct({
   pullRequestBody: Schema.String,
   reviewers: Schema.Array(Schema.String),
   requireApproval: Schema.Boolean,
-  pushSteps: Schema.Array(PreparationStep),
+  steps: Schema.Array(DeliveryAction),
 })
 
 const copyFields = { version: Schema.Number, copiedAt: Schema.String }
+
+/**
+ * After each task as a mission copied it, at its first task done: each repository's stack, with
+ * the commit template its commit actions use.
+ */
+export const TasksCopy = Schema.Struct({
+  section: Schema.Literal('tasks'),
+  ...copyFields,
+  repositories: Schema.Array(
+    Schema.Struct({
+      repositoryId: Schema.String,
+      name: Schema.String,
+      commitTemplate: Schema.String,
+      steps: Schema.Array(DeliveryAction),
+    }),
+  ),
+})
+export type TasksCopy = typeof TasksCopy.Type
 
 /** The preparation as a mission copied it, at its first push or pull request. */
 export const PreparationCopy = Schema.Struct({
@@ -1260,7 +1418,7 @@ export const WavesCopy = Schema.Struct({
       repositoryId: Schema.String,
       name: Schema.String,
       preset: DeliveryPreset,
-      steps: Schema.Array(WaveStep),
+      steps: Schema.Array(DeliveryAction),
       deliversAfter: Schema.Array(Schema.String),
     }),
   ),
@@ -1272,11 +1430,12 @@ export const EndCopy = Schema.Struct({
   section: Schema.Literal('end'),
   ...copyFields,
   closing: Schema.Literal(CLOSING),
-  cleanup: Schema.Array(CleanupStep),
+  cleanup: Schema.Array(DeliveryAction),
 })
+export type EndCopy = typeof EndCopy.Type
 
 /** A section of the rules copied into a mission, resolved, with the version it was copied at. */
-export const SectionCopy = Schema.Union([PreparationCopy, WavesCopy, EndCopy])
+export const SectionCopy = Schema.Union([TasksCopy, PreparationCopy, WavesCopy, EndCopy])
 export type SectionCopy = typeof SectionCopy.Type
 
 /** A section of the rules, resolved for the Project as it is, as a mission copies it. */
@@ -1289,6 +1448,18 @@ export function sectionOf(
   const effective = effectiveRepositories(rules, project)
   const version = rules.version
   switch (section) {
+    case 'tasks':
+      return {
+        section,
+        version,
+        copiedAt,
+        repositories: effective.map((one) => ({
+          repositoryId: one.repositoryId,
+          name: one.name,
+          commitTemplate: one.preparation.commitTemplate,
+          steps: one.stacks.tasks,
+        })),
+      }
     case 'preparation':
       return {
         section,
@@ -1299,7 +1470,7 @@ export function sectionOf(
           repositoryId: one.repositoryId,
           name: one.name,
           ...one.preparation,
-          pushSteps: one.pushSteps,
+          steps: one.stacks.preparation,
         })),
       }
     case 'waves':
@@ -1311,7 +1482,7 @@ export function sectionOf(
           repositoryId: one.repositoryId,
           name: one.name,
           preset: one.preset,
-          steps: one.steps,
+          steps: one.stacks.waves,
           deliversAfter: one.deliversAfter,
         })),
       }
@@ -1338,7 +1509,7 @@ export const PreparationDifference = Schema.Struct({
     'pullRequestBody',
     'reviewers',
     'requireApproval',
-    'pushSteps',
+    'steps',
   ]),
 })
 export type PreparationDifference = typeof PreparationDifference.Type
@@ -1349,7 +1520,7 @@ const PREPARATION_FIELDS = [
   'pullRequestBody',
   'reviewers',
   'requireApproval',
-  'pushSteps',
+  'steps',
 ] as const
 
 const sameValue = Schema.toEquivalence(EffectivePreparation)
@@ -1389,19 +1560,41 @@ export function preparationDifferences(
 }
 
 /**
- * The two copies a mission holds at Ship, checked together (R9 calls it at Ship): the preparation,
- * copied at the first push or pull request, and the waves, copied at Ship, may be of different
- * versions, each consistent alone. Refusals 1 and 2 are read across both.
+ * The copies a mission holds at Ship, checked together (R9 calls it at Ship): After each task,
+ * copied at the first task done, the preparation, copied at the first push or pull request, and
+ * the waves, copied at Ship, may be of different versions, each consistent alone. The sequence
+ * refusals are read across them; a mission with no task done yet has no copy of After each task.
  */
-export function validateCopies(preparation: PreparationCopy, waves: WavesCopy): DeliveryProblem[] {
-  const sequences = waves.repositories.map((repository) =>
-    sequenceProblems(
-      repository.repositoryId,
-      repository.name,
-      preparation.repositories.find((one) => one.repositoryId === repository.repositoryId)
-        ?.pushSteps ?? [],
-      repository.steps,
-    ),
+export function validateCopies(copies: {
+  readonly tasks: TasksCopy | null
+  readonly preparation: PreparationCopy
+  readonly waves: WavesCopy
+}): DeliveryProblem[] {
+  const stepsIn = (
+    repositories: ReadonlyArray<{
+      readonly repositoryId: string
+      readonly steps: ReadonlyArray<DeliveryAction>
+    }>,
+    repositoryId: string,
+  ) => repositories.find((one) => one.repositoryId === repositoryId)?.steps ?? []
+  const sequences = copies.waves.repositories.map((repository) =>
+    sequenceProblems(repository.repositoryId, repository.name, [
+      ...stepsIn(copies.tasks?.repositories ?? [], repository.repositoryId),
+      ...stepsIn(copies.preparation.repositories, repository.repositoryId),
+      ...repository.steps,
+    ]),
   )
-  return [...sequences.flatMap((one) => one.merge), ...sequences.flatMap((one) => one.push)]
+  return [
+    ...sequences.flatMap((one) => one.merge),
+    ...sequences.flatMap((one) => one.push),
+    ...sequences.flatMap((one) => one.commit),
+  ]
 }
+
+// ——— The stored documents ———
+
+/** The rules as one stored document; `delivery-documents.ts` reads it, of either shape. */
+export const DeliveryRulesJson = Schema.fromJsonString(DeliveryRules)
+
+/** A copy as one stored document. */
+export const SectionCopyJson = Schema.fromJsonString(SectionCopy)
