@@ -4190,6 +4190,9 @@ test('saves', () => { expect(1).toBe(1) })`
     expect(process.memoryUsage().heapUsed - before).toBeLessThan(256 * 1024 * 1024)
     const shallow = `<testsuites>${'<testsuite name="s">'.repeat(64)}<testcase name="t" classname="test" file="/work/acme/api/tests/export.test.mjs"/>${'</testsuite>'.repeat(64)}</testsuites>`
     expect(reportedTests(NODE_REPORT, shallow, 'tests/export.test.mjs')?.length).toBe(1)
+    // One suite deeper, its one test's path far under the paths' cap, is not read either.
+    const deeper = `<testsuites>${'<testsuite name="s">'.repeat(65)}<testcase name="t" classname="test" file="/work/acme/api/tests/export.test.mjs"/>${'</testsuite>'.repeat(65)}</testsuites>`
+    expect(reportedTests(NODE_REPORT, deeper, 'tests/export.test.mjs')).toBeNull()
   })
 
   test('the report reader names each test of the file by its path, with how it ended', () => {
