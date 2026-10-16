@@ -4,11 +4,12 @@
  * Each says what to look at once the application is open on it.
  */
 
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import type { Cause } from 'effect'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { moveMission } from '../src/engine/missions.ts'
+import { listNeeds } from '../src/engine/needs.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { PLANS_THE_EXPORT, QUIET, READS_COLD } from './agents.ts'
 import type { FixtureGit } from './git.ts'
@@ -18,7 +19,10 @@ import {
   builderBuilds,
   launchedExport,
   plannedExport,
+  fixedOutside,
+  proofRan,
   proofReached,
+  reached,
 } from './missions.ts'
 
 /** What a group builds in: its folder for repositories, and a Git that commits the same way twice. */
@@ -47,6 +51,20 @@ export function toCents(printed) {
   return Math.round(Number(printed) * 100)
 }
 `
+
+/** An export that writes its header and forgets the invoices: R1.S1's green fails. */
+const HEADER_ONLY = `/** The invoices as CSV. */
+export function toCsv() {
+  return 'number,total'
+}
+`
+
+/** The questions Hemera asks the user, as the Needs show them. */
+const decisionQuestions = Effect.map(listNeeds, (groups) =>
+  groups
+    .flatMap((group) => group.needs)
+    .flatMap((need) => (Predicate.isTagged(need.fields, 'Decision') ? [need.fields.question] : [])),
+)
 
 export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
   {
@@ -78,6 +96,46 @@ export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
           { repository: 'api', path: 'src/invoices.js', content: WITH_CENTS },
         ])
         yield* proofReached(mission.id, 'R1.S2', 'green')
+      }),
+  },
+  {
+    name: 'building-not-proven',
+    look: 'Larkspur\'s CSV export in Building: every task done, but R1.S1\'s green failed and the Builder ended its turn without a fix. Hemera asks whether to try again or end without it: the "not proven" question in Needs you.',
+    agents: (index) => [PLANS_THE_EXPORT, READS_COLD][index] ?? QUIET,
+    build: (world) =>
+      Effect.gen(function* () {
+        const { mission } = yield* launchedExport(world)
+        yield* builderBuilds(mission.id, 'T2', [
+          { repository: 'api', path: 'src/invoices.js', content: WITH_CENTS },
+        ])
+        yield* proofReached(mission.id, 'R1.S2', 'green')
+        yield* builderBuilds(mission.id, 'T1', [
+          { repository: 'api', path: 'src/export.js', content: HEADER_ONLY, creates: true },
+        ])
+        yield* reached(
+          'the "not proven" question',
+          Effect.map(decisionQuestions, (questions) =>
+            questions.some((question) => question.includes('is not proven')),
+          ),
+        )
+      }),
+  },
+  {
+    name: 'building-outside-change',
+    look: "Larkspur's CSV export in Building: R1.S1's green failed on the Builder's export, then the fix was written in src/export.js outside Hemera, as in an editor. The repository is marked \"Changed outside Hemera\", the change is in the Journal, and the green ran again and passed.",
+    agents: (index) => [PLANS_THE_EXPORT, READS_COLD][index] ?? QUIET,
+    build: (world) =>
+      Effect.gen(function* () {
+        const { mission } = yield* launchedExport(world)
+        yield* builderBuilds(mission.id, 'T2', [
+          { repository: 'api', path: 'src/invoices.js', content: WITH_CENTS },
+        ])
+        yield* builderBuilds(mission.id, 'T1', [
+          { repository: 'api', path: 'src/export.js', content: HEADER_ONLY, creates: true },
+        ])
+        yield* proofRan(mission.id, 'R1.S1', 2)
+        yield* fixedOutside(mission.id, 'api', 'src/export.js', EXPORT_DRAFT)
+        yield* proofReached(mission.id, 'R1.S1', 'green')
       }),
   },
   {

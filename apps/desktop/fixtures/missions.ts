@@ -5,10 +5,15 @@
  * `task_finished`), called with its grant as its agent calls them.
  */
 
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { PermissionAnswer } from '@hemera/core/domain'
 import { Effect } from 'effect'
 
+import { buildingOf } from '../src/engine/building/builder.ts'
 import { latestCheckOf } from '../src/engine/building/check.ts'
+import { OutsideChanges } from '../src/engine/building/outside.ts'
 import { launchMission } from '../src/engine/building/launch.ts'
 import { proofsRead } from '../src/engine/building/proofs.ts'
 import { createMission, getMission } from '../src/engine/missions.ts'
@@ -59,6 +64,35 @@ export const proofReached = (missionId: string, scenario: string, state: string)
       (view) => view?.scenarios.find((one) => one.scenario === scenario)?.state === state,
     ),
   )
+
+/** Waits until a scenario's proof has run so many times. */
+export const proofRan = (missionId: string, scenario: string, runs: number) =>
+  reached(
+    `${String(runs)} runs of ${scenario}`,
+    Effect.map(proofsRead(missionId), (view) => {
+      const proof = view?.scenarios.find((one) => one.scenario === scenario)
+      return proof !== undefined && proof.runs.length >= runs
+    }),
+  )
+
+/**
+ * The user writes a file of the mission's Workspace in their own editor, outside Hemera; then the
+ * detector compares the Workspace, as its timer and the window's focus make it do.
+ */
+export const fixedOutside = (
+  missionId: string,
+  repository: string,
+  path: string,
+  content: string,
+) =>
+  Effect.gen(function* () {
+    const view = yield* buildingOf(missionId)
+    const folder = view?.repositories.find((one) => one.name === repository)?.folder
+    if (folder === undefined)
+      return yield* Effect.die(new Error(`no ${repository} in the Workspace`))
+    yield* Effect.sync(() => writeFileSync(join(folder, path), content))
+    yield* OutsideChanges.use((outside) => outside.compare(missionId, null))
+  })
 
 /** The export planned, then frozen, checked and launched by the user: Building, its reds recorded. */
 export const launchedExport = (world: { readonly work: string; readonly git: FixtureGit }) =>

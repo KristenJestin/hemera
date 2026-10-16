@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Effect, Result } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
@@ -228,6 +228,46 @@ describe('The mission groups reach their state through the engine, with scripted
     expect(asking).toHaveLength(1)
     expect(asking[0]?.requestedBy).toBe('builder')
     expect(asking[0]?.choices).toEqual(expect.arrayContaining(['allow-once', 'deny']))
+  }, 120_000)
+
+  test('building-not-proven: a quiet Builder and the "not proven" question pending', async () => {
+    const { root } = places()
+    const fixture = await built('building-not-proven', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        return { mission, needs: (yield* listNeeds).flatMap((group) => group.needs) }
+      }),
+    )
+    expect(seen.mission.stage).toBe('building')
+    const questions = seen.needs.flatMap((need) =>
+      Predicate.isTagged(need.fields, 'Decision') ? [need.fields.question] : [],
+    )
+    expect(questions).toEqual([expect.stringContaining('R1.S1 is not proven')])
+  }, 120_000)
+
+  test('building-outside-change: a fix written outside Hemera while a proof failed', async () => {
+    const { root } = places()
+    const fixture = await built('building-outside-change', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        return { mission, proofs: yield* proofsRead(mission.id) }
+      }),
+    )
+    expect(seen.mission.stage).toBe('building')
+    expect(seen.mission.marks.map((mark) => mark.sentence)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/outside Hemera/i)]),
+    )
+    const s1 = seen.proofs?.scenarios.find((one) => one.scenario === 'R1.S1')
+    // Red at the start, its green failed on the Builder's export, then passed on the user's fix.
+    expect(s1?.runs.map((run) => [run.phase, run.classification])).toEqual([
+      ['red', 'assertion_failed'],
+      ['green', 'assertion_failed'],
+      ['green', 'passed'],
+    ])
   }, 120_000)
 
   test('cancelled: a planned mission the user cancelled', async () => {
