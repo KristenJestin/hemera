@@ -21,6 +21,7 @@ import { startProfile } from '../src/engine/profile.ts'
 import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from '../src/engine/registries.ts'
 import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
 import { fakeForge, ghSignedOut } from '../tests/fake-forge.ts'
+import { QUIET, scriptedAgents } from './agents.ts'
 import { fixtureGit } from './git.ts'
 import { FIXTURE_GROUPS, type FixtureGroup } from './groups.ts'
 
@@ -114,7 +115,11 @@ const buildState = (
           reconciliationSteps: RECONCILIATION_STEPS,
           gh: { path: env['PATH'] ?? '', env },
           forge: { env },
-          sessions: fakes.sessions,
+          sessions: {
+            ...scriptedAgents(fakes, group.agents ?? (() => QUIET)),
+            // A new mission starts its Planner on its own, as in the application.
+            plannerStarts: true,
+          },
           ticketSync: { schedules: false },
         },
         log,

@@ -11,6 +11,10 @@ import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
 import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
+import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
+import { freezeReadiness } from '../src/engine/planning/freeze.ts'
+import { readSpec } from '../src/engine/planning/store.ts'
+import type { EngineServices } from '../src/engine/profile.ts'
 import { listMissions } from '../src/engine/missions.ts'
 import { listProjects } from '../src/engine/projects.ts'
 import { listVariables, revealVariable } from '../src/engine/variables.ts'
@@ -148,6 +152,53 @@ describe('Each group reaches its state from an empty base, checked through the s
     )
     expect(project?.variables['PAYMENTS_API_KEY']).toMatch(/^sk-fixture-/)
     expect(project?.missions).toEqual([])
+  })
+})
+
+/** Reads a fixture's profile through the services, once. */
+const readIn = <A, E>(profile: string, program: Effect.Effect<A, E, EngineServices>) =>
+  commandsEngine(profile)(({ profile: started }) => started.use(program))
+
+/** The one mission of a fixture's one project. */
+const onlyMission = Effect.gen(function* () {
+  const [project] = yield* listProjects
+  const [mission] = yield* listMissions(project?.id ?? '')
+  if (mission === undefined) return yield* Effect.die(new Error('the fixture has no mission'))
+  return mission
+})
+
+describe('The mission groups reach their state through the engine, with scripted agents', () => {
+  test('planning: a mission in Planning with a plan to read and judge', async () => {
+    const { root } = places()
+    const fixture = await built('planning', root)
+    const seen = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const mission = yield* onlyMission
+        return {
+          mission,
+          spec: yield* readSpec(mission.id),
+          coldReads: yield* listColdReads(mission.id),
+          readiness: yield* freezeReadiness(mission.id),
+        }
+      }),
+    )
+    expect(seen.mission.stage).toBe('planning')
+    expect(seen.mission.frozen).toBe(false)
+    // The Planner wrote it whole and declared it complete; the cold read found nothing.
+    expect(seen.spec.declaredCompleteVersion).toBe(seen.spec.version)
+    expect(seen.spec.requirements.length).toBeGreaterThan(0)
+    expect(seen.spec.tasks.length).toBeGreaterThan(1)
+    expect(seen.coldReads.map((pass) => pass.state)).toEqual(['done'])
+    expect(seen.readiness.ready).toBe(true)
+  })
+
+  test('cancelled: a planned mission the user cancelled', async () => {
+    const { root } = places()
+    const fixture = await built('cancelled', root)
+    const mission = await readIn(fixture.profile, onlyMission)
+    expect(mission.stage).toBe('cancelled')
+    expect(mission.ball).toBeNull()
   })
 })
 
