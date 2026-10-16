@@ -16,7 +16,8 @@
     "build": "node build.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && tsc -p tsconfig.test.json && tsc -p tsconfig.e2e.json",
     "e2e": "wdio run wdio.conf.ts",
-    "e2e:headless": "wdio run wdio.headless.conf.ts"
+    "e2e:headless": "wdio run wdio.headless.conf.ts",
+    "fixtures": "node fixtures/cli.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.79.0",
