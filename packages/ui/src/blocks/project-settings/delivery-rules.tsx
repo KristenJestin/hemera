@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -535,7 +536,8 @@ export function RepositoryRow({
   const changes = changesOf(repository)
   const early = (kind: StepKind): boolean => kind === 'push' || kind === 'pull-request'
   const review = inReview ? repository.steps.filter((one) => early(one.step.config.kind)) : []
-  const waves = repository.steps.filter((one) => !review.includes(one))
+  const inReviewSteps = new Set(review)
+  const waves = repository.steps.filter((one) => !inReviewSteps.has(one))
   const row = (one: RecipeStep): ReactNode => (
     <StepRow
       key={one.step.id}
@@ -765,6 +767,8 @@ function Waves({
 }): ReactNode {
   const folding = useTransition(fold)
   const byPath = new Map(rules.repositories.map((one) => [one.path, one]))
+  const opened = new Set(initiallyOpen)
+  const busy = new Set(checking)
   // A cycle leaves no order: the repositories stand in one list, under the refusal that says why.
   const waves = refusals.dependencies === undefined ? rules.waves : null
   const groups =
@@ -797,8 +801,8 @@ function Waves({
                   repository={repository}
                   after={upstreamOf(path, rules.dependencies)}
                   inReview={rules.pullRequests.placement === 'review'}
-                  initiallyOpen={initiallyOpen.includes(path)}
-                  checking={checking.includes(path)}
+                  initiallyOpen={opened.has(path)}
+                  checking={busy.has(path)}
                   onOpen={onOpen}
                   onPreset={(preset) => onPreset(path, preset)}
                   onPutBack={(id) => onPutBack(path, id)}

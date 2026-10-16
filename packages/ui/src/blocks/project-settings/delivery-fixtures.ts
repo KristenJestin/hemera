@@ -522,10 +522,10 @@ export const EXAMPLE: Record<(typeof TEMPLATE_VARIABLES)[number]['name'], string
 
 /** The names a template holds that Hemera does not fill. */
 export function unknownNames(template: string): string[] {
-  const known: readonly string[] = TEMPLATE_VARIABLES.map((one) => one.name)
+  const known = new Set<string>(TEMPLATE_VARIABLES.map((one) => one.name))
   return [...template.matchAll(/\{[^{}\s]*\}/g)]
     .map((match) => match[0])
-    .filter((name) => !known.includes(name))
+    .filter((name) => !known.has(name))
 }
 
 /** The engine's refusal of a template, in its words. */
