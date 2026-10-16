@@ -8,10 +8,13 @@ import { Effect, Predicate } from 'effect'
 import type { Cause } from 'effect'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
+import { Chats } from '../src/engine/chat/service.ts'
+import { transcriptOf } from '../src/engine/chat/store.ts'
 import { moveMission } from '../src/engine/missions.ts'
+import { awaitRun, startRun } from '../src/engine/runs.ts'
 import { listNeeds } from '../src/engine/needs.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
-import { PLANS_THE_EXPORT, QUIET, READS_COLD } from './agents.ts'
+import { LEAKS_THE_KEY, PLANS_THE_EXPORT, QUIET, READS_COLD } from './agents.ts'
 import type { FixtureGit } from './git.ts'
 import { EXPORT_DRAFT, INVOICES, larkspur } from './larkspur.ts'
 import {
@@ -151,6 +154,36 @@ export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
           content: EXPORT_DRAFT,
           creates: true,
         })
+      }),
+  },
+  {
+    name: 'masking',
+    look: 'Larkspur with one Chat whose agent called the payments API: its fake key (PAYMENTS_API_KEY) in a request header, in a URL, in JSON written in prose and in JSON inside a JSON string. Every place shows the mask, never the key: the Chat and its tool outputs.',
+    agents: (index) => [LEAKS_THE_KEY][index] ?? QUIET,
+    build: (world) =>
+      Effect.gen(function* () {
+        const { project } = yield* larkspur(world.work, world.git)
+        const chat = yield* Chats.use((chats) => chats.create(project.id))
+        yield* Chats.use((chats) =>
+          chats.send(chat.id, 'Check that the payments API answers with our key.', []),
+        )
+        // The user runs the dry run of the payments client: the project's variables reach it.
+        const run = yield* startRun({
+          projectId: project.id,
+          workspaceId: null,
+          commandId: null,
+          line: 'node scripts/dry-run-payments.mjs',
+          folder: 'api',
+          startedBy: 'user',
+          sessionId: null,
+        })
+        yield* awaitRun(run.id)
+        yield* reached(
+          'the Chat answered',
+          Effect.map(transcriptOf(chat.id, null), (page) =>
+            JSON.stringify(page.entries).includes('the key works'),
+          ),
+        )
       }),
   },
   {

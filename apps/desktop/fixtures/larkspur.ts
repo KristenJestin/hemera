@@ -83,6 +83,20 @@ export function toCsv(invoices) {
 }
 `
 
+/**
+ * A dry run of the payments client, which sends nothing: it prints the request it would make with
+ * the key the project's variables give it, as a debugging script does.
+ */
+export const DRY_RUN = `// A dry run of the payments client: prints the request, sends nothing.
+const key = process.env.PAYMENTS_API_KEY ?? ''
+console.log('> GET /v1/charges HTTP/1.1')
+console.log('> Host: payments.example.test')
+console.log(\`> Authorization: Bearer \${key}\`)
+console.log(\`Would fetch https://payments.example.test/v1/charges?api_key=\${key} (dry run, nothing sent)\`)
+console.log(\`The configuration reads {"payments": {"apiKey": "\${key}", "currency": "EUR"}}.\`)
+console.log(JSON.stringify({ event: 'charge.succeeded', request: JSON.stringify({ headers: { 'x-api-key': key } }) }))
+`
+
 const WEB_PACKAGE = `{
   "name": "larkspur-web",
   "private": true,
@@ -122,6 +136,9 @@ export function larkspurOnDisk(work: string, git: FixtureGit) {
     'tests/invoices.test.js': INVOICES_TEST,
   })
   git.commit(api, 'test: round a share half to even', { 'tests/rounding.test.js': ROUNDING_TEST })
+  git.commit(api, 'chore: a dry run of the payments client', {
+    'scripts/dry-run-payments.mjs': DRY_RUN,
+  })
   git.run(api, 'switch', '-q', '-c', 'feature/csv-export')
   git.commit(api, 'feat: export the invoices as csv (draft)', { 'src/export.js': EXPORT_DRAFT })
   git.run(api, 'switch', '-q', 'main')

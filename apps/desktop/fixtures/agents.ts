@@ -12,6 +12,7 @@ import type { Schema } from 'effect'
 import { type FakeScript, type FakeStep, fakeAgent } from '../src/engine/agents/fake.ts'
 import { AgentStarter } from '../src/engine/agents/runtime.ts'
 import type { SuiteAgent } from '../src/engine/agents/suite-agent.ts'
+import { FAKE_PAYMENTS_KEY } from './larkspur.ts'
 
 export const uses = (id: string, tool: string, args: Schema.JsonObject): FakeStep => ({
   does: 'uses',
@@ -188,6 +189,66 @@ export const PLANS_THE_EXPORT: FakeScript = {
       }),
       uses('toolu_complete', 'declare_complete', { why: 'A Builder can build it as written.' }),
       says('The Spec is written whole; it is yours to read and judge.'),
+    ],
+  ],
+  steps: [says('Noted.')],
+}
+
+/** What stays readable around the key in each place it is put: the tests find each one. */
+export const MASKING_PLACES = [
+  'Authorization: ',
+  'https://payments.example.test/v1/charges?api_key=',
+  'The configuration reads',
+  'x-api-key',
+]
+
+const KEY = FAKE_PAYMENTS_KEY
+
+/** A command line the agent runs, as its call's arguments name it, and what it printed. */
+const runs = (id: string, title: string, line: string, printed: string): FakeStep[] => [
+  {
+    does: 'calls',
+    call: { id, title, kind: 'execute', status: 'in_progress', rawInput: { line } },
+  },
+  {
+    does: 'updates',
+    call: {
+      id,
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: printed } }],
+    },
+  },
+]
+
+/**
+ * The agent of a Chat that tries the payments API: the fake key in a request's header and in a
+ * URL on the command lines it runs, in JSON written in its own words, and in JSON inside a JSON
+ * string, as an agent that read the configuration would put it.
+ */
+export const LEAKS_THE_KEY: FakeScript = {
+  turns: [
+    [
+      says('I will try the payments API with the key from the configuration.'),
+      ...runs(
+        'call_headers',
+        'Ask for the charges',
+        `curl -i -H "Authorization: Bearer ${KEY}" https://payments.example.test/v1/charges`,
+        `> Authorization: Bearer ${KEY}\n< HTTP/1.1 200 OK\n`,
+      ),
+      ...runs(
+        'call_url',
+        'Ask for the charges by URL',
+        `curl -s "https://payments.example.test/v1/charges?api_key=${KEY}"`,
+        '{"data": []}',
+      ),
+      says(`The configuration reads {"payments": {"apiKey": "${KEY}", "currency": "EUR"}}.\n\n`),
+      says(
+        `The last webhook logged ${JSON.stringify({
+          event: 'charge.succeeded',
+          request: JSON.stringify({ headers: { 'x-api-key': KEY } }),
+        })}.`,
+      ),
+      says('The API answers; the key works.'),
     ],
   ],
   steps: [says('Noted.')],

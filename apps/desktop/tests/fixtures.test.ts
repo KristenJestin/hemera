@@ -9,7 +9,10 @@ import { join } from 'node:path'
 import { Effect, Predicate, Result } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
+import { MASKING_PLACES } from '../fixtures/agents.ts'
 import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
+import { FAKE_PAYMENTS_KEY } from '../fixtures/larkspur.ts'
+import { chatsOf, transcriptOf } from '../src/engine/chat/store.ts'
 import { FIXTURE_MARKER, checkFixtureFolder } from '../src/main/fixture-profile.ts'
 import { proofsRead } from '../src/engine/building/proofs.ts'
 import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
@@ -19,6 +22,7 @@ import type { EngineServices } from '../src/engine/profile.ts'
 import { listMissions } from '../src/engine/missions.ts'
 import { listNeeds } from '../src/engine/needs.ts'
 import { listProjects } from '../src/engine/projects.ts'
+import { listRuns, runOutput } from '../src/engine/runs.ts'
 import { listVariables, revealVariable } from '../src/engine/variables.ts'
 import { commandsEngine } from './commands-engine.ts'
 import { git } from './repositories.ts'
@@ -268,6 +272,29 @@ describe('The mission groups reach their state through the engine, with scripted
       ['green', 'assertion_failed'],
       ['green', 'passed'],
     ])
+  }, 120_000)
+
+  test('masking: tool outputs that hold the fake secrets: headers, URLs, JSON in prose, JSON in a JSON string', async () => {
+    const { root } = places()
+    const fixture = await built('masking', root)
+    const said = await readIn(
+      fixture.profile,
+      Effect.gen(function* () {
+        const [project] = yield* listProjects
+        const [chat] = yield* chatsOf(project?.id ?? '')
+        const [run] = yield* listRuns(project?.id ?? '', null)
+        return {
+          chat: JSON.stringify((yield* transcriptOf(chat?.id ?? '', null)).entries),
+          run: (yield* runOutput(run?.id ?? '')).output,
+        }
+      }),
+    )
+    // Every place the key was put is shown, the key in none of them.
+    for (const shown of [said.chat, said.run]) {
+      expect(shown).not.toContain(FAKE_PAYMENTS_KEY)
+      for (const place of MASKING_PLACES) expect(shown).toContain(place)
+      expect(shown.split('•••').length - 1).toBeGreaterThanOrEqual(MASKING_PLACES.length)
+    }
   }, 120_000)
 
   test('cancelled: a planned mission the user cancelled', async () => {
