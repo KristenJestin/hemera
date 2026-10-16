@@ -89,7 +89,6 @@ const inView = (element: Element): boolean => {
 /** The first read is on its way: skeletons where the sections and the Spec will be. */
 export const Loading: Story = {
   args: { moment: 'loading' },
-  parameters: { a11y: { options: { performanceTimer: true } } },
   play: async ({ canvasElement }) => {
     console.log(
       `DIAG ${performance.now().toFixed(0)} loading play start, ${document.querySelectorAll('*').length} elements, ${document.getAnimations().length} animations`,
@@ -105,7 +104,6 @@ export const Loading: Story = {
 /** The Spec could not be read: why, in words, and Try again. */
 export const Error: Story = {
   args: { moment: 'error' },
-  parameters: { a11y: { options: { performanceTimer: true } } },
   play: async ({ canvasElement, args }) => {
     const canvas = page(canvasElement)
     await expect(canvas.getByRole('alert')).toHaveTextContent('did not answer in time')

@@ -322,7 +322,7 @@ jobs:
         timeout-minutes: 15
         env:
           VITEST_BROWSER_DEBUG: 'true'
-          DEBUG: 'vitest:browser:*'
+          DEBUG: 'vitest:browser:*,vite:deps'
         run: pnpm test --project storybook-light --project storybook-dark
 
   # The check the branch rules require, under the name it had when one runner did it all.
