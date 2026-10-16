@@ -15,14 +15,18 @@
  */
 
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -66,6 +70,8 @@ import { Runs } from '../src/engine/runs.ts'
 import { Cap } from '../src/engine/sessions/cap.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
 import { REPORTED_TURN_BOUND, RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
+import { THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
+import { Withholding } from '../src/engine/tools/withholding.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { Database } from '../src/engine/storage/database.ts'
@@ -75,12 +81,13 @@ import {
   memoryJournal,
   missionSpent,
   missions,
+  probeContents,
   probes,
   sessionDeliveries,
   workspaces,
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
-import { PermissionRequests } from '../src/engine/tools/ports.ts'
+import { PermissionRequests, SensitivePlaces } from '../src/engine/tools/ports.ts'
 import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
 import { commitOnRemote, git, remote, repository } from './repositories.ts'
 import {
@@ -331,6 +338,28 @@ const { observed: _observed, ...WITHOUT_OUTPUT } = REPORT
 
 const answersOf = (agent: FakeAgent | undefined) =>
   agent?.answers.toolAnswers.map((one) => one.text) ?? []
+
+/** Every content the Probes' captures kept, as stored. */
+const keptContents = Effect.gen(function* () {
+  const database = yield* Database
+  const rows = yield* database.select({ content: probeContents.content }).from(probeContents)
+  return rows.map((row) => row.content)
+})
+
+/** A capture's read of one file, for a Probe whose place holds no sensitive file. */
+const found = (path: string) =>
+  Effect.runPromise(
+    Withholding.of({
+      sessionId: 'probe-session',
+      role: 'probe',
+      projectId: 'acme',
+      missionId: null,
+      place: { kind: 'workspace', readOnly: false, root: work },
+    }).pipe(
+      Effect.provideService(SensitivePlaces, { sensitive: () => Effect.succeed(null) }),
+      Effect.flatMap((withholding) => readFound(path, 1024, withholding)),
+    ),
+  )
 
 /** The agents that were Probes, in the order they started: their brief names their question. */
 const probeAgentsOf = (world: World) =>
@@ -1011,11 +1040,76 @@ describe('probe_report ends the Probe', () => {
           const probeGrant = yield* ToolAccess.use((access) => access.byToken(token))
           const answer = yield* callTool(probeGrant?.id ?? '', 'probe_report', reported())
           hold.release()
-          return { answer, detail: yield* readProbe(row.id) }
+          return { answer, detail: yield* readProbe(row.id), kept: yield* keptContents }
         }),
       ),
     )
   }
+
+  test('a probe file hard-linked to a file outside the worktree is not saved, and the probe names it', async () => {
+    const secret = join(work, 'outside.txt')
+    writeFileSync(secret, 'not the Probe’s to keep\n')
+    const seen = await reportedAfter([], (tree) => linkSync(secret, join(tree, 'notes.txt')))
+    expect(seen.answer.text).toMatch(/^Kept: Probe #1 ended/)
+    expect(seen.detail.files.find((file) => file.path === 'notes.txt')).toMatchObject({
+      status: 'new',
+      content: null,
+      withheld:
+        'content withheld: it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept in a Probe’s capture',
+    })
+    expect(JSON.stringify(seen.detail)).not.toContain('not the Probe’s to keep')
+    expect(seen.kept.join('\n')).not.toContain('not the Probe’s to keep')
+  })
+
+  test('a second name of a sensitive file of the worktree is withheld as that sensitive place', async () => {
+    const seen = await reportedAfter([], (tree) =>
+      linkSync(join(tree, '.env'), join(tree, 'notes.txt')),
+    )
+    expect(seen.detail.files.find((file) => file.path === 'notes.txt')).toMatchObject({
+      status: 'new',
+      content: null,
+      withheld: expect.stringMatching(
+        /^content withheld: sensitive place: .+, through a hard link$/,
+      ),
+    })
+    expect(JSON.stringify(seen.detail)).not.toContain('hunter2-acme')
+    expect(seen.kept.join('\n')).not.toContain('hunter2-acme')
+  })
+
+  test('ordinary files are still captured when the data folder is reached through a link', async () => {
+    const linked = join(work, 'data-link')
+    symlinkSync(data, linked, process.platform === 'win32' ? 'junction' : 'dir')
+    data = linked
+    const seen = await reportedAfter([], (tree) => {
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+    })
+    expect(seen.detail.files.find((file) => file.path === 'fixture.csv')).toMatchObject({
+      status: 'new',
+      content: 'name\nÉloïse\n',
+      withheld: null,
+    })
+  })
+
+  test('ordinary files are still captured', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      mkdirSync(join(tree, 'tests', 'fixtures'), { recursive: true })
+      writeFileSync(join(tree, 'tests', 'fixtures', 'names.csv'), 'name\nÉloïse\n')
+      writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+    })
+    const files = new Map(seen.detail.files.map((file) => [file.path, file]))
+    expect([...files.keys()].toSorted()).toEqual(['importer.ts', 'tests/fixtures/names.csv'])
+    expect(files.get('tests/fixtures/names.csv')).toMatchObject({
+      status: 'new',
+      content: 'name\nÉloïse\n',
+      withheld: null,
+    })
+    expect(files.get('importer.ts')).toMatchObject({
+      status: 'modified',
+      content: `${IMPORTER}// probed\n`,
+      withheld: null,
+    })
+    expect(files.get('importer.ts')?.patch).toContain('+// probed')
+  })
 
   test('what the preparation wrote is not captured; what the Probe changed of it is', async () => {
     const seen = await reportedAfter([{ line: nodeLine(marks) }], (tree) => {
@@ -1031,6 +1125,26 @@ describe('probe_report ends the Probe', () => {
       withheld: 'content withheld: a sensitive place',
     })
     expect(files.get('.env')?.sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  test('a sensitive file the Probe rewrote to the same size and times is still told changed', async () => {
+    // The preparation leaves the `.env` at a whole second, a time Node sets back exactly.
+    const settles = script(`
+import { utimesSync } from 'node:fs'
+utimesSync('.env', 1000000000, 1000000000)
+`)
+    const seen = await reportedAfter([{ line: nodeLine(settles) }], (tree) => {
+      const env = join(tree, '.env')
+      const before = statSync(env, { bigint: true })
+      writeFileSync(env, 'DATABASE_PASSWORD=hunter3-acme\n')
+      utimesSync(env, 1000000000, 1000000000)
+      const after = statSync(env, { bigint: true })
+      expect([after.size, after.mtimeNs]).toEqual([before.size, before.mtimeNs])
+    })
+    expect(seen.detail.files.find((file) => file.path === '.env')).toMatchObject({
+      content: null,
+      withheld: 'content withheld: a sensitive place',
+    })
   })
 
   test('the capture keeps at most 200 files and 5 MiB of content; the rest is listed, withheld', async () => {
@@ -1054,6 +1168,10 @@ describe('probe_report ends the Probe', () => {
     const bytes = kept.reduce((sum, file) => sum + Buffer.byteLength(file.content ?? ''), 0)
     expect(bytes).toBeLessThanOrEqual(5 * 1024 * 1024)
     expect(withheld.every((file) => /^[0-9a-f]{64}$/.test(file.sha256))).toBe(true)
+    // Hashed whole, a chunk at a time, through the handle that was proven.
+    expect(seen.detail.files.find((file) => file.path === 'big-2.txt')?.sha256).toBe(
+      createHash('sha256').update(big).digest('hex'),
+    )
   })
 
   test('a large JSON file and the large patch the Probe left are kept masked as the whole mask gives them, while another fiber keeps its turns (#402)', async () => {
@@ -1174,11 +1292,36 @@ describe('probe_report ends the Probe', () => {
 
   test('a file gone between Git’s list and its reading is skipped, never a failure', async () => {
     const gone = join(work, 'gone.txt')
-    expect(await Effect.runPromise(readFound(gone, 1024))).toBeNull()
+    expect(await found(gone)).toBeNull()
     writeFileSync(gone, 'here\n')
-    expect(await Effect.runPromise(readFound(gone, 1024))).toMatchObject({ withheld: null })
-    expect(await Effect.runPromise(readFound(join(gone, 'under.txt'), 1024))).toBeNull()
+    expect(await found(gone)).toMatchObject({ withheld: null })
+    expect(await found(join(gone, 'under.txt'))).toBeNull()
   })
+
+  test('a symbolic link out of the worktree is not followed', async () => {
+    const tree = join(work, 'tree')
+    const outside = join(work, 'outside')
+    mkdirSync(tree)
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'notes.txt'), 'not the Probe’s to keep\n')
+    // Git listed `notes/notes.txt` while `notes` was a folder; it is a link out when it is read.
+    symlinkSync(outside, join(tree, 'notes'), process.platform === 'win32' ? 'junction' : 'dir')
+    const read = await found(join(tree, 'notes', 'notes.txt'))
+    expect(read).toMatchObject({ bytes: null, withheld: `content withheld: ${THROUGH_A_LINK}` })
+    expect(read?.sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe in the worktree is refused, never waited on',
+    async () => {
+      const pipe = join(work, 'pipe')
+      execFileSync('mkfifo', [pipe])
+      expect(await found(pipe)).toMatchObject({
+        bytes: null,
+        withheld: 'content withheld: it is not a regular file (a pipe, a device or a folder)',
+      })
+    },
+  )
 })
 
 describe('The complete wipe', () => {

@@ -51,11 +51,14 @@ export const THROUGH_A_LINK =
  * file is never used for, and why. It is read as any file (pnpm, bun and uv make one of every
  * dependency file, and a command that could plant one could as well copy the file); it is never
  * kept as evidence, where a hard link would carry a file from outside the Workspace into the
- * mission's evidence, and never written over, the rule #373 set for writes.
+ * mission's evidence, nor in a Probe's capture (#425), and never written over, the rule #373 set
+ * for writes.
  */
 const SECOND_NAME_REFUSED = {
   evidence:
     'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept as evidence',
+  capture:
+    'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept in a Probe’s capture',
   write:
     'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never written over',
 } as const
