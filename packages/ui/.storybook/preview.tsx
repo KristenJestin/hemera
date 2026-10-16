@@ -18,6 +18,7 @@ import '../src/theme.css'
  * portal, a scrollbar or a native control. The tests never see it: each run pins one theme.
  */
 const withTheme: Decorator = (Story, context) => {
+  diag(`decorator ${context.id} ${document.visibilityState}`)
   const chosen = context.globals['theme']
   const dark = chosen === 'dark'
   useEffect(() => {
@@ -70,6 +71,20 @@ const diag = (message: string): void => {
 }
 if ('__vitest_browser__' in globalThis) {
   diag(`preview loaded ${document.documentElement.className}`)
+  let lastTimer = performance.now()
+  window.setInterval(() => {
+    const now = performance.now()
+    if (now - lastTimer > 1000) diag(`timer gap ${(now - lastTimer).toFixed(0)}ms`)
+    lastTimer = now
+  }, 200)
+  let lastFrame = performance.now()
+  const frame = (): void => {
+    const now = performance.now()
+    if (now - lastFrame > 1000) diag(`frame gap ${(now - lastFrame).toFixed(0)}ms`)
+    lastFrame = now
+    window.requestAnimationFrame(frame)
+  }
+  window.requestAnimationFrame(frame)
   window.addEventListener('beforeunload', () => {
     diag('beforeunload')
   })
