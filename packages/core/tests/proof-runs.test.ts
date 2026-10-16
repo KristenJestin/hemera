@@ -4589,6 +4589,25 @@ describe('What a test threw, as its runner and its report say it (#342, round 10
     expect(validRed(classified, 'tests/test_raised.py', addedAt(code, 1, 2), true)).toBe(false)
     expect(validRed(classified, 'tests/test_raised.py', addedAt(code, 5, 9))).toBe(true)
   })
+
+  test('a pytest test of the same id in another file the summary lists does not count against the test file’s', () => {
+    const output = `${fixture('pytest-ra.txt')}\nPASSED tests/other/test_export.py::TestExport::test_saves`
+    expect(validRed(pytestRun(output), 'tests/test_export.py', addedAt(PYTEST_SOURCE, 2, 3))).toBe(
+      true,
+    )
+  })
+
+  test('a test of the file that the listing and the report both show skipped agrees with the report', () => {
+    const text = vitestJsonWith('keeps', { status: 'skipped', failureMessages: [] })
+    const output = fixture('vitest-verbose.txt').replace(
+      '✓ export.test.ts > export > keeps 0ms',
+      '↓ export.test.ts > export > keeps',
+    )
+    expect(output).not.toBe(fixture('vitest-verbose.txt'))
+    expect(validRed(vitestRun(output, text), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(
+      true,
+    )
+  })
 })
 
 describe('The reporting Hemera adds to a proof’s command (#342, round 9)', () => {
