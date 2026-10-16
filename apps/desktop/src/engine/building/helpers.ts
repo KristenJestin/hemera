@@ -89,7 +89,7 @@ import {
   queuedResults,
 } from '../storage/schema.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
-import { readJudged } from '../tools/judged.ts'
+import { NotJudged, readJudged } from '../tools/judged.ts'
 import { containedIn } from '../tools/paths.ts'
 import { mutate } from '../transaction.ts'
 import { HelperDesk, type HelperWork } from './helper-desk.ts'
@@ -648,7 +648,13 @@ export const helpersLayer = (settings: HelpersSettings) =>
             if (Result.isFailure(bytes)) {
               const cause = bytes.failure.cause
               const reason = cause instanceof Error ? cause.message : String(cause)
-              return Result.fail(`${named} is not a file of your folder: ${reason}`)
+              // A file of the folder the rule refuses (a second name, a link, a pipe) is said as
+              // not kept, with why; one that could not be read is not a file of the folder.
+              return Result.fail(
+                cause instanceof NotJudged
+                  ? `${named} is not kept: ${reason}`
+                  : `${named} is not a file of your folder: ${reason}`,
+              )
             }
             const inside = relative(folder, real)
             const put = yield* putEvidence({

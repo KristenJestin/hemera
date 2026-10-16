@@ -406,8 +406,9 @@ describe('The Builder reads a frozen prototype’s files, never writes them', ()
         }),
       ),
     )
-    expect(seen.refused).toContain('list-1.html')
-    expect(seen.refused).toContain('hard link')
+    expect(seen.refused).toBe(
+      'refused: list-1.html is not kept: it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept as evidence',
+    )
     const secret = createHash('sha256').update('not-a-real-key').digest('hex')
     expect(seen.kept.map((row) => row.sha256)).not.toContain(secret)
   })
