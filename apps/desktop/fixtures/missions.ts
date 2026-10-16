@@ -5,7 +5,7 @@
  * `task_finished`), called with its grant as its agent calls them.
  */
 
-import { writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { PermissionAnswer } from '@hemera/core/domain'
@@ -75,6 +75,16 @@ export const proofRan = (missionId: string, scenario: string, runs: number) =>
     }),
   )
 
+/** Where a repository of the mission's Workspace is on disk. */
+const workspaceFolder = (missionId: string, repository: string) =>
+  Effect.gen(function* () {
+    const view = yield* buildingOf(missionId)
+    const folder = view?.repositories.find((one) => one.name === repository)?.folder
+    if (folder === undefined)
+      return yield* Effect.die(new Error(`no ${repository} in the Workspace`))
+    return folder
+  })
+
 /**
  * The user writes a file of the mission's Workspace in their own editor, outside Hemera; then the
  * detector compares the Workspace, as its timer and the window's focus make it do.
@@ -86,10 +96,7 @@ export const fixedOutside = (
   content: string,
 ) =>
   Effect.gen(function* () {
-    const view = yield* buildingOf(missionId)
-    const folder = view?.repositories.find((one) => one.name === repository)?.folder
-    if (folder === undefined)
-      return yield* Effect.die(new Error(`no ${repository} in the Workspace`))
+    const folder = yield* workspaceFolder(missionId, repository)
     yield* Effect.sync(() => writeFileSync(join(folder, path), content))
     yield* OutsideChanges.use((outside) => outside.compare(missionId, null))
   })
@@ -137,27 +144,10 @@ export const userAllows = Effect.gen(function* () {
   })
 })
 
-/**
- * One of Hemera's tools, called with the Builder's grant. A call that waits for the user is
- * allowed by them, then made again once under the grant they gave; a refusal stops the fixture,
- * said.
- */
-const builderCalls = (
-  grantId: string,
-  tool: string,
-  args: Parameters<typeof callTool>[2],
-  allowed = false,
-): Effect.Effect<
-  string,
-  never,
-  Effect.Services<ReturnType<typeof callTool>> | Effect.Services<typeof userAllows>
-> =>
+/** One of Hemera's tools, called with the Builder's grant; a refusal stops the fixture, said. */
+const builderCalls = (grantId: string, tool: string, args: Parameters<typeof callTool>[2]) =>
   Effect.gen(function* () {
     const answer = yield* callTool(grantId, tool, args).pipe(Effect.orDie)
-    if (answer.text.startsWith(WAITING) && !allowed) {
-      yield* userAllows.pipe(Effect.orDie)
-      return yield* builderCalls(grantId, tool, args, true)
-    }
     if (!answer.ok) return yield* Effect.die(new Error(`${tool} was refused: ${answer.text}`))
     return answer.text
   })
@@ -204,21 +194,42 @@ const builderGrant = (missionId: string) =>
 
 /**
  * The mission's Builder builds a task: it starts it, writes each file through `fs_write` after
- * reading it, and says it is finished.
+ * reading it, and says it is finished. `granted` runs once its grant is read, before the task.
  */
 export const builderBuilds = (
   missionId: string,
   task: string,
   writes: ReadonlyArray<BuilderWrite>,
+  granted: Effect.Effect<void> = Effect.void,
 ) =>
   Effect.gen(function* () {
     const grantId = yield* builderGrant(missionId)
+    yield* granted
     yield* builderCalls(grantId, 'task_start', { task })
     for (const write of writes) {
       yield* readFirst(grantId, write)
-      yield* builderCalls(grantId, 'fs_write', toolWrite(write))
+      yield* builderWrites(missionId, grantId, write)
     }
     yield* builderCalls(grantId, 'task_finished', { task, summary: `${task} built.` })
+  })
+
+/**
+ * A write of the Builder's through `fs_write`. One that waits for the user is allowed by them, and
+ * Hemera then writes it itself: it is done once the file holds it, before the Builder goes on.
+ */
+const builderWrites = (missionId: string, grantId: string, write: BuilderWrite) =>
+  Effect.gen(function* () {
+    const answer = yield* callTool(grantId, 'fs_write', toolWrite(write)).pipe(Effect.orDie)
+    if (!answer.text.startsWith(WAITING)) {
+      if (!answer.ok) return yield* Effect.die(new Error(`fs_write was refused: ${answer.text}`))
+      return
+    }
+    yield* userAllows.pipe(Effect.orDie)
+    const file = join(yield* workspaceFolder(missionId, write.repository), write.path)
+    yield* reached(
+      `the allowed write of ${write.path}`,
+      Effect.sync(() => existsSync(file) && readFileSync(file, 'utf8') === write.content),
+    )
   })
 
 /**

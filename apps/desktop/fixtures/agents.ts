@@ -26,6 +26,25 @@ export const says = (text: string): FakeStep => ({ does: 'says', text })
 /** An agent that answers every prompt and does nothing else. */
 export const QUIET: FakeScript = { steps: [says('Done.')] }
 
+/**
+ * A Builder whose turns stay open from `hold` until `release`, so it is never judged quiet
+ * meanwhile: what happens while it is held comes before its turn ends, on every build.
+ */
+export function heldBuilder() {
+  let gate: PromiseWithResolvers<void> | null = null
+  const script: FakeScript = { ...QUIET, between: () => gate?.promise ?? Promise.resolve() }
+  return {
+    script,
+    hold: Effect.sync(() => {
+      gate = Promise.withResolvers<void>()
+    }),
+    release: Effect.sync(() => {
+      gate?.resolve()
+      gate = null
+    }),
+  }
+}
+
 /** A cold read that reads the Spec and finds nothing. */
 export const READS_COLD: FakeScript = {
   turns: [

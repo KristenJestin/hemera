@@ -24,6 +24,7 @@ import {
   REVIEWS_THE_CODE,
   REVIEWS_THE_SPEC,
   SLOW_GREEN_SECONDS,
+  heldBuilder,
   plansTheExport,
   type RoleScripts,
 } from './agents.ts'
@@ -85,6 +86,9 @@ const decisionQuestions = Effect.map(listNeeds, (groups) =>
 
 /** The agents of a planned mission: its Planner, then its cold read. */
 const PLANNED: RoleScripts = { planner: PLANS_THE_EXPORT, 'cold-read': READS_COLD }
+
+/** The Builder of building-outside-change, held while the fix is written outside Hemera. */
+const OUTSIDE_BUILDER = heldBuilder()
 
 /** The agents of a mission built to its end: the documenter and both reviewers too. */
 const REVIEWED: RoleScripts = {
@@ -211,19 +215,26 @@ export const FIXTURE_GROUPS: ReadonlyArray<FixtureGroup> = [
   {
     name: 'building-outside-change',
     look: "Larkspur's CSV export in Building: R1.S1's green failed on the Builder's export, then the fix was written in src/export.js outside Hemera, as in an editor. The repository is marked \"Changed outside Hemera\", the change is in the Journal, and the green ran again and passed.",
-    scripts: PLANNED,
+    scripts: { ...PLANNED, builder: OUTSIDE_BUILDER.script },
     build: (world) =>
       Effect.gen(function* () {
         const { mission } = yield* launchedExport(world)
+        // The Builder's turn stays open until the fix outside Hemera is taken in, so it is not
+        // judged quiet on the failed green first and asked "not proven": the order is the same
+        // on every build.
         yield* builderBuilds(mission.id, 'T2', [
           { repository: 'api', path: 'src/invoices.js', content: WITH_CENTS },
         ])
-        yield* builderBuilds(mission.id, 'T1', [
-          { repository: 'api', path: 'src/export.js', content: HEADER_ONLY, creates: true },
-        ])
+        yield* builderBuilds(
+          mission.id,
+          'T1',
+          [{ repository: 'api', path: 'src/export.js', content: HEADER_ONLY, creates: true }],
+          OUTSIDE_BUILDER.hold,
+        )
         yield* proofRan(mission.id, 'R1.S1', 2)
         yield* fixedOutside(mission.id, 'api', 'src/export.js', EXPORT_DRAFT)
         yield* proofReached(mission.id, 'R1.S1', 'green')
+        yield* OUTSIDE_BUILDER.release
       }),
   },
   {
