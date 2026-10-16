@@ -96,13 +96,17 @@ export interface ProofRunClass {
    */
   readonly printedFailures: ReadonlyArray<PrintedFailure>
   /**
-   * The test file's tests as the runner's report names them, each with how it ended: read whole,
-   * and the same tests, path for path, as the file declares when it ran; null otherwise (no report,
-   * one not read, or one that does not agree with the file).
+   * The test file's tests as the runner's report names them, each with how it ended and whether
+   * the runner's own listing on the console shows it so: read whole, the same tests, path for path,
+   * as the file declares when it ran, and no test the listing shows ending otherwise; null
+   * otherwise (no report, one not read, or one that does not agree with the file or the listing).
    */
-  readonly reported?: ReadonlyArray<ReportedTest> | null
-  /** What the output prints as a passed test, uncoloured: a `✓` line's text, a pytest node id. */
-  readonly passedLines?: ReadonlyArray<string>
+  readonly reported?: ReadonlyArray<ListedTest> | null
+}
+
+/** A test a report names, and whether the runner's listing shows it ending the same way. */
+export interface ListedTest extends ReportedTest {
+  readonly listed: boolean
 }
 
 /** One failure a report names: its test, its file, and what it says. */
@@ -911,27 +915,99 @@ const classOfFailure = (failure: Failure): ProofClass => {
 
 /** A JavaScript or Python test file: its red is named only by a report the runner wrote. */
 const SCRIPTED = /\.(?:[cm]?[jt]sx?|py)$/
-/** The mark vitest and jest print before a passed test. */
-const PASSED_MARK = /^\s*[✓√]\s+/
-/** A duration at the end of a passed test's line, `12ms` or `(1.5 s)`, matched from its space. */
-const PASSED_DURATION = /(?<!\s)\s+\(?\d+(?:\.\d+)?\s?m?s\)?$/
+/** How a test ended, as a runner's listing shows it. */
+type Listed = 'passed' | 'failed' | 'skipped'
 
-/** What a line prints as a passed test: a `✓` line's text, a pytest `PASSED` node id; or null. */
-const passedLine = (line: string): string | null => {
-  const mark = PASSED_MARK.exec(line)
-  if (mark !== null) return line.slice(mark[0].length).trimEnd().replace(PASSED_DURATION, '')
-  const [first = '', second = ''] = line.trim().split(/\s+/)
-  if (first === 'PASSED') return second.includes('::') ? second : null
-  if (second === 'PASSED') return first.includes('::') ? first : null
-  return null
+/** The marks vitest lists a test with (`√` where a console cannot print `✓`). */
+const VITEST_MARKS: ReadonlyMap<string, Listed> = new Map([
+  ['✓', 'passed'],
+  ['√', 'passed'],
+  ['×', 'failed'],
+  ['↓', 'skipped'],
+])
+/** The marks node's spec reporter lists a test with. */
+const NODE_MARKS: ReadonlyMap<string, Listed> = new Map([
+  ['✔', 'passed'],
+  ['✖', 'failed'],
+  ['﹣', 'skipped'],
+])
+/** The words pytest's `-rA` summary lists a test with: an error is a failure, an xfail a skip. */
+const PYTEST_WORDS: ReadonlyMap<string, Listed> = new Map([
+  ['PASSED', 'passed'],
+  ['FAILED', 'failed'],
+  ['ERROR', 'failed'],
+  ['XFAIL', 'skipped'],
+  ['XPASS', 'passed'],
+])
+/** The duration vitest prints after a test it ran. */
+const VITEST_DURATION = / \d+(?:\.\d+)?m?s$/
+/** What node prints after a test's title: its duration, then a skip or a todo. */
+const NODE_TAIL = /^ \(\d+(?:\.\d+)?ms\)(?: # (?:SKIP|TODO)\b.*)?$/
+/** A test pytest's summary lists: its word, and its node id. */
+const PYTEST_LISTED = /(?:^|\s)(PASSED|FAILED|ERROR|XFAIL|XPASS)\s+(\S+)/g
+
+/** Where the last of some marks is in a line, followed by a space; -1 when none is. */
+const lastMark = (line: string, marks: ReadonlyMap<string, Listed>): number =>
+  Math.max(...Array.from(marks.keys(), (mark) => line.lastIndexOf(`${mark} `)))
+
+/**
+ * One line of a runner's listing: the test it shows (its path, or its title for node) and how it
+ * ended; null for another line. The listing is read from the last mark of a line, since whatever
+ * a test prints with no newline comes before the runner's own line, never after it.
+ */
+const listedLine = (
+  line: string,
+  runner: TestReporting['runner'],
+  testPath: string,
+): { readonly key: string; readonly listed: Listed } | null => {
+  if (runner === 'pytest') {
+    const found = Array.from(line.matchAll(PYTEST_LISTED)).at(-1)
+    const listed = PYTEST_WORDS.get(found?.[1] ?? '')
+    const id = found?.[2] ?? ''
+    const split = id.indexOf('::')
+    if (listed === undefined || split < 0 || !sameFile(id.slice(0, split), testPath)) return null
+    return { key: id.slice(split + 2), listed }
+  }
+  const marks = runner === 'node' ? NODE_MARKS : VITEST_MARKS
+  const at = lastMark(line, marks)
+  if (at < 0 || (runner !== 'node' && runner !== 'vitest')) return null
+  const listed = marks.get(line.slice(at, at + 1)) ?? null
+  const text = line.slice(at + 2).trimEnd()
+  if (listed === null) return null
+  if (runner === 'node') {
+    const tail = text.lastIndexOf(' (')
+    if (tail < 0 || !NODE_TAIL.test(text.slice(tail))) return null
+    return { key: text.slice(0, tail), listed: text.includes(' # SKIP', tail) ? 'skipped' : listed }
+  }
+  const split = text.indexOf(' > ')
+  if (split < 0 || !sameFile(text.slice(0, split), testPath)) return null
+  const path = text.slice(split + 3)
+  return { key: listed === 'skipped' ? path : path.replace(VITEST_DURATION, ''), listed }
 }
 
-/** The tests an output prints as passed. */
-const passedLinesOf = (output: string): ReadonlyArray<string> =>
-  output.split(/\r?\n/).flatMap((whole) => {
-    const text = passedLine(uncoloured(whole).slice(0, LINE_CAP))
-    return text === null ? [] : [text]
-  })
+/**
+ * How the runner's own listing on the console shows each test of the file ended, by its path
+ * (its title for node): every way it is shown, a test printing a line like the runner's only
+ * adding one. Each line is read from its end, cut to a few KB.
+ */
+const consoleListing = (
+  output: string,
+  runner: TestReporting['runner'],
+  testPath: string,
+): ReadonlyMap<string, ReadonlySet<Listed>> => {
+  const shown = new Map<string, Set<Listed>>()
+  for (const whole of output.split('\n')) {
+    const one = listedLine(uncoloured(whole).slice(-LINE_CAP), runner, testPath)
+    if (one === null) continue
+    const set = shown.get(one.key) ?? new Set<Listed>()
+    shown.set(one.key, set.add(one.listed))
+  }
+  return shown
+}
+
+/** How a test a report names ended, as a listing would show it. */
+const listedAs = (verdict: ReportedTest['verdict']): Listed =>
+  verdict === 'passed' || verdict === 'skipped' ? verdict : 'failed'
 
 /**
  * The path a declared test's runner reports it by: its describes and title joined by ` > `
@@ -962,7 +1038,7 @@ const tally = (keys: ReadonlyArray<string>): ReadonlyMap<string, number> => {
  */
 const reportOf = (
   run: Parameters<typeof classifyProofRun>[0],
-): ReadonlyArray<ReportedTest> | null => {
+): ReadonlyArray<ListedTest> | null => {
   const report = run.report
   const testPath = run.testPath
   if (report === undefined || report === null || testPath === null || report.source === null) {
@@ -976,11 +1052,27 @@ const reportOf = (
   const keys = read.tests.map((one) => reportKey(one.scope, one.title, python))
   if (!read.certain || keys.some((key) => key === null)) return null
   const declared = tally(keys.flatMap((key) => (key === null ? [] : [key])))
-  const listed = tally(tests.map((one) => one.key))
+  const counted = tally(tests.map((one) => one.key))
   const agree =
-    declared.size === listed.size &&
-    Array.from(declared).every(([key, count]) => listed.get(key) === count)
-  return agree ? tests : null
+    declared.size === counted.size &&
+    Array.from(declared).every(([key, count]) => counted.get(key) === count)
+  if (!agree) return null
+  // node's spec lists a test by its title alone: tests sharing one must all end as it shows.
+  const node = report.reporting.runner === 'node'
+  const titleOf = (key: string) => (node ? (key.split(' > ').at(-1) ?? key) : key)
+  const listing = consoleListing(run.output, report.reporting.runner, testPath)
+  const shownOf = (one: ReportedTest) => listing.get(titleOf(one.key))
+  // A test the listing shows ending otherwise than the report says is a report of another run.
+  const contradicted = tests.some((one) => {
+    const shown = shownOf(one)
+    return shown !== undefined && (shown.size !== 1 || !shown.has(listedAs(one.verdict)))
+  })
+  if (contradicted) return null
+  return tests.map((one): ListedTest => ({
+    key: one.key,
+    verdict: one.verdict,
+    listed: shownOf(one) !== undefined,
+  }))
 }
 
 /**
@@ -1002,7 +1094,6 @@ export function classifyProofRun(run: {
   const lines = {
     ...failingLinesOf(run.output),
     reported: reportOf(run),
-    passedLines: passedLinesOf(run.output),
   }
   const none = { failingTest: null, assertion: null, failingFile: null, failures: [], ...lines }
   if (run.exitCode === null) return { classification: 'environment', ...none }
@@ -1368,8 +1459,9 @@ const reportFailure = (failure: ProofRunClass['failures'][number]): PrintedFailu
  * What the runner's report says of the tests a proof adds to a JavaScript or Python file: an
  * assertion when one of them failed on an assertion and none on another error, another error when
  * one did, passed when all passed; null when the report does not name them for certain (no report
- * kept, a test not literal whole or sharing its path, one the report does not hold or skipped, or
- * one the output prints as passed).
+ * kept, a test not literal whole, one the report does not hold once or skipped, or an assertion
+ * the runner's listing does not show). A test whose path another declared test shares is held
+ * twice by any report kept, so it is never named.
  */
 const reportedVerdict = (
   run: ProofRunClass,
@@ -1380,18 +1472,15 @@ const reportedVerdict = (
   if (tests === null || tests === undefined || names.length === 0) return null
   const python = testPath.endsWith('.py')
   const verdicts = names.map((name) => {
-    if (!Predicate.hasProperty(name, 'scope') || name.scope === null || name.clash) return null
+    if (!Predicate.hasProperty(name, 'scope') || name.scope === null) return null
     const key = reportKey(name.scope, name.title, python)
     if (key === null) return null
-    const printedPassed = (run.passedLines ?? []).some((line) =>
-      python
-        ? line.endsWith(`::${key}`)
-        : line === key || line.endsWith(` > ${key}`) || line === name.title,
-    )
     const own = tests.filter((one) => one.key === key)
-    const verdict = own.length === 1 ? (own[0]?.verdict ?? null) : null
-    // A failure the output prints as passed is a report that may not be this run's.
-    return (printedPassed && verdict === 'assertion') || verdict === 'skipped' ? null : verdict
+    const [one] = own
+    if (own.length !== 1 || one === undefined || one.verdict === 'skipped') return null
+    // A file can be written over the report as the run ends; the runner's own line cannot be
+    // taken back: an assertion counts only when the listing shows the test failing.
+    return one.verdict === 'assertion' && !one.listed ? null : one.verdict
   })
   if (verdicts.includes(null)) return null
   if (verdicts.includes('error')) return 'error'
@@ -1399,11 +1488,11 @@ const reportedVerdict = (
 }
 
 /**
- * Whether a run is a valid red for a JavaScript or Python test file: its runner's report decides
- * when it names the tests the proof adds for certain (an assertion of theirs is a red, another
- * error or a pass is not). Otherwise the output is never trusted to name them, since a test can
- * print anything: it can only refuse (a failure of theirs it shows as another error), and the key
- * line decides, on a run where an assertion failed.
+ * Whether a run is a valid red for a JavaScript or Python test file. The output is never trusted
+ * to name the tests the proof adds, since a test can print anything: it can only refuse (a failure
+ * of theirs it shows as another error), and does first. Then the runner's report decides when it
+ * names them for certain (an assertion of theirs is a red, another error or a pass is not).
+ * Otherwise the key line decides, on a run where an assertion failed.
  */
 const scriptedRed = (
   run: ProofRunClass,
@@ -1411,13 +1500,13 @@ const scriptedRed = (
   names: ReadonlyArray<TestName>,
   keyLineMatched: boolean | null,
 ): boolean => {
-  const report = reportedVerdict(run, testPath, names)
-  if (report !== null) return report === 'assertion'
   const located = run.failures.filter((one) => one.file !== null)
   const own =
     located.length > 0 ? located.filter((one) => sameFile(one.file ?? '', testPath)) : run.failures
   const shown = run.failures.length > 0 ? own.map(reportFailure) : run.printedFailures
   if (names.length > 0 && named(shown, names, testPath) === 'error') return false
+  const report = reportedVerdict(run, testPath, names)
+  if (report !== null) return report === 'assertion'
   const asserted =
     run.failures.length > 0
       ? own.some((one) => one.assertion)

@@ -19,11 +19,14 @@ import {
   addedTestNames,
   addedTests,
   foundReport,
-  guessReporting,
   keyLineFound,
   normalisedOutput,
   redPassed,
+  reportedTests,
+  shellSyntaxIn,
   validRed,
+  withReporting,
+  wordsOf,
 } from '../src/domain/index.ts'
 
 const TAP_ASSERTION = `TAP version 13
@@ -3765,21 +3768,18 @@ const reported = (
   source: string,
 ) => classifyProofRun({ output, exitCode: 1, testPath, report: { reporting, found, source } })
 
-const VITEST_JUNIT: TestReporting = {
+/** Where Hemera asks each runner for its report: a folder of the run's own, outside the repository. */
+const VITEST_REPORT: TestReporting = {
   runner: 'vitest',
-  report: { format: 'junit', path: 'report.xml' },
+  report: { format: 'json', path: '/tmp/hemera-report/report.json' },
 }
-const VITEST_JSON: TestReporting = {
-  runner: 'vitest',
-  report: { format: 'json', path: 'report.json' },
-}
-const NODE_JUNIT: TestReporting = {
+const NODE_REPORT: TestReporting = {
   runner: 'node',
-  report: { format: 'junit', path: 'report.xml' },
+  report: { format: 'junit', path: '/tmp/hemera-report/report.xml' },
 }
-const PYTEST_JUNIT: TestReporting = {
+const PYTEST_REPORT: TestReporting = {
   runner: 'pytest',
-  report: { format: 'junit', path: 'report.xml' },
+  report: { format: 'junit', path: '/tmp/hemera-report/report.xml' },
 }
 
 /** The vitest 5.0.1 run of `export.test.ts`: `saves` fails on an assertion, `keeps` passes, `throws` throws. */
@@ -3817,69 +3817,239 @@ def test_alone():
 /** The test a proof adds, as the source reads it: the added lines of a file. */
 const addedAt = (code: string, from: number, to: number) => addedTests(addition(code, from, to))
 
-describe('A red named by the report the runner wrote, never by the console (#342, round 8)', () => {
-  const vitestRun = (format: 'junit' | 'json') =>
-    reported(
-      fixture('vitest-report.txt'),
-      'export.test.ts',
-      format === 'junit' ? VITEST_JUNIT : VITEST_JSON,
-      {
-        kind: 'read',
-        text: fixture(format === 'junit' ? 'vitest-report.junit.xml' : 'vitest-report.json'),
-      },
-      VITEST_SOURCE,
-    )
+/** vitest's run of `export.test.ts` with Hemera's reporting: its verbose listing, its JSON report. */
+const vitestRun = (output = fixture('vitest-verbose.txt'), text = fixture('vitest-verbose.json')) =>
+  reported(output, 'export.test.ts', VITEST_REPORT, { kind: 'read', text }, VITEST_SOURCE)
+/** pytest's run of `tests/test_export.py` with Hemera's reporting: its `-rA` summary, its JUnit report. */
+const pytestRun = (output = fixture('pytest-ra.txt'), text = fixture('pytest-ra.junit.xml')) =>
+  reported(output, 'tests/test_export.py', PYTEST_REPORT, { kind: 'read', text }, PYTEST_SOURCE)
+/** node's run of `tests/export.test.mjs` with Hemera's reporting: its spec listing, its JUnit report. */
+const NODE_SOURCE = fixture('node-report.test.mjs.txt')
+const nodeRun = (output = fixture('node-spec.txt'), text = fixture('node-spec.junit.xml')) =>
+  reported(output, 'tests/export.test.mjs', NODE_REPORT, { kind: 'read', text }, NODE_SOURCE)
 
-  test('a vitest JUnit or JSON report that names the added test failed on an assertion is a red, with no key line', () => {
-    for (const format of ['junit', 'json'] as const) {
-      const names = addedAt(VITEST_SOURCE, 4, 6)
-      expect([format, validRed(vitestRun(format), 'export.test.ts', names)]).toEqual([format, true])
+/** The vitest JSON report with one test's result replaced. */
+const vitestJsonWith = (
+  title: string,
+  result: { readonly status: string; readonly failureMessages: ReadonlyArray<string> },
+) => {
+  const report = JSON.parse(fixture('vitest-verbose.json'))
+  for (const file of report.testResults) {
+    for (const one of file.assertionResults) {
+      if (one.title === title) Object.assign(one, result)
     }
+  }
+  return JSON.stringify(report)
+}
+
+describe('A red named by the report Hemera asks the runner for, its listing agreeing (#342, round 9)', () => {
+  test('a vitest JSON report, its verbose listing agreeing, names the added test failed on an assertion: a red with no key line', () => {
+    expect(validRed(vitestRun(), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(true)
   })
 
   test('a report that names the added test failed on another error, or passed, is no red, whatever the key line', () => {
-    for (const format of ['junit', 'json'] as const) {
-      const thrown = addedAt(VITEST_SOURCE, 10, 14)
-      const passed = addedAt(VITEST_SOURCE, 7, 9)
-      expect(validRed(vitestRun(format), 'export.test.ts', thrown, true)).toBe(false)
-      expect(validRed(vitestRun(format), 'export.test.ts', passed, true)).toBe(false)
+    expect(validRed(vitestRun(), 'export.test.ts', addedAt(VITEST_SOURCE, 10, 14), true)).toBe(
+      false,
+    )
+    expect(validRed(vitestRun(), 'export.test.ts', addedAt(VITEST_SOURCE, 7, 9), true)).toBe(false)
+  })
+
+  test('a pytest JUnit report, its -rA summary agreeing, names a test in a class and one at the top of the module', () => {
+    const at = (from: number, to: number) => addedAt(PYTEST_SOURCE, from, to)
+    expect(validRed(pytestRun(), 'tests/test_export.py', at(2, 3))).toBe(true)
+    expect(validRed(pytestRun(), 'tests/test_export.py', at(13, 14))).toBe(true)
+    expect(validRed(pytestRun(), 'tests/test_export.py', at(8, 10), true)).toBe(false)
+    expect(validRed(pytestRun(), 'tests/test_export.py', at(5, 6), true)).toBe(false)
+  })
+
+  test('a node --test JUnit report, its spec listing agreeing, names a test in a describe and one at the top, by the cause of its failure', () => {
+    const at = (from: number, to: number) => addedAt(NODE_SOURCE, from, to)
+    expect(validRed(nodeRun(), 'tests/export.test.mjs', at(5, 7))).toBe(true)
+    expect(validRed(nodeRun(), 'tests/export.test.mjs', at(13, 16))).toBe(true)
+    expect(validRed(nodeRun(), 'tests/export.test.mjs', at(8, 8), true)).toBe(false)
+    // Its TypeError's message forges a cause line: every cause must be an assertion.
+    expect(validRed(nodeRun(), 'tests/export.test.mjs', at(9, 11), true)).toBe(false)
+  })
+
+  test('a report swapped after the runner wrote it is contradicted by the runner’s own listing of the added test', () => {
+    const saves =
+      "import { expect, test } from 'vite-plus/test'\n\ntest('saves', () => {\n  expect(1).toBe(1)\n})\n"
+    const vitest = reported(
+      fixture('vitest-swap.txt'),
+      'saves.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-swap.json') },
+      saves,
+    )
+    expect(validRed(vitest, 'saves.test.ts', addedAt(saves, 3, 5))).toBe(false)
+    const python = 'def test_saves():\n    assert 1 == 1\n'
+    const pytest = reported(
+      fixture('pytest-swap.txt'),
+      'tests/test_saves.py',
+      PYTEST_REPORT,
+      { kind: 'read', text: fixture('pytest-swap.junit.xml') },
+      python,
+    )
+    expect(validRed(pytest, 'tests/test_saves.py', addedAt(python, 1, 2))).toBe(false)
+  })
+
+  test('an added test the console does not list leaves the red to the key line', () => {
+    const output = fixture('vitest-verbose.txt').replace(
+      /^.*× export\.test\.ts > export > saves.*$/m,
+      '',
+    )
+    const names = addedAt(VITEST_SOURCE, 4, 6)
+    expect(validRed(vitestRun(output), 'export.test.ts', names)).toBe(false)
+    expect(validRed(vitestRun(output), 'export.test.ts', names, true)).toBe(true)
+    const pytest = fixture('pytest-ra.txt').replace(
+      /^FAILED tests\/test_export\.py::TestExport::test_saves.*$/m,
+      '',
+    )
+    expect(validRed(pytestRun(pytest), 'tests/test_export.py', addedAt(PYTEST_SOURCE, 2, 3))).toBe(
+      false,
+    )
+  })
+
+  test('a node title two tests share, one ending otherwise than the listing shows, leaves the red to the key line', () => {
+    const code = `${NODE_SOURCE}\ntest('saves', () => {})\n`
+    const classified = reported(
+      fixture('node-spec.txt'),
+      'tests/export.test.mjs',
+      NODE_REPORT,
+      {
+        kind: 'read',
+        text: fixture('node-spec.junit.xml').replace(
+          '</testsuites>',
+          '<testcase name="saves" classname="test" file="/work/acme/api/tests/export.test.mjs"/></testsuites>',
+        ),
+      },
+      code,
+    )
+    expect(validRed(classified, 'tests/export.test.mjs', addedAt(code, 5, 7))).toBe(false)
+  })
+
+  test('a listing that gives another test of the file a status the report does not leaves the red to the key line', () => {
+    const vitest = fixture('vitest-verbose.txt').replace(
+      '✓ export.test.ts > export > keeps',
+      '× export.test.ts > export > keeps',
+    )
+    expect(validRed(vitestRun(vitest), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(false)
+    const pytest = `${fixture('pytest-ra.txt')}\nFAILED tests/test_export.py::TestExport::test_keeps - assert 1 == 2`
+    expect(validRed(pytestRun(pytest), 'tests/test_export.py', addedAt(PYTEST_SOURCE, 2, 3))).toBe(
+      false,
+    )
+    const node = `${fixture('node-spec.txt')}\n  ✖ keeps (0.1ms)`
+    expect(validRed(nodeRun(node), 'tests/export.test.mjs', addedAt(NODE_SOURCE, 5, 7))).toBe(false)
+  })
+
+  test('a report that says the added test failed on an assertion while the console shows another error is no red', () => {
+    const text = vitestJsonWith('throws', {
+      status: 'failed',
+      failureMessages: ['AssertionError: expected 1 to be 2'],
+    })
+    expect(
+      validRed(vitestRun(undefined, text), 'export.test.ts', addedAt(VITEST_SOURCE, 10, 14), true),
+    ).toBe(false)
+  })
+
+  test('a JSON failure that also holds another error, or holds no message at all, is no assertion', () => {
+    for (const failureMessages of [
+      ['AssertionError: expected 1 to be 2', 'TypeError: rows.map is not a function'],
+      [],
+    ]) {
+      const text = vitestJsonWith('saves', { status: 'failed', failureMessages })
+      expect([
+        failureMessages,
+        validRed(vitestRun(undefined, text), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6), true),
+      ]).toEqual([failureMessages, false])
     }
   })
 
-  test('a node --test JUnit report names a test in a describe and one at the top, by the cause of its failure', () => {
-    const source = fixture('node-report.test.mjs.txt')
-    const classified = reported(
-      fixture('node-report.txt'),
-      'tests/export.test.mjs',
-      NODE_JUNIT,
-      { kind: 'read', text: fixture('node-report.junit.xml') },
-      source,
-    )
-    const at = (from: number, to: number) => addedAt(source, from, to)
-    expect(validRed(classified, 'tests/export.test.mjs', at(5, 7))).toBe(true)
-    expect(validRed(classified, 'tests/export.test.mjs', at(13, 16))).toBe(true)
-    expect(validRed(classified, 'tests/export.test.mjs', at(8, 8), true)).toBe(false)
-    // Its TypeError's message forges a cause line: every cause must be an assertion.
-    expect(validRed(classified, 'tests/export.test.mjs', at(9, 11), true)).toBe(false)
+  test('a node failure with no cause, a timeout, is no assertion', () => {
+    const xml = fixture('node-spec.junit.xml')
+    const saves = xml.indexOf('<testcase name="saves"')
+    const end = xml.indexOf('</testcase>', saves)
+    const failure = xml.slice(saves, end).replace(/\n\s*cause: [\s\S]*?(?=\n\s*})/, '')
+    const text = `${xml.slice(0, saves)}${failure}${xml.slice(end)}`
+    expect(text).not.toBe(xml)
+    expect(
+      validRed(nodeRun(undefined, text), 'tests/export.test.mjs', addedAt(NODE_SOURCE, 5, 7), true),
+    ).toBe(false)
   })
 
-  test('a pytest JUnit report names a test in a class and one at the top of the module', () => {
-    const classified = reported(
-      fixture('pytest-report.txt'),
-      'tests/test_export.py',
-      PYTEST_JUNIT,
-      { kind: 'read', text: fixture('pytest-report.junit.xml') },
-      PYTEST_SOURCE,
+  test('a pytest failure raised by pytest.fail, and a pytest error whose traceback ends on an AssertionError, are no assertion', () => {
+    const xml = fixture('pytest-ra.junit.xml')
+    const failed = xml.replace(
+      'tests/test_export.py:3: AssertionError',
+      'tests/test_export.py:3: Failed',
     )
-    const at = (from: number, to: number) => addedAt(PYTEST_SOURCE, from, to)
-    expect(validRed(classified, 'tests/test_export.py', at(2, 3))).toBe(true)
-    expect(validRed(classified, 'tests/test_export.py', at(13, 14))).toBe(true)
-    expect(validRed(classified, 'tests/test_export.py', at(8, 10), true)).toBe(false)
-    expect(validRed(classified, 'tests/test_export.py', at(5, 6), true)).toBe(false)
+    expect(failed).not.toBe(xml)
+    const at = addedAt(PYTEST_SOURCE, 2, 3)
+    expect(validRed(pytestRun(undefined, failed), 'tests/test_export.py', at, true)).toBe(false)
+    const saves = xml.indexOf('name="test_saves"')
+    const open = xml.indexOf('<failure', saves)
+    const close = xml.indexOf('</failure>', saves)
+    const errored = `${xml.slice(0, open)}<error${xml.slice(open + '<failure'.length, close)}</error>${xml.slice(close + '</failure>'.length)}`
+    expect(validRed(pytestRun(undefined, errored), 'tests/test_export.py', at, true)).toBe(false)
+  })
+
+  test('two added tests, one failing on an assertion and one on another error, are no red', () => {
+    expect(validRed(vitestRun(), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 14), true)).toBe(false)
+  })
+
+  test('an added test the report shows skipped is left to the key line', () => {
+    const text = vitestJsonWith('saves', { status: 'skipped', failureMessages: [] })
+    const output = fixture('vitest-verbose.txt').replace(
+      '× export.test.ts > export > saves 5ms',
+      '↓ export.test.ts > export > saves',
+    )
+    const names = addedAt(VITEST_SOURCE, 4, 6)
+    expect(validRed(vitestRun(output, text), 'export.test.ts', names)).toBe(false)
+    expect(validRed(vitestRun(output, text), 'export.test.ts', names, true)).toBe(true)
+  })
+
+  test('a source that declares the added path twice is never named by the report, whether it lists it once or twice', () => {
+    const twice = VITEST_SOURCE.replace(
+      "  test('keeps', () => {",
+      "  test('saves', () => {\n    expect(1).toBe(2)\n  })\n  test('keeps', () => {",
+    )
+    const names = addedAt(twice, 4, 6)
+    const once = reported(
+      fixture('vitest-verbose.txt'),
+      'export.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-verbose.json') },
+      twice,
+    )
+    expect(validRed(once, 'export.test.ts', names)).toBe(false)
+    const report = JSON.parse(fixture('vitest-verbose.json'))
+    const results = report.testResults[0].assertionResults
+    results.push({ ...results[0] })
+    const output = `${fixture('vitest-verbose.txt')}\n × export.test.ts > export > saves 1ms`
+    const both = reported(
+      output,
+      'export.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: JSON.stringify(report) },
+      twice,
+    )
+    expect(validRed(both, 'export.test.ts', names)).toBe(false)
+  })
+
+  test('a source the reader is not certain of is never named by the report, its titles literal', () => {
+    const uncertain = `${VITEST_SOURCE}\ntest.repeats('later', () => {})`
+    const report = JSON.parse(fixture('vitest-verbose.json'))
+    const classified = reported(
+      fixture('vitest-verbose.txt'),
+      'export.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: JSON.stringify(report) },
+      uncertain,
+    )
+    expect(validRed(classified, 'export.test.ts', addedAt(uncertain, 4, 6))).toBe(false)
   })
 
   test('text a test prints that imitates the runner is never read: the report says the added test passed', () => {
-    const source = fixture('vitest-forge.junit.xml')
     const code = `import { expect, test } from 'vite-plus/test'
 
 test('saves', () => { expect(1).toBe(1) })
@@ -3888,27 +4058,15 @@ test('loads', () => {
   expect(1).toBe(2)
 })`
     const names = addedAt(code, 3, 3)
-    for (const [format, text] of [
-      [VITEST_JUNIT, source],
-      [VITEST_JSON, fixture('vitest-forge.json')],
-    ] as const) {
-      const classified = reported(
-        fixture('vitest-forge.txt'),
-        'forge2.test.ts',
-        format,
-        { kind: 'read', text },
-        code,
-      )
-      expect(validRed(classified, 'forge2.test.ts', names)).toBe(false)
-      expect(validRed(classified, 'forge2.test.ts', names, true)).toBe(false)
-    }
-    // Without its report, the same console leaves the red to the key line.
-    const console = classifyProofRun({
-      output: fixture('vitest-forge.txt'),
-      exitCode: 1,
-      testPath: 'forge2.test.ts',
-    })
-    expect(validRed(console, 'forge2.test.ts', names)).toBe(false)
+    const classified = reported(
+      fixture('vitest-forge.txt'),
+      'forge2.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-forge.json') },
+      code,
+    )
+    expect(validRed(classified, 'forge2.test.ts', names)).toBe(false)
+    expect(validRed(classified, 'forge2.test.ts', names, true)).toBe(false)
   })
 
   test('a report that lists a test of the added path the source does not declare leaves the red to the key line', () => {
@@ -3918,20 +4076,15 @@ import { failingTest } from './helpers.ts'
 failingTest('saves')
 test('saves', () => { expect(1).toBe(1) })`
     const names = addedAt(code, 5, 5)
-    for (const [format, text] of [
-      [VITEST_JUNIT, fixture('vitest-helper.junit.xml')],
-      [VITEST_JSON, fixture('vitest-helper.json')],
-    ] as const) {
-      const classified = reported(
-        fixture('vitest-helper.txt'),
-        'helper.test.ts',
-        format,
-        { kind: 'read', text },
-        code,
-      )
-      expect(validRed(classified, 'helper.test.ts', names)).toBe(false)
-      expect(validRed(classified, 'helper.test.ts', names, true)).toBe(true)
-    }
+    const classified = reported(
+      fixture('vitest-helper.txt'),
+      'helper.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-helper.json') },
+      code,
+    )
+    expect(validRed(classified, 'helper.test.ts', names)).toBe(false)
+    expect(validRed(classified, 'helper.test.ts', names, true)).toBe(true)
   })
 
   test('a pytest collection hook that renames another test to the added one, from a conftest or a sibling folder, leaves the red to the key line', () => {
@@ -3941,7 +4094,7 @@ test('saves', () => { expect(1).toBe(1) })`
       const classified = reported(
         fixture(`${name}.txt`),
         'tests/test_a.py',
-        PYTEST_JUNIT,
+        PYTEST_REPORT,
         { kind: 'read', text: fixture(`${name}.junit.xml`) },
         code,
       )
@@ -3952,66 +4105,208 @@ test('saves', () => { expect(1).toBe(1) })`
   test('a report that lacks a test the source declares, or a test file the report does not hold, leaves the red to the key line', () => {
     const missing = `${VITEST_SOURCE}\ntest('later', () => {})`
     const classified = reported(
-      fixture('vitest-report.txt'),
+      fixture('vitest-verbose.txt'),
       'export.test.ts',
-      VITEST_JUNIT,
-      { kind: 'read', text: fixture('vitest-report.junit.xml') },
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-verbose.json') },
       missing,
     )
     expect(validRed(classified, 'export.test.ts', addedAt(missing, 4, 6))).toBe(false)
     const elsewhere = reported(
-      fixture('vitest-report.txt'),
+      fixture('vitest-verbose.txt'),
       'import.test.ts',
-      VITEST_JUNIT,
-      { kind: 'read', text: fixture('vitest-report.junit.xml') },
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-verbose.json') },
       VITEST_SOURCE,
     )
     expect(validRed(elsewhere, 'import.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(false)
   })
 
-  test('a report the console contradicts (the added test printed as passed) leaves the red to the key line', () => {
-    const output = `${fixture('vitest-report.txt')}\n ✓ export.test.ts > export > saves 1ms`
-    const classified = reported(
-      output,
-      'export.test.ts',
-      VITEST_JUNIT,
-      { kind: 'read', text: fixture('vitest-report.junit.xml') },
-      VITEST_SOURCE,
+  test('a report holds only the tests of its own file: another file, of the same name elsewhere or of the same module name, is not read as it', () => {
+    const json = JSON.parse(fixture('vitest-verbose.json'))
+    const ours = json.testResults[0]
+    json.testResults = [
+      { ...ours, name: '/work/acme/api/other/export.test.ts' },
+      { ...ours, name: '/work/acme/api/import.test.ts' },
+    ]
+    expect(reportedTests(VITEST_REPORT, JSON.stringify(json), 'tests/export.test.ts')).toEqual([])
+    json.testResults = [ours, { ...ours, name: '/work/acme/api/import.test.ts' }]
+    expect(reportedTests(VITEST_REPORT, JSON.stringify(json), 'export.test.ts')?.length).toBe(3)
+    const xml = fixture('pytest-ra.junit.xml').replaceAll(
+      'classname="tests.test_export',
+      'classname="tests.test_import',
     )
-    expect(validRed(classified, 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(false)
-    const pytest = `${fixture('pytest-report.txt')}\ntests/test_export.py::TestExport::test_saves PASSED`
-    const python = reported(
-      pytest,
-      'tests/test_export.py',
-      PYTEST_JUNIT,
-      { kind: 'read', text: fixture('pytest-report.junit.xml') },
-      PYTEST_SOURCE,
-    )
-    expect(validRed(python, 'tests/test_export.py', addedAt(PYTEST_SOURCE, 2, 3))).toBe(false)
+    expect(reportedTests(PYTEST_REPORT, xml, 'tests/test_export.py')).toEqual([])
   })
 
   test('a report that is missing, truncated, does not parse, is too large or older than the run leaves the red to the key line', () => {
-    const xml = fixture('vitest-report.junit.xml')
+    const json = fixture('vitest-verbose.json')
     const names = addedAt(VITEST_SOURCE, 4, 6)
     for (const found of [
       { kind: 'unreadable', reason: 'missing' },
       { kind: 'unreadable', reason: 'older than the run' },
       { kind: 'unreadable', reason: 'over its size cap' },
-      { kind: 'read', text: xml.slice(0, xml.indexOf('</testsuite>')) },
-      { kind: 'read', text: xml.replace('</testsuites>', '') },
+      { kind: 'read', text: json.slice(0, json.length / 2) },
       { kind: 'read', text: '{ "testResults": [' },
       { kind: 'read', text: '' },
     ] as const) {
       const classified = reported(
-        fixture('vitest-report.txt'),
+        fixture('vitest-verbose.txt'),
         'export.test.ts',
-        VITEST_JUNIT,
+        VITEST_REPORT,
         found,
         VITEST_SOURCE,
       )
       expect([found, validRed(classified, 'export.test.ts', names)]).toEqual([found, false])
       expect([found, validRed(classified, 'export.test.ts', names, true)]).toEqual([found, true])
     }
+  })
+
+  test('a JUnit report cut short, or holding CDATA, a doctype or a comment never closed, is not read', () => {
+    const xml = fixture('pytest-ra.junit.xml')
+    const at = addedAt(PYTEST_SOURCE, 2, 3)
+    for (const text of [
+      xml.slice(0, xml.indexOf('</testsuite>')),
+      xml.replace('</testsuites>', ''),
+      xml.replace('<testsuites', '<!DOCTYPE testsuites><testsuites'),
+      xml.replace('assert 1 == 2', '<![CDATA[assert 1 == 2]]>'),
+      `${xml}\n<!-- never closed`,
+    ]) {
+      expect([
+        text.slice(-40),
+        validRed(pytestRun(undefined, text), 'tests/test_export.py', at),
+      ]).toEqual([text.slice(-40), false])
+    }
+  })
+
+  test('a JUnit report nested deeper than 64 suites is not read, in bounded memory', () => {
+    const depth = 16_000
+    const text = `<testsuites>${'<testsuite name="s">'.repeat(depth)}${'<testcase name="t" classname="test" file="/work/acme/api/tests/export.test.mjs"/>'.repeat(depth)}${'</testsuite>'.repeat(depth)}</testsuites>`
+    const before = process.memoryUsage().heapUsed
+    expect(reportedTests(NODE_REPORT, text, 'tests/export.test.mjs')).toBeNull()
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(256 * 1024 * 1024)
+    const shallow = `<testsuites>${'<testsuite name="s">'.repeat(64)}<testcase name="t" classname="test" file="/work/acme/api/tests/export.test.mjs"/>${'</testsuite>'.repeat(64)}</testsuites>`
+    expect(reportedTests(NODE_REPORT, shallow, 'tests/export.test.mjs')?.length).toBe(1)
+  })
+
+  test('the report reader names each test of the file by its path, with how it ended', () => {
+    expect(
+      reportedTests(NODE_REPORT, fixture('node-spec.junit.xml'), 'tests/export.test.mjs'),
+    ).toEqual([
+      { key: 'export > saves', verdict: 'assertion' },
+      { key: 'export > keeps', verdict: 'passed' },
+      // Its TypeError's message prints a cause line of an assertion: one cause that is not makes it an error.
+      { key: 'export > throws', verdict: 'error' },
+      { key: 'the scenario holds', verdict: 'assertion' },
+    ])
+    expect(
+      reportedTests(PYTEST_REPORT, fixture('pytest-ra.junit.xml'), 'tests/test_export.py'),
+    ).toEqual([
+      { key: 'TestExport::test_saves', verdict: 'assertion' },
+      { key: 'TestExport::test_keeps', verdict: 'passed' },
+      // An AttributeError is an error, whatever its name ends with.
+      { key: 'TestExport::test_throws', verdict: 'error' },
+      { key: 'test_alone', verdict: 'assertion' },
+    ])
+    expect(reportedTests(VITEST_REPORT, fixture('vitest-verbose.json'), 'export.test.ts')).toEqual([
+      { key: 'export > saves', verdict: 'assertion' },
+      { key: 'export > keeps', verdict: 'passed' },
+      { key: 'export > throws', verdict: 'error' },
+    ])
+  })
+
+  test('a JUnit name written with an entity is read as the title it stands for', () => {
+    const text =
+      '<testsuites><testsuite name="export"><testcase name="saves &amp; loads &quot;csv&quot;" classname="test" file="/work/acme/api/tests/a.test.mjs"/></testsuite></testsuites>'
+    expect(reportedTests(NODE_REPORT, text, 'tests/a.test.mjs')).toEqual([
+      { key: 'export > saves & loads "csv"', verdict: 'passed' },
+    ])
+  })
+
+  test('a JUnit report with a comment never closed before its tests is not read', () => {
+    const xml = fixture('pytest-ra.junit.xml')
+    const open = xml.replace('<testcase ', '<!-- <testcase ')
+    expect(open).not.toBe(xml)
+    const at = addedAt(PYTEST_SOURCE, 2, 3)
+    expect(validRed(pytestRun(undefined, xml), 'tests/test_export.py', at)).toBe(true)
+    expect(validRed(pytestRun(undefined, open), 'tests/test_export.py', at)).toBe(false)
+  })
+
+  test('a file as it ran that the reader is not certain of is never named by the report, even when the proof’s code is read for certain', () => {
+    const uncertain = `${VITEST_SOURCE}
+const rows = [1, 2)`
+    const classified = reported(
+      fixture('vitest-verbose.txt'),
+      'export.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-verbose.json') },
+      uncertain,
+    )
+    expect(validRed(classified, 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(false)
+    const certain = reported(
+      fixture('vitest-verbose.txt'),
+      'export.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-verbose.json') },
+      VITEST_SOURCE,
+    )
+    expect(validRed(certain, 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(true)
+  })
+
+  test('an added path the file declares twice is never named, even when the listing shows both failing and the report names one an assertion', () => {
+    const twice = VITEST_SOURCE.replace(
+      "  test('keeps', () => {",
+      "  test('saves', () => {\n    expect(1).toBe(2)\n  })\n  test('keeps', () => {",
+    )
+    const report = JSON.parse(fixture('vitest-verbose.json'))
+    const results = report.testResults[0].assertionResults
+    results.push({ ...results[0], failureMessages: ['TypeError: rows.map is not a function'] })
+    const output = `${fixture('vitest-verbose.txt')}\n × export.test.ts > export > saves 1ms`
+    const classified = reported(
+      output,
+      'export.test.ts',
+      VITEST_REPORT,
+      { kind: 'read', text: JSON.stringify(report) },
+      twice,
+    )
+    expect(validRed(classified, 'export.test.ts', addedAt(twice, 4, 6))).toBe(false)
+  })
+
+  test('a test’s output glued before the runner’s own line, however long, never hides it', () => {
+    const code =
+      "import { expect, test } from 'vite-plus/test'\n\ntest('saves', () => {\n  expect(1).toBe(1)\n})\n"
+    for (const glued of ['junk ✓ x × saves.test.ts > saves ', `${'x'.repeat(5_000)}`]) {
+      const output = fixture('vitest-swap.txt')
+        .replace(' ✓ saves.test.ts > saves', `${glued} ✓ saves.test.ts > saves`)
+        .concat('\n × saves.test.ts > saves 1ms\n')
+      const classified = reported(
+        output,
+        'saves.test.ts',
+        VITEST_REPORT,
+        { kind: 'read', text: fixture('vitest-swap.json') },
+        code,
+      )
+      expect([glued.length, validRed(classified, 'saves.test.ts', addedAt(code, 3, 5))]).toEqual([
+        glued.length,
+        false,
+      ])
+    }
+  })
+
+  test('a test of the same path in another file the run lists does not count against the test file’s', () => {
+    const output = `${fixture('vitest-verbose.txt')}\n ✓ import.test.ts > export > saves 1ms`
+    expect(validRed(vitestRun(output), 'export.test.ts', addedAt(VITEST_SOURCE, 4, 6))).toBe(true)
+  })
+
+  test('a pytest test the summary lists as an ERROR agrees with a report that says it failed', () => {
+    const output = fixture('pytest-ra.txt').replace(
+      'FAILED tests/test_export.py::TestExport::test_throws',
+      'ERROR tests/test_export.py::TestExport::test_throws',
+    )
+    expect(output).not.toBe(fixture('pytest-ra.txt'))
+    expect(validRed(pytestRun(output), 'tests/test_export.py', addedAt(PYTEST_SOURCE, 2, 3))).toBe(
+      true,
+    )
   })
 
   test('a report too large or older than the run is refused before it is read', () => {
@@ -4037,19 +4332,19 @@ test('saves', () => { expect(1).toBe(1) })`
   })
 
   test('a report in a format its runner is not read in, or an added test the source does not read whole, leaves the red to the key line', () => {
-    const text = fixture('vitest-report.junit.xml')
     const names = addedAt(VITEST_SOURCE, 4, 6)
     for (const reporting of [
-      { runner: 'jest', report: { format: 'junit', path: 'report.xml' } },
-      { runner: 'node', report: { format: 'junit', path: 'report.xml' } },
+      { runner: 'vitest', report: { format: 'junit', path: 'report.xml' } },
+      { runner: 'jest', report: { format: 'json', path: 'report.json' } },
+      { runner: 'node', report: { format: 'json', path: 'report.json' } },
       { runner: 'pytest', report: { format: 'json', path: 'report.json' } },
       { runner: 'vitest' },
     ] as const) {
       const classified = reported(
-        fixture('vitest-report.txt'),
+        fixture('vitest-verbose.txt'),
         'export.test.ts',
         reporting,
-        { kind: 'read', text },
+        { kind: 'read', text: fixture('vitest-verbose.json') },
         VITEST_SOURCE,
       )
       expect([reporting, validRed(classified, 'export.test.ts', names)]).toEqual([reporting, false])
@@ -4059,57 +4354,18 @@ test('saves', () => { expect(1).toBe(1) })`
       "test.each([1])('saves %s', () => {",
     )
     const classified = reported(
-      fixture('vitest-report.txt'),
+      fixture('vitest-verbose.txt'),
       'export.test.ts',
-      VITEST_JUNIT,
-      { kind: 'read', text },
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-verbose.json') },
       each,
     )
     expect(validRed(classified, 'export.test.ts', addedAt(each, 4, 6))).toBe(false)
   })
 
-  test('a jest JSON report names the added test by its describes and title', () => {
-    const report = JSON.stringify({
-      testResults: [
-        {
-          name: '/work/acme/api/tests/export.test.js',
-          assertionResults: [
-            {
-              ancestorTitles: ['export'],
-              title: 'saves',
-              status: 'failed',
-              failureMessages: [
-                'Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 2\nReceived: 1\n    at Object.toBe (/work/acme/api/tests/export.test.js:3:15)',
-              ],
-            },
-            {
-              ancestorTitles: ['export'],
-              title: 'keeps',
-              status: 'failed',
-              failureMessages: [
-                'TypeError: rows.map is not a function\n    at Object.<anonymous> (/work/acme/api/tests/export.test.js:6:10)',
-              ],
-            },
-          ],
-        },
-      ],
-    })
-    const code =
-      "describe('export', () => {\n  test('saves', () => {\n    expect(1).toBe(2)\n  })\n  test('keeps', () => { rows.map(String) })\n})"
-    const classified = reported(
-      'FAIL tests/export.test.js',
-      'tests/export.test.js',
-      { runner: 'jest', report: { format: 'json', path: 'report.json' } },
-      { kind: 'read', text: report },
-      code,
-    )
-    expect(validRed(classified, 'tests/export.test.js', addedAt(code, 2, 4))).toBe(true)
-    expect(validRed(classified, 'tests/export.test.js', addedAt(code, 5, 5), true)).toBe(false)
-  })
-
   test('without a report, a JavaScript or Python test named failing on an assertion by the console is left to the key line', () => {
     const plain = classifyProofRun({
-      output: fixture('vitest-report.txt'),
+      output: fixture('vitest-verbose.txt'),
       exitCode: 1,
       testPath: 'export.test.ts',
     })
@@ -4144,43 +4400,55 @@ test('saves', () => { expect(1).toBe(1) })`
     }
   })
 
-  test('a report is read in linear time, its tests compared with the file’s once', () => {
-    const make = (size: number) => {
-      const cases = Array.from(
-        { length: size },
-        (_, at) =>
-          `<testcase classname="export.test.ts" name="export &gt; t${String(at)}"><failure type="AssertionError">e</failure></testcase>`,
-      )
-      return `<testsuites><testsuite name="export.test.ts">${cases.join('')}</testsuite></testsuites>`
-    }
-    const source = (size: number) =>
-      `describe('export', () => {\n${Array.from({ length: size }, (_, at) => `test('t${String(at)}', () => {})`).join('\n')}\n})`
-    const sources = new Map<string, string>()
+  test('a report is read in linear time, its tests compared with the file’s and the listing’s once', () => {
+    const titles = (size: number) => Array.from({ length: size }, (_, at) => `t${String(at)}`)
+    const make = (size: number) =>
+      JSON.stringify({
+        testResults: [
+          {
+            name: '/work/acme/api/export.test.ts',
+            assertionResults: titles(size).map((title) => ({
+              ancestorTitles: ['export'],
+              title,
+              status: 'failed',
+              failureMessages: ['AssertionError: e'],
+            })),
+          },
+        ],
+      })
+    const sources = new Map<string, readonly [string, string]>()
     const read = (text: string) => {
-      const size = String((text.match(/<testcase /g) ?? []).length)
-      const code = sources.get(size) ?? ''
-      reported('', 'export.test.ts', VITEST_JUNIT, { kind: 'read', text }, code)
+      const [code, output] = sources.get(String(text.length)) ?? ['', '']
+      reported(output, 'export.test.ts', VITEST_REPORT, { kind: 'read', text }, code)
     }
     const built = (size: number) => {
-      sources.set(String(size), source(size))
-      return make(size)
+      const text = make(size)
+      sources.set(String(text.length), [
+        `describe('export', () => {\n${titles(size)
+          .map((title) => `test('${title}', () => {})`)
+          .join('\n')}\n})`,
+        titles(size)
+          .map((title) => ` × export.test.ts > export > ${title} 1ms`)
+          .join('\n'),
+      ])
+      return text
     }
     expect(growth(built, 400, read)).toBeLessThan(24)
   })
 
-  test('a report’s long attribute names, a pytest failure’s long last line and the passed lines of an output are read in linear time', () => {
+  test('a report’s long attribute names, a pytest failure’s long last line and the listing’s lines are read in linear time', () => {
     const inputs: ReadonlyArray<readonly [string, (size: number) => string, TestReporting]> = [
       [
         'an attribute name never given a value',
         (size) =>
-          `<testsuites><testsuite><testcase classname="export.test.ts" ${'a'.repeat(size * 40)}></testcase></testsuite></testsuites>`,
-        VITEST_JUNIT,
+          `<testsuites><testsuite><testcase classname="test" ${'a'.repeat(size * 40)}></testcase></testsuite></testsuites>`,
+        NODE_REPORT,
       ],
       [
         'a last traceback line of many locations',
         (size) =>
           `<testsuites><testsuite><testcase classname="tests.test_export" name="test_saves"><failure message="m">x:1: ${'a:1: '.repeat(size * 8)}!</failure></testcase></testsuite></testsuites>`,
-        PYTEST_JUNIT,
+        PYTEST_REPORT,
       ],
     ]
     for (const [label, make, reporting] of inputs) {
@@ -4189,15 +4457,37 @@ test('saves', () => { expect(1).toBe(1) })`
       }
       expect([label, growth(make, 400, read) < 24]).toEqual([label, true])
     }
-    const passed = (output: string) => {
-      classifyProofRun({ output, exitCode: 1, testPath: 'export.test.ts' })
-    }
     // Each line's length grows, up to the cap a line is cut to.
-    for (const [label, make] of [
-      ['spaces in a ✓ line', (size: number) => ` ✓ a${' '.repeat(size)}b\n`.repeat(20)],
-      ['ids in a PASSED line', (size: number) => `${'a::'.repeat(size / 4)}b x\n`.repeat(20)],
+    for (const [label, make, reporting, path] of [
+      [
+        'spaces in a ✓ line',
+        (size: number) => ` ✓ a${' '.repeat(size)}b\n`.repeat(20),
+        VITEST_REPORT,
+        'export.test.ts',
+      ],
+      [
+        'ids in a PASSED line',
+        (size: number) => `PASSED ${'a::'.repeat(size / 4)}b x\n`.repeat(20),
+        PYTEST_REPORT,
+        'tests/test_export.py',
+      ],
+      [
+        'spaces and brackets in a ✔ line',
+        (size: number) => ` ✔ a${' ('.repeat(size / 2)}b\n`.repeat(20),
+        NODE_REPORT,
+        'tests/export.test.mjs',
+      ],
     ] as const) {
-      expect([label, growth(make, 400, passed) < 24]).toEqual([label, true])
+      const listed = (output: string) => {
+        reported(
+          output,
+          path,
+          reporting,
+          { kind: 'read', text: fixture('vitest-verbose.json') },
+          VITEST_SOURCE,
+        )
+      }
+      expect([label, growth(make, 400, listed) < 24]).toEqual([label, true])
     }
   })
 
@@ -4232,142 +4522,81 @@ test('saves', () => { expect(1).toBe(1) })`
   })
 })
 
-describe('The runner and its report, guessed from the proof’s command and the repository (#342, round 8)', () => {
-  const guess = (command: string, files: Record<string, string> = {}) =>
-    guessReporting({ command, read: (path) => files[path] ?? null })
+describe('The reporting Hemera adds to a proof’s command (#342, round 9)', () => {
+  const PATH = '/tmp/hemera-report/report.json'
+  const XML = '/tmp/hemera-report/report.xml'
 
-  test('vitest’s reporter flags name a JUnit or JSON report', () => {
-    expect(guess('vitest run --reporter=junit --outputFile=out/report.xml')).toEqual({
-      runner: 'vitest',
-      report: { format: 'junit', path: 'out/report.xml' },
-    })
-    expect(guess('npx vitest run --reporter json --outputFile.json=report.json')).toEqual({
-      runner: 'vitest',
-      report: { format: 'json', path: 'report.json' },
-    })
-    expect(
-      guess('vp test run --reporter=default --reporter=junit --outputFile.junit=report.xml'),
-    ).toEqual({
-      runner: 'vitest',
-      report: { format: 'junit', path: 'report.xml' },
-    })
-    expect(guess('vitest run tests/export.test.ts')).toEqual({ runner: 'vitest' })
-  })
-
-  test('jest’s --json with --outputFile names a JSON report', () => {
-    expect(guess('jest --json --outputFile=report.json tests/export.test.js')).toEqual({
-      runner: 'jest',
-      report: { format: 'json', path: 'report.json' },
-    })
-    expect(guess('npx jest tests/export.test.js')).toEqual({ runner: 'jest' })
-  })
-
-  test('pytest’s --junitxml names a JUnit report, from the command or from its configuration’s addopts', () => {
-    expect(guess('python -m pytest --junitxml=report.xml tests/test_export.py')).toEqual({
-      runner: 'pytest',
-      report: { format: 'junit', path: 'report.xml' },
-    })
-    expect(
-      guess('pytest tests/test_export.py', {
-        'pytest.ini': '[pytest]\naddopts = -q --junitxml=out/junit.xml\n',
-      }),
-    ).toEqual({
-      runner: 'pytest',
-      report: { format: 'junit', path: 'out/junit.xml' },
-    })
-    expect(
-      guess('uv run pytest', {
-        'pyproject.toml': '[tool.pytest.ini_options]\naddopts = "--junit-xml=junit.xml"\n',
-      }),
-    ).toEqual({
-      runner: 'pytest',
-      report: { format: 'junit', path: 'junit.xml' },
-    })
-  })
-
-  test('node --test’s junit reporter names its report by the destination given in its place', () => {
-    expect(
-      guess(
-        'node --test --test-reporter=tap --test-reporter-destination=stdout --test-reporter junit --test-reporter-destination report.xml tests/',
-      ),
-    ).toEqual({ runner: 'node', report: { format: 'junit', path: 'report.xml' } })
-    expect(guess('node --test --test-reporter=junit tests/')).toEqual({ runner: 'node' })
-    expect(
-      guess(
-        '"C:\\Program Files\\nodejs\\node.exe" --test --test-reporter=junit --test-reporter-destination=out\\report.xml',
-      ),
-    ).toEqual({ runner: 'node', report: { format: 'junit', path: 'out\\report.xml' } })
-  })
-
-  test('a package script is read for the command it runs', () => {
-    const files = {
-      'package.json':
-        '{ "scripts": { "test": "vitest run --reporter=junit --outputFile=report.xml" } }',
-    }
-    for (const command of ['npm test', 'pnpm test', 'pnpm run test', 'yarn test']) {
-      expect([command, guess(command, files)]).toEqual([
-        command,
-        { runner: 'vitest', report: { format: 'junit', path: 'report.xml' } },
-      ])
+  test('a vitest run, however it is launched, gets its verbose listing and a JSON report at Hemera’s path', () => {
+    for (const command of [
+      'vp test run export.test.ts',
+      'vitest run export.test.ts',
+      'npx vitest run export.test.ts',
+      'pnpm exec vitest run export.test.ts',
+    ]) {
+      expect(withReporting(command, PATH)).toEqual({
+        line: `${command} --reporter=verbose --reporter=json --outputFile.json='${PATH}'`,
+        added: `--reporter=verbose --reporter=json --outputFile.json='${PATH}'`,
+        reporting: { runner: 'vitest', report: { format: 'json', path: PATH } },
+      })
     }
   })
 
-  test('a vitest configuration that writes a report with literal values names it', () => {
-    const config =
-      "export default { test: { reporters: ['default', 'junit'], outputFile: { junit: './out/report.xml' } } }"
-    expect(guess('vitest run', { 'vitest.config.ts': config })).toEqual({
-      runner: 'vitest',
-      report: { format: 'junit', path: './out/report.xml' },
-    })
-  })
-
-  test('a vitest configuration with one output file for every reporter names it', () => {
-    const config = "export default { test: { reporters: ['json'], outputFile: './report.json' } }"
-    expect(guess('vitest run', { 'vitest.config.ts': config })).toEqual({
-      runner: 'vitest',
-      report: { format: 'json', path: './report.json' },
-    })
-  })
-
-  test('a configuration read to guess the report is read in linear time', () => {
-    for (const [label, make, command, name] of [
-      [
-        'reporters never closed',
-        (size: number) => 'reporters: ['.repeat(size),
-        'vitest run',
-        'vitest.config.ts',
-      ],
-      [
-        'output files never closed',
-        (size: number) => "reporters: ['json'] outputFile: { ".repeat(size),
-        'vitest run',
-        'vitest.config.ts',
-      ],
-      [
-        'blank lines and no addopts',
-        (size: number) => `${'\n'.repeat(size * 20)}x`,
-        'pytest',
-        'pytest.ini',
-      ],
-    ] as const) {
-      const read = (config: string) => {
-        guess(command, { [name]: config })
-      }
-      expect([label, growth(make, 400, read) < 24]).toEqual([label, true])
+  test('a pytest run gets its -rA summary and a JUnit report at Hemera’s path', () => {
+    for (const command of ['pytest tests/test_export.py', 'python -m pytest -q', 'uv run pytest']) {
+      expect(withReporting(command, XML)).toEqual({
+        line: `${command} -rA --junitxml='${XML}'`,
+        added: `-rA --junitxml='${XML}'`,
+        reporting: { runner: 'pytest', report: { format: 'junit', path: XML } },
+      })
     }
   })
 
-  test('the other runners are named, with no report, and an unknown command is unknown', () => {
-    for (const [command, runner] of [
-      ['go test ./...', 'go'],
-      ['cargo test', 'cargo'],
-      ['cargo nextest run', 'nextest'],
-      ['node --test tests/', 'node'],
-      ['npx mocha', 'mocha'],
-      ['python -m unittest tests.test_export', 'unittest'],
-      ['make check', 'unknown'],
-    ] as const) {
-      expect([command, guess(command)]).toEqual([command, { runner }])
+  test('a node --test run gets its spec listing and a JUnit report, each reporter of its own given its destination', () => {
+    const added = `--test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination='${XML}'`
+    expect(withReporting('node --test tests/', XML)).toEqual({
+      line: `node --test ${added} tests/`,
+      added,
+      reporting: { runner: 'node', report: { format: 'junit', path: XML } },
+    })
+    const windows =
+      '"C:\\Program Files\\nodejs\\node.exe" --test --test-reporter=tap tests/export.test.mjs'
+    expect(withReporting(windows, XML)?.line).toBe(
+      `"C:\\Program Files\\nodejs\\node.exe" --test ${added} --test-reporter-destination=stdout --test-reporter=tap tests/export.test.mjs`,
+    )
+    const paired = 'node --test --test-reporter tap --test-reporter-destination stdout tests/'
+    expect(withReporting(paired, XML)?.line).toBe(
+      `node --test ${added} --test-reporter tap --test-reporter-destination stdout tests/`,
+    )
+  })
+
+  test('a command Hemera cannot add its reporting to keeps its line, with no report: the key line decides', () => {
+    for (const command of [
+      'npm test',
+      'pnpm test',
+      'npx jest',
+      'go test ./...',
+      'cargo test',
+      'make check',
+      'npx mocha',
+      'python -m unittest tests.test_export',
+      'vitest run --outputFile=out.json',
+      'vp test run --outputFile.json out.json',
+      'pytest --junitxml=out.xml',
+      'node --test --test-reporter=tap --test-reporter=dot --test-reporter-destination=stdout tests/',
+      'node tests/export.test.mjs',
+      'echo vitest',
+    ]) {
+      expect([command, withReporting(command, PATH)]).toEqual([command, null])
     }
+    expect(withReporting('vitest run', "/tmp/it's/report.json")).toBeNull()
+  })
+
+  test('the line Hemera runs is free of shell syntax and keeps its report path whole, spaces and all', () => {
+    const path = 'C:\\Users\\Ada Lovelace\\AppData\\Local\\Temp\\hemera-report-1\\report.json'
+    const line = withReporting('vp test run', path)?.line ?? ''
+    expect(shellSyntaxIn(line)).toBeNull()
+    expect(wordsOf(line)).toContain(`--outputFile.json=${path}`)
+    const node = withReporting('node --test tests/', path)?.line ?? ''
+    expect(wordsOf(node)).toContain(`--test-reporter-destination=${path}`)
   })
 })

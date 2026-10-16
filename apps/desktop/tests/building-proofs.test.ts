@@ -10,16 +10,7 @@
  * Workspace, and real `node --test` files as the proofs.
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
@@ -154,21 +145,8 @@ const launchedWith = (
   plan: ReadonlyArray<(typeof PLAN)[number]> = PLAN,
 ) => launched(work, undefined, undefined, plan, undefined, undefined, proofs)
 
-/** A folder outside every repository for the runners' reports: a report written in one is a change. */
-const REPORTS = mkdtempSync(join(tmpdir(), 'hemera-reports-'))
-let reports = 0
-/** A report file of its own for each proof command. */
-const reportPath = () => {
-  reports += 1
-  return join(REPORTS, `report-${String(reports)}.xml`)
-}
-
-/**
- * What runs a test file of `api`, its output in TAP whatever the terminal, and its JUnit report
- * written outside the repository: the report is what names the test a proof adds (#342).
- */
-const testLine = (path: string) =>
-  `"${process.execPath}" --test --test-reporter=tap --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination "${reportPath()}" ${path}`
+/** What runs a test file of `api`, its report in TAP whatever the terminal. */
+const testLine = (path: string) => `"${process.execPath}" --test --test-reporter=tap ${path}`
 
 /** An automated proof whose test is a new file of `api`. */
 const automated = (
@@ -492,6 +470,29 @@ describe('The red phase (CT-35)', () => {
     expect(seen.proof.red?.evidenceId).not.toBeNull()
     expect(seen.proof.red?.testEvidenceId).not.toBeNull()
     expect(seen.events).toEqual([{ scenario: 'R1.S2' }])
+  })
+
+  test('a proof runs its command with the reporting Hemera adds, and its evidence shows the line run and what was added (#342)', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(exportProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const proof = yield* proofOf(mission.id, 'R1.S2')
+          const evidence = yield* readEvidence(mission.id, proof.red?.evidenceId ?? '')
+          return { proof, evidence: new TextDecoder().decode(evidence.bytes) }
+        }),
+      ),
+    )
+    const added = /--test-reporter=spec .*--test-reporter-destination=('[^']*')/.exec(
+      seen.proof.red?.line ?? '',
+    )
+    expect(seen.proof.red?.line.startsWith(`"${process.execPath}" --test `)).toBe(true)
+    expect(added).not.toBeNull()
+    expect(
+      seen.evidence.startsWith(`$ ${seen.proof.red?.line}\nHemera added: --test-reporter=spec`),
+    ).toBe(true)
   })
 
   test('a compilation error is error_before_test and comes back as an attempt', async () => {

@@ -1,0 +1,35 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ✓ saves.test.ts > saves 1ms
+ × other.test.ts > loads 7ms
+   → expected 1 to be 2 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  other.test.ts > loads
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ other.test.ts:6:13
+      4| test('loads', () => {
+      5|   spawn(process.execPath, ['../swap.mjs', '--outputFile.json', 'forged…
+      6|   expect(1).toBe(2)
+       |             ^
+      7| })
+      8|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 1 passed (2)
+   Start at  12:10:31
+   Duration  110ms (transform 48%, import 26%, tests 17%, worker 9%)
+
+JSON report written to /tmp/hemera-report/report.json

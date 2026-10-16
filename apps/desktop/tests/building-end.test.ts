@@ -17,7 +17,6 @@ import {
   fstatSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readFileSync,
   realpathSync,
@@ -25,7 +24,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
 
 import {
@@ -132,22 +130,6 @@ beforeEach(() => {
   work = realpathSync.native(temporaryFolder('building-end-work'))
 })
 afterEach(removeFolders)
-
-/** A folder outside every repository for the runners' reports: a report written in one is a change. */
-const REPORTS = mkdtempSync(join(tmpdir(), 'hemera-reports-'))
-let reports = 0
-/** A report file of its own for each proof command. */
-const reportPath = () => {
-  reports += 1
-  return join(REPORTS, `report-${String(reports)}.xml`)
-}
-
-/**
- * What runs a test file under `node --test`: TAP on its output whatever the terminal, and its JUnit
- * report written outside the repository, which is what names the test a proof adds (#342).
- */
-const nodeTest = (path: string) =>
-  `"${process.execPath}" --test --test-reporter=tap --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination "${reportPath()}" ${path}`
 
 /** How long a step of the end may take on a slow runner: never a measure of speed. */
 const LONG = 30_000
@@ -669,7 +651,7 @@ describe('The end sequence', () => {
             path: 'tests/export.test.mjs',
             code: markdown,
             insertion: 'new_file',
-            command: nodeTest('tests/export.test.mjs'),
+            command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
           },
           seen_today: false,
         },
@@ -1624,7 +1606,7 @@ const exportProof = () => ({
       path: 'tests/export.test.mjs',
       code: exported,
       insertion: 'new_file',
-      command: nodeTest('tests/export.test.mjs'),
+      command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
     },
     seen_today: false,
   },
@@ -2720,7 +2702,7 @@ const markdownProof = () => ({
       path: 'tests/export.test.mjs',
       code: markdownTest,
       insertion: 'new_file',
-      command: nodeTest('tests/export.test.mjs'),
+      command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
     },
     seen_today: false,
   },
@@ -3065,7 +3047,7 @@ describe('The refresh', () => {
             path: 'tests/export.test.mjs',
             code: markdown,
             insertion: 'new_file',
-            command: nodeTest('tests/export.test.mjs'),
+            command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
           },
           seen_today: false,
         },
@@ -3577,7 +3559,7 @@ describe('The refresh and an environment need', () => {
                     command: {
                       name: 'export proof',
                       type: 'script',
-                      line: nodeTest('api/tests/export.test.mjs'),
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
                       lineWindows: null,
                       lineLinux: null,
                       repositoryId: null,
@@ -3765,7 +3747,7 @@ describe('The refresh and an environment need', () => {
                     command: {
                       name: 'export proof',
                       type: 'script',
-                      line: nodeTest('api/tests/export.test.mjs'),
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
                       lineWindows: null,
                       lineLinux: null,
                       repositoryId: null,
@@ -3957,7 +3939,7 @@ describe('The refresh and an environment need', () => {
                     command: {
                       name: 'export proof',
                       type: 'script',
-                      line: nodeTest('api/tests/export.test.mjs'),
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
                       lineWindows: null,
                       lineLinux: null,
                       repositoryId: null,
@@ -4145,7 +4127,7 @@ describe('The refresh and an environment need', () => {
                     command: {
                       name: 'export proof',
                       type: 'script',
-                      line: nodeTest('api/tests/export.test.mjs'),
+                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
                       lineWindows: null,
                       lineLinux: null,
                       repositoryId: null,
