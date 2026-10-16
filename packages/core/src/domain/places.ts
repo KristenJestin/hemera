@@ -46,8 +46,14 @@ export function concernSaid(concern: PlaceConcern, placeName = 'the Workspace'):
 // ---------------------------------------------------------------------------------------------
 // The sensitive places.
 
-/** One segment of a sensitive place: a name, or every name that starts with a prefix. */
-type Segment = { readonly name: string } | { readonly prefix: string }
+/**
+ * One segment of a sensitive place: a name, every name that starts with a prefix (`dotless`: and
+ * holds no dot after it), or every name that ends with a suffix.
+ */
+type Segment =
+  | { readonly name: string }
+  | { readonly prefix: string; readonly dotless?: boolean }
+  | { readonly suffix: string }
 
 interface SensitiveEntry {
   /** As the list says it. */
@@ -57,6 +63,8 @@ interface SensitiveEntry {
   readonly anchored?: boolean
   /** A name of the place a read tool reads freely, though the place is sensitive. */
   readonly readFreely?: (name: string) => boolean
+  /** Matched whatever the case of its names, on every system: `.ENV` is a `.env` too. */
+  readonly anyCase?: boolean
 }
 
 /**
@@ -96,8 +104,13 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
   { listed: '/etc/shadow', segments: named('etc', 'shadow'), anchored: true },
   { listed: '/etc/sudoers', segments: named('etc', 'sudoers'), anchored: true },
   { listed: '/etc/sudoers.d', segments: named('etc', 'sudoers.d'), anchored: true },
-  { listed: '.env', segments: named('.env') },
-  { listed: '.env.*', segments: [{ prefix: '.env.' }], readFreely: envTemplate },
+  { listed: '.env', segments: named('.env'), anyCase: true },
+  { listed: '.env.*', segments: [{ prefix: '.env.' }], readFreely: envTemplate, anyCase: true },
+  { listed: '.envrc', segments: named('.envrc'), anyCase: true },
+  // Private keys wherever they sit; `id_*` without a dot, so `id_ed25519.pub` and `id_utils.ts` are not.
+  { listed: '*.pem', segments: [{ suffix: '.pem' }], anyCase: true },
+  { listed: '*.key', segments: [{ suffix: '.key' }], anyCase: true },
+  { listed: 'id_*', segments: [{ prefix: 'id_', dotless: true }], anyCase: true },
 ]
 
 /** Whether names differ only by case on this system. */
@@ -120,11 +133,18 @@ function globOf(segment: string): RegExp | null {
   }
 }
 
-/** Whether a segment of a path — a name, or a glob that may name it — is this entry's segment. */
-function segmentIs(written: string, segment: Segment, platform: string): boolean {
-  const fold = foldsCase(platform)
+/**
+ * Whether a segment of a path — a name, or a glob that may name it — is this entry's segment. A
+ * glob counts for a suffix or a prefix without a dot only when it writes them (`*.pem`, `id_*`):
+ * `*` alone names every file of a folder, and would make every command that uses one ask.
+ */
+function segmentIs(written: string, segment: Segment, platform: string, anyCase: boolean): boolean {
+  const fold = anyCase || foldsCase(platform)
   const name = fold ? written.toLowerCase() : written
   const glob = globOf(written)
+  if ('suffix' in segment) {
+    return name.endsWith(segment.suffix) && name.length > segment.suffix.length
+  }
   if ('name' in segment) {
     const wanted = fold ? segment.name.toLowerCase() : segment.name
     if (glob === null) return name === wanted
@@ -133,6 +153,9 @@ function segmentIs(written: string, segment: Segment, platform: string): boolean
     return glob.test(wanted)
   }
   const prefix = segment.prefix
+  if (segment.dotless === true) {
+    return name.startsWith(prefix) && name.length > prefix.length && !name.includes('.')
+  }
   if (glob === null) return name.startsWith(prefix) && name.length > prefix.length
   if (platform !== 'win32' && !written.startsWith('.')) return false
   return glob.test(`${prefix}local`)
@@ -160,7 +183,7 @@ export function sensitivePlace(
     for (const start of starts) {
       if (start + length > parts.length) continue
       const matches = entry.segments.every((segment, at) =>
-        segmentIs(parts[start + at] ?? '', segment, context.platform),
+        segmentIs(parts[start + at] ?? '', segment, context.platform, entry.anyCase === true),
       )
       if (!matches) continue
       if (entry.anchored === true && parts[0] !== '') continue
