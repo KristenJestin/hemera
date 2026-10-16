@@ -1,0 +1,67 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ loop.test.ts (5 tests | 3 failed) 7ms
+   × exports csv 5ms
+   × exports md 1ms
+   × saves 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  loop.test.ts > exports csv
+AssertionError: expected 'csv' to be 'txt' // Object.is equality
+
+Expected: "txt"
+Received: "csv"
+
+ ❯ loop.test.ts:3:80
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| for (const kind of ['csv', 'md']) test(`exports ${kind}`, () => { expe…
+       |                                                                                ^
+      4| const name = 'saves'
+      5| test(name, () => { expect(1).toBe(2) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  loop.test.ts > exports md
+AssertionError: expected 'md' to be 'txt' // Object.is equality
+
+Expected: "txt"
+Received: "md"
+
+ ❯ loop.test.ts:3:80
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| for (const kind of ['csv', 'md']) test(`exports ${kind}`, () => { expe…
+       |                                                                                ^
+      4| const name = 'saves'
+      5| test(name, () => { expect(1).toBe(2) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  loop.test.ts > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ loop.test.ts:5:30
+      3| for (const kind of ['csv', 'md']) test(`exports ${kind}`, () => { expe…
+      4| const name = 'saves'
+      5| test(name, () => { expect(1).toBe(2) })
+       |                              ^
+      6| test('exports csv', () => { expect(1).toBe(1) })
+      7| test('saves', () => { expect(1).toBe(1) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 2 passed (5)
+   Start at  14:43:12
+   Duration  110ms (transform 43%, tests 24%, import 22%, worker 11%)
+

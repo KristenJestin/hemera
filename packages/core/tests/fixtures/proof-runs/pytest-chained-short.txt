@@ -1,0 +1,51 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 5 items
+
+tests/test_export.py FFFFF                                               [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+tests/test_export.py:4: in test_one_is_one
+    assert 1 == 2
+E   assert 1 == 2
+_________________________________ test_chained _________________________________
+tests/test_export.py:8: in test_chained
+    assert 1 == 2, "the invoice is not saved"
+E   AssertionError: the invoice is not saved
+E   assert 1 == 2
+
+During handling of the above exception, another exception occurred:
+tests/test_export.py:10: in test_chained
+    raise RuntimeError("cleanup failed")
+E   RuntimeError: cleanup failed
+_____________________________ test_chained_reverse _____________________________
+tests/test_export.py:14: in test_chained_reverse
+    {}["x"]
+E   KeyError: 'x'
+
+During handling of the above exception, another exception occurred:
+tests/test_export.py:16: in test_chained_reverse
+    assert 1 == 2, "after a key error"
+E   AssertionError: after a key error
+E   assert 1 == 2
+_______________________________ test_unsuffixed ________________________________
+tests/test_export.py:23: in test_unsuffixed
+    raise NotFound("toMarkdown")
+E   test_export.NotFound: toMarkdown
+----------------------------- Captured stdout call -----------------------------
+AssertionError: printed by the test
+_______________________________ test_logs_assert _______________________________
+tests/test_export.py:28: in test_logs_assert
+    raise TypeError("x")
+E   TypeError: x
+------------------------------ Captured log call -------------------------------
+ERROR    app:test_export.py:27 E   assert something
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_export.py::test_chained - RuntimeError: cleanup failed
+FAILED tests/test_export.py::test_chained_reverse - AssertionError: after a k...
+FAILED tests/test_export.py::test_unsuffixed - test_export.NotFound: toMarkdown
+FAILED tests/test_export.py::test_logs_assert - TypeError: x
+============================== 5 failed in 0.03s ===============================

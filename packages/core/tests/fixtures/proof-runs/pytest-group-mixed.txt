@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+plugins: timeout-2.4.0
+collected 1 item
+
+tests/test_group_mixed.py F                                              [100%]
+
+=================================== FAILURES ===================================
+__________ test_the_invoices_export_as_markdown_in_a_mixed_task_group __________
+  + Exception Group Traceback (most recent call last):
+  |   File "/work/acme/api/tests/test_group_mixed.py", line 2, in test_the_invoices_export_as_markdown_in_a_mixed_task_group
+  |     raise ExceptionGroup("tasks", [AssertionError("the invoice is not saved"), TypeError("to_markdown is not callable")])
+  | ExceptionGroup: tasks (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | AssertionError: the invoice is not saved
+    +---------------- 2 ----------------
+    | TypeError: to_markdown is not callable
+    +------------------------------------
+=========================== short test summary info ============================
+FAILED tests/test_group_mixed.py::test_the_invoices_export_as_markdown_in_a_mixed_task_group
+============================== 1 failed in 0.04s ===============================

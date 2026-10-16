@@ -1,0 +1,40 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 4 items
+
+tests/test_dup.py FF.F                                                   [100%]
+
+=================================== FAILURES ===================================
+____________________________ TestExport.test_saves _____________________________
+
+self = <test_dup.TestExport object at 0x7f6ab48d5590>
+
+    def test_saves(self):
+>       raise {}["x"] if False else ValueError("not implemented")
+E       ValueError: not implemented
+
+tests/test_dup.py:3: ValueError
+____________________________ TestImport.test_saves _____________________________
+
+self = <test_dup.TestImport object at 0x7f6ab48d5950>
+
+    def test_saves(self):
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_dup.py:7: AssertionError
+____________________________ TestRestore.test_keeps ____________________________
+
+self = <test_dup.TestRestore object at 0x7f6ab48d5810>
+
+    def test_keeps(self):
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_dup.py:15: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_dup.py::TestExport::test_saves - ValueError: not implemented
+FAILED tests/test_dup.py::TestImport::test_saves - assert 1 == 2
+FAILED tests/test_dup.py::TestRestore::test_keeps - assert 1 == 2
+========================= 3 failed, 1 passed in 0.01s ==========================

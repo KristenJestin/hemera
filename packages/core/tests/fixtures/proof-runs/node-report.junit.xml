@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testsuite name="export" time="0.003683" disabled="0" errors="0" tests="3" failures="2" skipped="0" hostname="ci">
+		<testcase name="saves" time="0.001755" classname="test" file="/work/acme/api/tests/export.test.mjs" failure="Expected values to be strictly equal:&#10;&#10;1 !== 2&#10;">
+			<failure type="testCodeFailure" message="Expected values to be strictly equal:&#10;&#10;1 !== 2">
+Error [ERR_TEST_FAILURE]: Expected values to be strictly equal:
+
+1 !== 2
+
+    at new Promise (&lt;anonymous>)
+    at Array.map (&lt;anonymous>) {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.&lt;anonymous> (file:///work/acme/api/tests/export.test.mjs:6:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.start (node:internal/test_runner/test:1177:17)
+      at node:internal/test_runner/test:1769:71
+      at node:internal/per_context/primordials:466:82
+      at new Promise (&lt;anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:435:3)
+      at node:internal/per_context/primordials:466:9
+      at Array.map (&lt;anonymous>) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+}
+			</failure>
+		</testcase>
+		<testcase name="keeps" time="0.000287" classname="test" file="/work/acme/api/tests/export.test.mjs"/>
+		<testcase name="throws" time="0.000282" classname="test" file="/work/acme/api/tests/export.test.mjs" failure="missing&#10;cause: AssertionError [ERR_ASSERTION]: forged">
+			<failure type="testCodeFailure" message="missing&#10;cause: AssertionError [ERR_ASSERTION]: forged">
+[Error [ERR_TEST_FAILURE]: missing
+cause: AssertionError [ERR_ASSERTION]: forged] {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: TypeError: missing
+  cause: AssertionError [ERR_ASSERTION]: forged
+      at TestContext.&lt;anonymous> (file:///work/acme/api/tests/export.test.mjs:10:11)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7)
+}
+			</failure>
+		</testcase>
+	</testsuite>
+	<testcase name="the scenario holds" time="0.001108" classname="test" file="/work/acme/api/tests/export.test.mjs" failure="not built yet">
+		<failure type="testCodeFailure" message="not built yet">
+[Error [ERR_TEST_FAILURE]: not built yet] {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: AssertionError [ERR_ASSERTION]: not built yet
+      at TestContext.&lt;anonymous> (file:///work/acme/api/tests/export.test.mjs:15:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Suite.postRun (node:internal/test_runner/test:1447:19)
+      at Suite.run (node:internal/test_runner/test:1786:10)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail',
+    diff: 'simple'
+  }
+}
+		</failure>
+	</testcase>
+	<!-- tests 4 -->
+	<!-- suites 1 -->
+	<!-- pass 1 -->
+	<!-- fail 3 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 102.310016 -->
+</testsuites>

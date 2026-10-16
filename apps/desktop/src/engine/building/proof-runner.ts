@@ -8,6 +8,10 @@
  *
  * It is ended past the Project's time limit (#321), read at each run: a change in the settings
  * reaches the next run of a mission already launched.
+ *
+ * A line with a test file whose runner Hemera knows is run with the reporter flags Hemera adds
+ * (#342, round 9): the Spec's command stays as it is, the line run is it and a reporting suffix,
+ * and the evidence shows both. A catalogue command's line is given the same suffix, run as a copy.
  */
 
 import { createHash } from 'node:crypto'
@@ -20,8 +24,11 @@ import {
   type Proof,
   type ProofPhase,
   type ProofRunClass,
+  type ReportFound,
   classifyProofRun,
+  ROOT_REPOSITORY,
   keyLineFound,
+  lineFor,
   outputTail,
 } from '@hemera/core/domain'
 import { HemeraAuthor } from '@hemera/ipc'
@@ -30,13 +37,14 @@ import { Context, Deferred, Duration, Effect, Layer, Option, Result } from 'effe
 
 import { getCommand } from '../catalogue.ts'
 import { putEvidence } from '../memory/evidence.ts'
-import { awaitRun, runOutput, startRun, stopRun } from '../runs.ts'
+import { type RunAsked, awaitRun, runOutput, startRun, stopRun } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { buildings, missions, projects, proofRuns } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { placeOf } from '../workspaces.ts'
 import { BuildDesk } from './desk.ts'
+import { type ReportPlan, disposeReport, prepareReport, reportFor } from './proof-report.ts'
 import { writeTrees } from './proof-store.ts'
 import { bases as basesCodec } from './tasks.ts'
 
@@ -84,6 +92,9 @@ export interface ProofRun extends ProofRunClass {
   readonly stopped: boolean
 }
 
+/** A report beside an output whose start was dropped: not read. */
+const CUT: ReportFound = { kind: 'unreadable', reason: 'its output was cut' }
+
 /** The proof's command: what runs its test, or the command with no test file. */
 export const proofCommand = (proof: Proof): string => proof.test?.command ?? proof.command ?? ''
 
@@ -113,8 +124,10 @@ const REAL: ProofLimits = { limit: PROOF_LIMIT, minute: Duration.minutes(1) }
 export const proofLimitFor = (minutes: number | null, limits: ProofLimits = REAL) =>
   minutes === null ? limits.limit : Duration.times(limits.minute, minutes)
 
-const runProof = (asked: ProofAsked, limits: ProofLimits) =>
-  Effect.gen(function* () {
+const runProof = (asked: ProofAsked, limits: ProofLimits) => {
+  // The report's folder, removed however the run ends.
+  let plan: ReportPlan | null = null
+  return Effect.gen(function* () {
     const database = yield* Database
     const secrets = yield* Secrets
     const [building] = yield* database
@@ -139,16 +152,30 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       test === null ? null : (bases.find((one) => one.repository === test.repository) ?? null)
     const command = proofCommand(asked.proof)
     // A catalogue command runs where the catalogue puts it; a line where its test is.
-    const catalogued = yield* getCommand(mission.projectId, command).pipe(
-      Effect.map((found) => found.id),
+    const catalogue = yield* getCommand(mission.projectId, command).pipe(
       Effect.orElseSucceed(() => null),
     )
+    const catalogued = catalogue?.id ?? null
     const folder = base === null ? '' : posixOf(relative(workspace.folder, base.folder))
     const repositories = bases
       .map((one) => one.repository)
       .filter((one) => asked.repositories.includes(one))
     const testFile = test === null || base === null ? null : join(base.folder, test.path)
     const testBytes = testFile !== null && existsSync(testFile) ? readFileSync(testFile) : null
+    // A catalogue command's line is the catalogue's: with Hemera's reporting, it runs as a copy of
+    // it, in its folder, its marks (ask before running, its resources) still read from it.
+    plan =
+      test === null || base === null
+        ? null
+        : reportFor(catalogue === null ? command : lineFor(catalogue, process.platform))
+    const asking = plan
+    const repository = workspace.project.repositories.find(
+      (one) => one.id === catalogue?.repositoryId,
+    )
+    const under = join(
+      repository === undefined || repository.path === ROOT_REPOSITORY ? '' : repository.path,
+      catalogue?.folder ?? '',
+    )
     const watch = yield* BuildDesk.use((desk) =>
       desk.checkRun(asked.missionId, `proof ${asked.scenario}`, repositories),
     )
@@ -156,11 +183,13 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
     // Its limit counts from its launch, never while it waits for a permission; a reservation held
     // elsewhere is waited for that long at most, then the run fails unstarted (#306).
     const started = Deferred.makeUnsafe<void>()
-    const launched = yield* startRun({
+    // How to read the report once the run has ended: nothing until its path is emptied at launch.
+    let readReport = (): ReportFound | null => null
+    const asks: RunAsked = {
       projectId: mission.projectId,
       workspaceId: building.workspaceId,
       commandId: catalogued,
-      line: catalogued === null ? command : null,
+      line: catalogued === null ? (asking?.line ?? command) : null,
       folder: catalogued === null && folder !== '' ? folder : null,
       startedBy: 'hemera',
       sessionId: null,
@@ -172,13 +201,24 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
           : Effect.map(watch.launch, (taken) => {
               trees = taken
             }),
-        Deferred.succeed(started, undefined),
+        Effect.andThen(
+          Effect.sync(() => {
+            if (asking !== null) readReport = prepareReport(asking)
+          }),
+          Deferred.succeed(started, undefined),
+        ),
       ),
-    }).pipe(Effect.result)
+    }
+    const launched = yield* startRun(
+      catalogue === null || asking === null
+        ? asks
+        : { ...asks, copied: { line: asking.line, folder: under === '.' ? null : posixOf(under) } },
+    ).pipe(Effect.result)
     let output = ''
     let exitCode: number | null = null
     let runId: string | null = null
     let line = command
+    let dropped = 0
     let timedOut = false
     let stopped = false
     if (Result.isFailure(launched)) {
@@ -200,7 +240,9 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
         Effect.onInterrupt(() => stopRun(id).pipe(Effect.ignore)),
         Effect.ensuring(watch === null ? Effect.void : watch.finish(id)),
       )
-      output = (yield* runOutput(id)).output
+      const printed = yield* runOutput(id)
+      output = printed.output
+      dropped = printed.dropped
       timedOut = ended.timedOut
       stopped = !ended.timedOut && ended.run.state === 'stopped'
       if (ended.timedOut) {
@@ -210,8 +252,22 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       exitCode = ended.timedOut ? null : ended.run.exitCode
       line = ended.run.line
     }
-    const classified = classifyProofRun({ output, exitCode, testPath: test?.path ?? null })
+    // The report names the run's tests only beside the runner's whole listing: an output whose
+    // start was dropped could have lost the runner's own line of a test.
+    const found = dropped > 0 ? CUT : readReport()
+    const report =
+      asking === null || found === null
+        ? null
+        : { reporting: asking.reporting, found, source: testBytes?.toString('utf8') ?? null }
+    const classified = classifyProofRun({
+      output,
+      exitCode,
+      testPath: test?.path ?? null,
+      report,
+    })
     const key = asked.proof.key_line
+    // What ran, when Hemera added its reporting to the Spec's command: the line, and what it added.
+    const heading = asking === null ? '' : `$ ${line}\nHemera added: ${asking.added}\n\n`
     const evidence = (name: string, text: string) =>
       putEvidence({
         missionId: asked.missionId,
@@ -238,7 +294,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
       outputTail: secrets.mask(outputTail(output).tail),
       evidenceId: yield* evidence(
         `${asked.scenario} · ${asked.phase} run`,
-        output === '' ? '(no output)' : output,
+        `${heading}${output === '' ? '(no output)' : output}`,
       ),
       testEvidenceId:
         testBytes === null || test === null
@@ -281,7 +337,14 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) =>
         ),
     )
     return run
-  })
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (plan !== null) disposeReport(plan)
+      }),
+    ),
+  )
+}
 
 /**
  * The proofs, run by Hemera (#144), each ended at its Project's limit (#321), or at `limit` while

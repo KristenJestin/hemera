@@ -1,0 +1,29 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ other.test.ts (1 test | 1 failed) 73ms
+   × exports csv 62ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  other.test.ts > exports csv
+AssertionError: expected 'a;b' to be 'a,b' // Object.is equality
+
+Expected: "a,b"
+Received: "a;b"
+
+ ❯ other.test.ts:3:43
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| test('exports csv', () => { expect('a;b').toBe('a,b') })
+       |                                           ^
+      4|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 2 passed (3)
+   Start at  13:25:07
+   Duration  1.42s (transform 37%, import 30%, tests 22%, worker 11%)
+

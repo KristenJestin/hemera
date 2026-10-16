@@ -1,0 +1,32 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ dynamic.test.ts (2 tests | 1 failed) 8ms
+   × saves 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  dynamic.test.ts > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ shared.ts:3:33
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| test('saves', () => { expect(1).toBe(2) })
+       |                                 ^
+      4|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  16:28:03
+   Duration  146ms (transform 50%, import 24%, tests 17%, worker 9%)
+
