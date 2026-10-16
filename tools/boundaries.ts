@@ -102,8 +102,9 @@ const JUDGED_OPEN = `${FILE_TOOLS}judged.ts`
 /** The gate, the one place that makes the exception for the file a verdict judged. */
 const GATE = `${FILE_TOOLS}gate.ts`
 
-/** What of `node:fs` opens or reads a file. */
+/** What of `node:fs` opens or reads a file, `promises` holding them all. */
 const READS = new Set([
+  'promises',
   'open',
   'openSync',
   'openAsBlob',
@@ -125,7 +126,7 @@ export const READS_ALLOWED: ReadonlyArray<{ file: string; name: string; why: str
   },
 ]
 
-const FS = String.raw`['"](?:node:)?fs(?:/promises)?['"]`
+const FS = String.raw`[\`'"](?:node:)?fs(?:/promises)?[\`'"]`
 
 /** `{ a, b as c, type D }`'s names as the module has them, its types left out. */
 const namesIn = (list: string, renamed: RegExp): string[] =>
