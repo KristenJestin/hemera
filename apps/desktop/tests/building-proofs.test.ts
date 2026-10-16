@@ -18,6 +18,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -649,6 +650,53 @@ describe('A proof written only where Hemera judged it (#385)', () => {
     // The write Hemera began is recorded as failed, never left for a restart to guess.
     expect(seen.writes.map((one) => [one.state, one.outcome])).toEqual([['failed', THROUGH_A_LINK]])
   })
+
+  test('a repository folder swapped for a link leading outside never receives the proof’s bytes, nor is its test read there', async () => {
+    const outside = outsideFolder()
+    const seen = await writtenAfter('proving', exportProof, (api) => {
+      renameSync(api, `${api}-moved`)
+      symlinkSync(outside, api, 'junction')
+    })
+    expect(existsSync(join(outside, 'tests', 'export.test.mjs'))).toBe(false)
+    expect(seen.events).toEqual([{ scenarios: [], conflicts: ['R1.S2'] }])
+    expect(seen.delivered).toContain(
+      `api/${EXPORT_PATH} was left as it is: it leads out of its repository`,
+    )
+    expect(seen.proofRun).toContain('test is not in place yet')
+  })
+
+  test('a test file with a second name (a checkout made of hard links) is in place, and proof_run runs it', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith(exportProof)
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          const api = yield* apiOf(mission.id)
+          const store = join(api, 'store')
+          mkdirSync(store)
+          linkSync(join(api, EXPORT_PATH), join(store, 'export.test.mjs'))
+          const { grantId } = yield* builderOf(mission.id)
+          return yield* call(grantId, 'proof_run', { scenario: 'R1.S2' })
+        }),
+      ),
+    )
+    expect(seen).not.toMatch(/^refused/)
+  })
+
+  test.runIf(process.platform === 'win32')(
+    'a proof’s path whose letters differ in case from the disk’s folder is written into that folder',
+    async () => {
+      const path = 'Tests/export.test.mjs'
+      const seen = await writtenAfter(
+        'proving',
+        () => ({ 'R1.S2': automated(path, EXPORT_TEST) }),
+        (api) => mkdirSync(join(api, 'tests')),
+      )
+      expect(seen.events).toEqual([{ scenarios: ['R1.S2'], conflicts: [] }])
+      expect(readFileSync(join(seen.api, 'tests', 'export.test.mjs'), 'utf8')).toBe(EXPORT_TEST)
+    },
+  )
 
   test('a second name given to a proof’s file between its read and its write keeps its bytes: the file is replaced', async () => {
     const outside = outsideFolder()
