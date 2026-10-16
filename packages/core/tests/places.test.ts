@@ -159,6 +159,11 @@ describe('Sensitive places always ask', () => {
     [LINUX, '/home/me/work/app/deploy/id_ed25519', '~/work/app/deploy/id_ed25519'],
     [LINUX, '/home/me/work/app/certs/*.pem', '~/work/app/certs/*.pem'],
     [LINUX, '/home/me/work/app/deploy/id_*', '~/work/app/deploy/id_*'],
+    [LINUX, '/home/me/work/app/certs/.pem', '~/work/app/certs/.pem'],
+    [LINUX, '/home/me/work/app/certs/.key', '~/work/app/certs/.key'],
+    [LINUX, '/home/me/work/app/deploy/app.env', '~/work/app/deploy/app.env'],
+    [LINUX, '/home/me/work/app/deploy/Secrets.ENV', '~/work/app/deploy/Secrets.ENV'],
+    [LINUX, '/home/me/work/app/deploy/*.env', '~/work/app/deploy/*.env'],
     [MAC, '/Users/me/Library/Keychains/login.keychain-db', '~/Library/Keychains'],
     [MAC, '/Users/me/.SSH/config', '~/.SSH'],
     [WINDOWS, 'C:\\Users\\me\\.ssh\\config', '~\\.ssh'],
@@ -182,10 +187,24 @@ describe('Sensitive places always ask', () => {
     [LINUX, '/home/me/work/app/src/keys.ts'],
     [LINUX, '/home/me/work/app/src/*'],
     [LINUX, '/home/me/work/app/.envrc.ts'],
+    [LINUX, '/home/me/work/app/src/id_utils/index.ts'],
+    [LINUX, '/home/me/work/app/vendor/server.pem/README.md'],
+    [LINUX, '/home/me/work/app/vendor/api.key/README.md'],
+    [LINUX, '/home/me/work/app/deploy.env/README.md'],
+    [LINUX, '/home/me/work/app/.venv/bin/python'],
     [WINDOWS, 'C:\\work\\app\\src\\env.ts'],
   ] as const)('%# %s is not a sensitive place', (context, path) => {
     expect(sensitivePlace(path, context)).toBeNull()
   })
+
+  test.each(['example.env', 'app.sample.env', '.env.example'])(
+    'the template %s is read freely, and still asks to be written',
+    (name) => {
+      const path = `/home/me/work/app/deploy/${name}`
+      expect(sensitivePlace(path, LINUX, { reading: true })).toBeNull()
+      expect(sensitivePlace(path, LINUX)).toBe(`~/work/app/deploy/${name}`)
+    },
+  )
 })
 
 describe('A concern says why the call asked', () => {

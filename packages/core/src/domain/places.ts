@@ -65,6 +65,8 @@ interface SensitiveEntry {
   readonly readFreely?: (name: string) => boolean
   /** Matched whatever the case of its names, on every system: `.ENV` is a `.env` too. */
   readonly anyCase?: boolean
+  /** Matched on a path's last name only: a file's name, never a folder's (`src/id_utils/`). */
+  readonly lastName?: boolean
 }
 
 /**
@@ -76,6 +78,12 @@ export const ENV_TEMPLATE_ENDINGS = ['.example', '.sample', '.template', '.dist'
 
 const envTemplate = (name: string): boolean =>
   ENV_TEMPLATE_ENDINGS.some((ending) => name.toLowerCase().endsWith(ending))
+
+/** A `*.env` that is a template by the name before `.env` (`example.env`, `app.sample.env`). */
+const envFileTemplate = (name: string): boolean => {
+  const stem = name.toLowerCase().slice(0, -'.env'.length)
+  return ENV_TEMPLATE_ENDINGS.some((ending) => stem === ending.slice(1) || stem.endsWith(ending))
+}
 
 const named = (...names: readonly string[]): Segment[] => names.map((name) => ({ name }))
 
@@ -107,10 +115,24 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
   { listed: '.env', segments: named('.env'), anyCase: true },
   { listed: '.env.*', segments: [{ prefix: '.env.' }], readFreely: envTemplate, anyCase: true },
   { listed: '.envrc', segments: named('.envrc'), anyCase: true },
-  // Private keys wherever they sit; `id_*` without a dot, so `id_ed25519.pub` and `id_utils.ts` are not.
-  { listed: '*.pem', segments: [{ suffix: '.pem' }], anyCase: true },
-  { listed: '*.key', segments: [{ suffix: '.key' }], anyCase: true },
-  { listed: 'id_*', segments: [{ prefix: 'id_', dotless: true }], anyCase: true },
+  // The `env_file` of a Compose file and its kind (`app.env`), wherever it sits.
+  {
+    listed: '*.env',
+    segments: [{ suffix: '.env' }],
+    readFreely: envFileTemplate,
+    anyCase: true,
+    lastName: true,
+  },
+  // Private keys wherever they sit, by a file's name; `id_*` without a dot, so `id_ed25519.pub`
+  // and `id_utils.ts` are not.
+  { listed: '*.pem', segments: [{ suffix: '.pem' }], anyCase: true, lastName: true },
+  { listed: '*.key', segments: [{ suffix: '.key' }], anyCase: true, lastName: true },
+  {
+    listed: 'id_*',
+    segments: [{ prefix: 'id_', dotless: true }],
+    anyCase: true,
+    lastName: true,
+  },
 ]
 
 /** Whether names differ only by case on this system. */
@@ -142,9 +164,7 @@ function segmentIs(written: string, segment: Segment, platform: string, anyCase:
   const fold = anyCase || foldsCase(platform)
   const name = fold ? written.toLowerCase() : written
   const glob = globOf(written)
-  if ('suffix' in segment) {
-    return name.endsWith(segment.suffix) && name.length > segment.suffix.length
-  }
+  if ('suffix' in segment) return name.endsWith(segment.suffix)
   if ('name' in segment) {
     const wanted = fold ? segment.name.toLowerCase() : segment.name
     if (glob === null) return name === wanted
@@ -179,7 +199,12 @@ export function sensitivePlace(
   const parts = segmentsOf(path)
   for (const entry of SENSITIVE_PLACES) {
     const length = entry.segments.length
-    const starts = entry.anchored === true ? [1] : parts.map((_, at) => at)
+    const starts =
+      entry.anchored === true
+        ? [1]
+        : entry.lastName === true
+          ? [parts.length - length]
+          : parts.map((_, at) => at)
     for (const start of starts) {
       if (start + length > parts.length) continue
       const matches = entry.segments.every((segment, at) =>
