@@ -3765,7 +3765,7 @@ describe('The refresh and an environment need', () => {
                     command: {
                       name: 'export proof',
                       type: 'script',
-                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
+                      line: nodeTest('api/tests/export.test.mjs'),
                       lineWindows: null,
                       lineLinux: null,
                       repositoryId: null,
@@ -3957,7 +3957,7 @@ describe('The refresh and an environment need', () => {
                     command: {
                       name: 'export proof',
                       type: 'script',
-                      line: `"${process.execPath}" --test --test-reporter=tap api/tests/export.test.mjs`,
+                      line: nodeTest('api/tests/export.test.mjs'),
                       lineWindows: null,
                       lineLinux: null,
                       repositoryId: null,
