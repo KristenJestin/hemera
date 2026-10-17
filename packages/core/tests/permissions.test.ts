@@ -16,6 +16,7 @@ import {
   chatMustAskThroughScripts,
   deletesGit,
   effectiveAction,
+  gitConfigWrites,
   missionRefusal,
   neverMatch,
   plainListing,
@@ -147,6 +148,95 @@ describe('A deletion of .git is refused wherever it hides', () => {
     ['ls', '.git'],
   ])('%j is not one', (...words) => {
     expect(deletesGit(words)).toBe(false)
+  })
+})
+
+describe('A git config that writes is told with the file it writes, wherever it hides (#448)', () => {
+  const writesOf = (words: ReadonlyArray<string>, context = LINUX) =>
+    gitConfigWrites(effectiveAction(words, context).sequences)
+
+  test.each([
+    [
+      ['git', 'config', 'core.fsmonitor', './tools/watch.sh'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['git', '-C', 'api', 'config', 'core.fsmonitor', 'x'],
+      { file: 'repository', folders: ['api'], gitDir: null },
+    ],
+    [
+      ['git', '-C', 'a', '-C', 'b', 'config', 'k.v', 'x'],
+      { file: 'repository', folders: ['a', 'b'], gitDir: null },
+    ],
+    [
+      ['git', '--git-dir=.git', 'config', 'k.v', 'x'],
+      { file: 'repository', folders: [], gitDir: '.git' },
+    ],
+    [
+      ['git', '--git-dir', 'repo.git', 'config', 'k.v', 'x'],
+      { file: 'repository', folders: [], gitDir: 'repo.git' },
+    ],
+    [
+      ['git', '-c', 'a.b=c', 'config', 'k.v', 'x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['git', 'config', '--local', '--add', 'k.v', 'x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['git', 'config', '--worktree', 'k.v', 'x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [['git', 'config', 'set', 'k.v', 'x'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '--unset', 'k.v'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '-e'], { file: 'repository', folders: [], gitDir: null }],
+    [
+      ['git', 'config', '--file', '.git/config', 'k.v', 'x'],
+      { file: 'named', folders: [], path: '.git/config' },
+    ],
+    [['git', 'config', '-f', 'x.cfg', 'k.v', 'x'], { file: 'named', folders: [], path: 'x.cfg' }],
+    [
+      ['git', '-C', 'api', 'config', '--file=x.cfg', 'k.v', 'x'],
+      { file: 'named', folders: ['api'], path: 'x.cfg' },
+    ],
+    [['git', 'config', '--global', 'core.hooksPath', '/tmp/h'], { file: 'global' }],
+    [['git', 'config', '--system', 'k.v', 'x'], { file: 'system' }],
+    [['git', 'config', '-f'], { file: 'unread' }],
+    [['git', '-C'], { file: 'unread' }],
+    [['/usr/bin/git', 'config', 'k.v', 'x'], { file: 'repository', folders: [], gitDir: null }],
+    [['git.exe', 'CONFIG', 'k.v', 'x'], { file: 'repository', folders: [], gitDir: null }],
+    [
+      ['sh', '-c', 'cd api && git config core.fsmonitor x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['env', 'A=1', 'git', 'config', 'k.v', 'x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['powershell', '-Command', 'git config core.fsmonitor x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+  ] as const)('%j writes %j', (words, write) => {
+    expect(writesOf(words)).toEqual([write])
+  })
+
+  test.each([
+    ['git', 'config', '--get', 'core.fsmonitor'],
+    ['git', 'config', '--get-all', 'remote.origin.url'],
+    ['git', 'config', '--get-regexp', '^core'],
+    ['git', 'config', '--list'],
+    ['git', 'config', '-l'],
+    ['git', 'config', '--show-origin', '--list'],
+    ['git', 'config', 'get', 'core.fsmonitor'],
+    ['git', 'config', 'list'],
+    ['git', '-C', 'api', 'config', '--global', '--get', 'user.name'],
+    ['git', 'status'],
+    ['git', 'log', '--', 'config'],
+    ['cat', '.git/config'],
+  ])('%j writes nothing', (...words) => {
+    expect(writesOf(words)).toEqual([])
   })
 })
 

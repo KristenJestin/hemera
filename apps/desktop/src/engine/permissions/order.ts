@@ -37,6 +37,8 @@ import {
   deletesGit,
   effectiveAction,
   chatMustAskThroughScripts,
+  type GitConfigWrite,
+  gitConfigWrites,
   missionRefusal,
   namesGit,
   neverMatch,
@@ -157,6 +159,26 @@ const ownFolder = (call: JudgedCall): boolean => {
     !namesGit(relative(place.root, call.path.resolved)) &&
     !namesGit(relative(realRoot(place.root), call.path.resolved))
   )
+}
+
+/** The configuration a `git config` writes, as the human is shown it, from its run folder. */
+const configWritten = (write: GitConfigWrite, folder: string, home: string): string => {
+  switch (write.file) {
+    case 'global':
+      return shownPath(join(home, '.gitconfig'), home)
+    case 'system':
+      return 'the system’s Git configuration'
+    case 'unread':
+      return 'a git config whose file does not read'
+    case 'named':
+      return shownPath(resolve(folder, ...write.folders, write.path), home)
+    case 'repository': {
+      const repository = resolve(folder, ...write.folders)
+      const gitDir =
+        write.gitDir === null ? join(repository, '.git') : resolve(repository, write.gitDir)
+      return shownPath(join(gitDir, 'config'), home)
+    }
+  }
 }
 
 /** A place's root as the disk has it, links followed; as written when it cannot say. */
@@ -358,6 +380,11 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               const resolved = yield* place(call, folder.path, path)
               const written = isAbsolute(path) ? resolve(path) : resolve(folder.path, path)
               yield* pointAt(written, resolved)
+            }
+            // A `git config` that writes always asks, as the configuration it writes (#448).
+            const sequences = effectiveAction(wordsOf(call.line ?? ''), context).sequences
+            for (const write of gitConfigWrites(sequences)) {
+              sensitive.push(`sensitive place: ${configWritten(write, folder.path, home)}`)
             }
           }
           if (call.command?.askBeforeRunning === true) {

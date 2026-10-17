@@ -234,6 +234,97 @@ const GIT_VALUES = new Set([
   '--list-cmds',
 ])
 
+/**
+ * A `git config` that writes, and the file it writes as the line says it (#448): the repository's
+ * own (`-C` folders from the run folder, and `--git-dir` from them), a file it names, the user's
+ * or the system's, or `unread` when its words do not say. What it writes is a configuration Git
+ * reads at every command, the engine's own included, and may run a program it names.
+ */
+export type GitConfigWrite =
+  | {
+      readonly file: 'repository'
+      readonly folders: ReadonlyArray<string>
+      readonly gitDir: string | null
+    }
+  | { readonly file: 'named'; readonly folders: ReadonlyArray<string>; readonly path: string }
+  | { readonly file: 'global' }
+  | { readonly file: 'system' }
+  | { readonly file: 'unread' }
+
+/** What makes a `git config` only read: a get, a list, a show, in either syntax. */
+const CONFIG_READS = /^(?:--get|--list$|-l$|--show-)/
+/** The options of `git config` that take the next word as their value. */
+const CONFIG_VALUES = new Set([
+  '-f',
+  '--file',
+  '--blob',
+  '--type',
+  '--default',
+  '--comment',
+  '--value',
+])
+
+/** The `git config` write of Git's arguments, null when they are no such write. */
+function gitConfigWrite(args: ReadonlyArray<string>): GitConfigWrite | null {
+  const folders: string[] = []
+  let gitDir: string | null = null
+  let at = 0
+  while (at < args.length) {
+    const word = args[at] ?? ''
+    const value = args[at + 1]
+    if (word === '-C' || word === '--git-dir') {
+      if (value === undefined) return { file: 'unread' }
+      if (word === '-C') folders.push(value)
+      else gitDir = value
+      at += 2
+    } else if (word.startsWith('--git-dir=')) {
+      gitDir = word.slice('--git-dir='.length)
+      at += 1
+    } else if (GIT_VALUES.has(word)) {
+      if (value === undefined) return { file: 'unread' }
+      at += 2
+    } else if (word.startsWith('-')) at += 1
+    else break
+  }
+  if (at >= args.length) return null
+  if ((args[at] ?? '').toLowerCase() !== 'config') return null
+  const rest = args.slice(at + 1)
+  let file: GitConfigWrite = { file: 'repository', folders, gitDir }
+  let first: string | null = null
+  for (let index = 0; index < rest.length; index += 1) {
+    const word = rest[index] ?? ''
+    if (CONFIG_READS.test(word)) return null
+    if (word === '--global') file = { file: 'global' }
+    else if (word === '--system') file = { file: 'system' }
+    else if (word.startsWith('--file=')) file = { file: 'named', folders, path: word.slice(7) }
+    if (CONFIG_VALUES.has(word)) {
+      const value = rest[index + 1]
+      if (value === undefined) return { file: 'unread' }
+      if (word === '-f' || word === '--file') file = { file: 'named', folders, path: value }
+      index += 1
+    } else if (!word.startsWith('-')) first ??= word
+  }
+  return first === 'get' || first === 'list' ? null : file
+}
+
+/**
+ * Every `git config` a line's commands would run that writes, through any wrapper or shell, read
+ * at every word as the refusals read them: a write always asks, as a sensitive place does.
+ */
+export function gitConfigWrites(
+  sequences: ReadonlyArray<ReadonlyArray<string>>,
+): ReadonlyArray<GitConfigWrite> {
+  const writes: GitConfigWrite[] = []
+  for (const words of sequences) {
+    for (const [at, word] of words.entries()) {
+      if (programName(word) !== 'git') continue
+      const write = gitConfigWrite(words.slice(at + 1))
+      if (write !== null) writes.push(write)
+    }
+  }
+  return writes
+}
+
 /** A Git command's subcommand and what follows it, past Git's own options. */
 function gitSubcommand(args: ReadonlyArray<string>) {
   let at = 0

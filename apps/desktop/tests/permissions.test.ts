@@ -277,6 +277,47 @@ describe('A Git folder is a sensitive place to write, never to read (#448)', () 
   })
 })
 
+describe('A git config that writes always asks, whatever the judge says (#448)', () => {
+  test('a Builder’s git config that writes asks as the configuration it writes, and nothing is written; one that reads does not ask', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          const lines = [
+            'git config core.fsmonitor ./tools/watch.sh',
+            'git -C . config --file .git/config core.fsmonitor ./tools/watch.sh',
+            `sh -c 'git --git-dir=.git config core.fsmonitor ./tools/watch.sh'`,
+            'git -c color.ui=never config core.fsmonitor ./tools/watch.sh',
+            'git config --global core.hooksPath ./hooks',
+            `find . -path '*git/config' -exec tee -a {} +`,
+          ]
+          const answers = []
+          for (const line of lines) answers.push(yield* run(builder, line))
+          return {
+            answers,
+            config: readFileSync(join(main, '.git', 'config'), 'utf8'),
+            read: yield* run(builder, 'git config --get core.bare'),
+          }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.answers.map((one) => one.ok)).toEqual([false, false, false, false, false, false])
+    expect(questions).toEqual([
+      'sensitive place: ~/acme/.git/config',
+      expect.stringContaining('sensitive place: ~/acme/.git/config'),
+      expect.stringContaining('sensitive place: ~/acme/.git/config'),
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/.gitconfig',
+      'sensitive place: ~/acme/*git',
+    ])
+    expect(answer.config).not.toContain('fsmonitor')
+    expect(answer.read.ok).toBe(true)
+  })
+})
+
 describe('What cannot be read with certainty counts as outside', () => {
   test.each([
     ['an unknown variable', `sh -c 'cat $SECRET_FILE'`],

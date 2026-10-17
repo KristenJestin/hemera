@@ -730,8 +730,9 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
    * A Probe of Acme, its recipe running `steps`, whose agent makes the writes `calls` names through
    * the gate, then `prepare` and the engine's next Git calls on its worktree and on `api`. Then
    * `control` writes as anything but the Probe's tools could, and the engine's Git runs on the
-   * worktree again. Answers what the gate said to each write, the worktree's `.git`, and whether
-   * `marker` was written before the control and after it.
+   * worktree again, then the machine's git alone. Answers what the gate said to each write and
+   * run, the worktree's `.git`, and whether `marker` was written before the control, after the
+   * engine's Git, and after the machine's git alone.
    */
   const probeWrites = (
     marker: string,
@@ -742,9 +743,12 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
       readonly prepare?: (tree: string) => void
       readonly control?: (tree: string) => void
       readonly steps?: ReadonlyArray<{ readonly line: string }>
+      /** The command lines the Probe runs after its writes. */
+      readonly runs?: ReadonlyArray<Schema.JsonObject>
     } = {},
   ) => {
-    const { reads = [], prepare = () => {}, control = () => {}, steps = [] } = options
+    const { reads = [], prepare = () => {}, control = () => {}, steps = [], runs = [] } = options
+    const made = reads.length + calls.length + runs.length
     const hold = held()
     // The Planner's grant is the suite's own: the first agent started is the Probe.
     let taken = 0
@@ -753,13 +757,14 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
         [
           ...reads.map((args, at) => uses(`toolu_read_${String(at)}`, 'fs_read', args)),
           ...calls.map((args, at) => uses(`toolu_git_${String(at)}`, 'fs_write', args)),
+          ...runs.map((args, at) => uses(`toolu_run_${String(at)}`, 'commands_run', args)),
         ],
       ],
       steps: [says('Waiting.')],
       // Its writes go at once; what follows them waits for the test.
       between: () => {
         taken += 1
-        return taken > reads.length + calls.length ? hold.promise : Promise.resolve()
+        return taken > made ? hold.promise : Promise.resolve()
       },
     }))
     return run(({ profile }) =>
@@ -772,10 +777,7 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
           yield* launch(grantId, 'does the importer keep accents?')
           yield* probeIn(mission.id, 1, ['running'])
           yield* until(
-            Effect.sync(
-              () =>
-                (world.agents[0]?.answers.toolAnswers.length ?? 0) === reads.length + calls.length,
-            ),
+            Effect.sync(() => (world.agents[0]?.answers.toolAnswers.length ?? 0) === made),
           )
           prepare(tree)
           const engineStatus = (folder: string) =>
@@ -786,9 +788,12 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
           const gitFile = readFileSync(join(tree, '.git'), 'utf8')
           control(tree)
           yield* engineStatus(tree)
+          const afterEngine = existsSync(marker)
+          // The same status run by the machine's git alone, as an agent's own command would.
+          execFileSync('git', ['-C', tree, 'status', '--porcelain'], { stdio: 'ignore' })
           hold.release()
           const answers = answersOf(world.agents[0]).slice(reads.length)
-          return { answers, gitFile, before, after: existsSync(marker) }
+          return { answers, gitFile, before, afterEngine, afterPlain: existsSync(marker) }
         }),
       ),
     )
@@ -819,7 +824,8 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
     ])
     expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
     expect(seen.before).toBe(false)
-    expect(seen.after).toBe(true)
+    expect(seen.afterEngine).toBe(true)
+    expect(seen.afterPlain).toBe(true)
   })
 
   test('a Probe that writes a core.fsmonitor or a filter into the repository’s Git folder, or its worktree’s, is asked as a sensitive place, never written', async () => {
@@ -850,6 +856,27 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
     expect(existsSync(join(api, '.git', 'info', 'attributes'))).toBe(false)
     expect(existsSync(join(api, '.git', 'worktrees', 'api', 'config.worktree'))).toBe(false)
     expect(seen.before).toBe(false)
+  })
+
+  test('a Probe whose command runs git config to set a core.fsmonitor is asked as the repository’s configuration, never written, whatever the judge says', async () => {
+    const { api } = places()
+    const marker = join(work, 'never-written')
+    const seen = await probeWrites(marker, [], {
+      runs: [
+        { line: 'git config core.fsmonitor ./tools/watch.sh', repository: 'api' },
+        { line: 'git config --worktree core.fsmonitor ./tools/watch.sh', repository: 'api' },
+      ],
+    })
+    expect(seen.answers).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/^sensitive place: .*[\\/]api[\\/]\.git[\\/]config$/),
+      expect.stringMatching(/^sensitive place: .*[\\/]api[\\/]\.git[\\/]config$/),
+    ])
+    expect(readFileSync(join(api, '.git', 'config'), 'utf8')).not.toContain('fsmonitor')
+    expect(existsSync(join(api, '.git', 'worktrees', 'api', 'config.worktree'))).toBe(false)
   })
 
   test('a .git spelled in another case, or reached through a link, is the same sensitive place', async () => {

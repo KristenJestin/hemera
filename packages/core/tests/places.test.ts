@@ -185,6 +185,14 @@ describe('Sensitive places always ask', () => {
       'C:\\work\\app\\.git::$INDEX_ALLOCATION',
     ],
     [WINDOWS, 'C:\\work\\app\\.env.', 'C:\\work\\app\\.env.'],
+    // A glob that names a Git folder without its dot, as `find -path` reads it (#448).
+    [LINUX, '/home/me/work/app/*git/config', '~/work/app/*git'],
+    [LINUX, '/home/me/work/app/*GIT*/hooks', '~/work/app/*GIT*'],
+    // The user's own Git configuration, which every Git command reads.
+    [LINUX, '/home/me/.gitconfig', '~/.gitconfig'],
+    [LINUX, '/home/me/.config/git/config', '~/.config/git/config'],
+    [LINUX, '/home/me/.config/git/attributes', '~/.config/git/attributes'],
+    [WINDOWS, 'C:\\Users\\me\\.gitconfig', '~\\.gitconfig'],
   ] as const)('%# %s is the sensitive place %s', (context, path, shown) => {
     expect(sensitivePlace(path, context)).toBe(shown)
   })
@@ -212,6 +220,10 @@ describe('Sensitive places always ask', () => {
     [LINUX, '/home/me/work/app/.github/workflows/ci.yml'],
     [LINUX, '/home/me/work/app/.gitignore'],
     [LINUX, '/home/me/work/app/.gitattributes'],
+    [LINUX, '/home/me/work/app/*'],
+    [LINUX, '/home/me/work/app/*/config'],
+    [LINUX, '/home/me/work/app/*it/config'],
+    [LINUX, '/home/me/.config/git/ignore'],
     [LINUX, '/home/me/work/app/.git.'],
     [LINUX, '/home/me/work/app/git/config'],
     [WINDOWS, 'C:\\work\\app\\.gitmodules'],

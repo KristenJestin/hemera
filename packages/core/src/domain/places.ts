@@ -67,6 +67,11 @@ interface SensitiveEntry {
   readonly anyCase?: boolean
   /** Matched on a path's last name only: a file's name, never a folder's (`src/id_utils/`). */
   readonly lastName?: boolean
+  /**
+   * Named by a glob without its leading dot when the glob writes the rest of the name: a pattern
+   * a program matches itself (`find -path`) is no shell's, and takes a dot as any character.
+   */
+  readonly dotlessGlobs?: boolean
 }
 
 /**
@@ -116,8 +121,19 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
   { listed: '~/.hemera-dev', segments: named('.hemera-dev') },
   // A repository's Git folder, a worktree's `.git` file and what they lead to: Git reads its
   // configuration, hooks and attributes there, and runs the programs they name (`core.fsmonitor`,
-  // a filter, a hook) at the engine's next Git call, with its rights (#448). Read freely.
-  { listed: '.git', segments: named('.git'), readFreely: () => true, anyCase: true },
+  // a filter, a hook) at the engine's next Git call, with its rights (#448). Read freely; a glob
+  // that writes its name without the dot names it too (`find -path '*git/config'`).
+  {
+    listed: '.git',
+    segments: named('.git'),
+    readFreely: () => true,
+    anyCase: true,
+    dotlessGlobs: true,
+  },
+  // The user's own Git configuration, which every Git command reads as well.
+  { listed: '~/.gitconfig', segments: named('.gitconfig') },
+  { listed: '~/.config/git/config', segments: named('.config', 'git', 'config') },
+  { listed: '~/.config/git/attributes', segments: named('.config', 'git', 'attributes') },
   { listed: '/etc/shadow', segments: named('etc', 'shadow'), anchored: true },
   { listed: '/etc/sudoers', segments: named('etc', 'sudoers'), anchored: true },
   { listed: '/etc/sudoers.d', segments: named('etc', 'sudoers.d'), anchored: true },
@@ -178,7 +194,13 @@ function globOf(segment: string): RegExp | null {
  * glob counts for a suffix or a prefix without a dot only when it writes them (`*.pem`, `id_*`):
  * `*` alone names every file of a folder, and would make every command that uses one ask.
  */
-function segmentIs(written: string, segment: Segment, platform: string, anyCase: boolean): boolean {
+function segmentIs(
+  written: string,
+  segment: Segment,
+  platform: string,
+  anyCase: boolean,
+  dotlessGlobs = false,
+): boolean {
   const fold = anyCase || foldsCase(platform)
   const said = platform === 'win32' ? windowsName(written) : written
   const name = fold ? said.toLowerCase() : said
@@ -188,7 +210,10 @@ function segmentIs(written: string, segment: Segment, platform: string, anyCase:
     const wanted = fold ? segment.name.toLowerCase() : segment.name
     if (glob === null) return name === wanted
     // A shell's glob does not match a leading dot unless it writes one; Windows' does.
-    if (platform !== 'win32' && wanted.startsWith('.') && !written.startsWith('.')) return false
+    const dotless = dotlessGlobs && name.includes(wanted.slice(1))
+    if (platform !== 'win32' && wanted.startsWith('.') && !written.startsWith('.') && !dotless) {
+      return false
+    }
     return glob.test(wanted)
   }
   const prefix = segment.prefix
@@ -227,7 +252,13 @@ export function sensitivePlace(
     for (const start of starts) {
       if (start + length > parts.length) continue
       const matches = entry.segments.every((segment, at) =>
-        segmentIs(parts[start + at] ?? '', segment, context.platform, entry.anyCase === true),
+        segmentIs(
+          parts[start + at] ?? '',
+          segment,
+          context.platform,
+          entry.anyCase === true,
+          entry.dotlessGlobs === true,
+        ),
       )
       if (!matches) continue
       if (entry.anchored === true && parts[0] !== '') continue
