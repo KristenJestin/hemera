@@ -43,26 +43,6 @@ const QUOTED_OR_BARE = String.raw`"(?:[^"\\]|\\.)*"|'[^']*'`
  * the credential (a header's name, a scheme, a label) stays readable.
  */
 
-/**
- * A header whose whole value is a credential, its scheme with its token: as a header line writes
- * it (to the end of the line or of the quotes around it), or as JSON writes it. An escaped quote
- * (`\"`) closes no quotes around it, so the value runs on through it: a backslash takes the
- * character after it.
- */
-const CREDENTIAL_HEADER = new RegExp(
-  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|(?=[^"'\r\n])[^"'\\\r\n]*(?:\\[^\r\n]?[^"'\\\r\n]*)*)`,
-  'gi',
-)
-
-/**
- * The header as masking read it before #401, its value stopped at any quote, escaped or not: the
- * shapes read in turn as the oracle reads them read it this way (`asTheOracleReads`).
- */
-const CREDENTIAL_HEADER_TO_A_QUOTE = new RegExp(
-  String.raw`\b(?<keep>(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
-  'gi',
-)
-
 /** A bare `Bearer` credential, and a `Basic` one written as the header writes it. */
 const BEARER = /\b(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi
 const BASIC = /\b(?<keep>Basic\s+)[A-Za-z0-9+/]{8,}={0,2}/g
@@ -208,19 +188,134 @@ function* applied(text: string, edits: ReadonlyArray<Edit>): Steps<string> {
   return out + text.slice(from)
 }
 
+/** A match of a shape: where it starts, where what it hides starts, and where it ends. */
+interface Match {
+  readonly start: number
+  readonly hiddenFrom: number
+  readonly end: number
+}
+
+/** A shape of credential: its first match in a text from a position, if there is one. */
+type Shape = (text: string, from: number) => Match | null
+
+/** The shape a pattern matches: it hides all it matches but its group `keep`, which begins it. */
+const matched =
+  (pattern: RegExp): Shape =>
+  (text, from) => {
+    const match = matchFrom(pattern, text, from)
+    if (match === null) return null
+    const start = match.index
+    return {
+      start,
+      hiddenFrom: start + (match.groups?.['keep']?.length ?? 0),
+      end: start + match[0].length,
+    }
+  }
+
+/** What may end a value between double quotes: its closing quote, or a line end after a backslash. */
+const IN_DOUBLE_QUOTES_STOPS = /["\n\r\u2028\u2029]/g
+
+/** What ends a bare value: a quote or a line end. */
+const BARE_STOPS = /["'\r\n]/g
+
+/**
+ * Where the value between double quotes whose quote is at `at` ends, after its closing quote, or
+ * -1 when it does not close: a backslash takes the character after it, but a line end (as `.`
+ * takes none). Read from one quote or line end to the next, never one escape at a time.
+ */
+const doubleQuotedEnd = (text: string, at: number): number => {
+  for (let from = at + 1; ;) {
+    const stop = matchFrom(IN_DOUBLE_QUOTES_STOPS, text, from)?.index ?? -1
+    if (stop === -1) return -1
+    const taken = escapedAt(text, at + 1, stop)
+    if (text.charAt(stop) === '"' && !taken) return stop + 1
+    // A line end a backslash would take: that backslash takes nothing, and the value cannot go on.
+    if (text.charAt(stop) !== '"' && taken) return -1
+    from = stop + 1
+  }
+}
+
+/**
+ * Where the bare value at `at` ends: at a quote or a line end. Read through escapes, a backslash
+ * takes the character after it but a line end, so an escaped quote (`\"`) does not end it. Read
+ * from one quote or line end to the next, never one escape at a time.
+ */
+const bareEnd = (text: string, at: number, throughEscapes: boolean): number => {
+  for (let from = at; ;) {
+    const stop = matchFrom(BARE_STOPS, text, from)?.index ?? text.length
+    const quote = text.charAt(stop) === '"' || text.charAt(stop) === "'"
+    if (!throughEscapes || !quote || !escapedAt(text, at, stop)) return stop
+    from = stop + 1
+  }
+}
+
+/**
+ * Where the value at `at`, past the spaces after a header's name, ends, or -1 when none begins
+ * there: between double quotes, between single quotes, or bare, which a quote cannot begin.
+ */
+const valueEnd = (text: string, at: number, throughEscapes: boolean): number => {
+  const first = text.charAt(at)
+  if (first === '"') return doubleQuotedEnd(text, at)
+  if (first === "'") {
+    const closing = text.indexOf("'", at + 1)
+    return closing === -1 ? -1 : closing + 1
+  }
+  if (first === '') return -1
+  return bareEnd(text, at, throughEscapes)
+}
+
+/** The name of a header whose whole value is a credential, and what stands before its value. */
+const HEADER_NAME =
+  /\b(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=](?<spaces>\s*)/gi
+
+/**
+ * A header whose whole value is a credential, its scheme with its token: as a header line writes
+ * it (to the end of the line or of the quotes around it), or as JSON writes it. Its value is read
+ * by a scan, never by a pattern: a pattern that crosses a value of megabytes runs out of stack.
+ * The scan reads it as the pattern of #401 did: where no value begins after the spaces (a quote
+ * that never closes), the spaces are given back one at a time, and the last that is no line end
+ * begins a bare value. With `throughEscapes`, a bare value runs on through a backslash escape, as
+ * an escaped quote (`\"`) closes no quotes around it; without, it stops at any quote, as masking
+ * read it before #401: the shapes read in turn as the oracle reads them read it this way
+ * (`asTheOracleReads`).
+ */
+const header =
+  (throughEscapes: boolean): Shape =>
+  (text, from) => {
+    for (let at = from; ;) {
+      const name = matchFrom(HEADER_NAME, text, at)
+      if (name === null) return null
+      const start = name.index
+      const spaced = start + name[0].length
+      const spaces = spaced - (name.groups?.['spaces']?.length ?? 0)
+      let hiddenFrom = spaced
+      let end = valueEnd(text, hiddenFrom, throughEscapes)
+      while (end === -1 && hiddenFrom > spaces) {
+        hiddenFrom -= 1
+        if (!'\r\n'.includes(text.charAt(hiddenFrom)))
+          end = bareEnd(text, hiddenFrom, throughEscapes)
+      }
+      if (end !== -1) return { start, hiddenFrom, end }
+      at = start + 1
+    }
+  }
+
+const CREDENTIAL_HEADER = header(true)
+const CREDENTIAL_HEADER_TO_A_QUOTE = header(false)
+
 /**
  * The shapes, each matched on the text as it was given: none ever sees what another masked, so a
  * shape that takes the first word of another cannot hide the rest of it, whatever their order.
  */
-const SHAPES: ReadonlyArray<RegExp> = [
-  PRIVATE_KEY,
+const SHAPES: ReadonlyArray<Shape> = [
+  matched(PRIVATE_KEY),
   CREDENTIAL_HEADER,
-  BEARER,
-  BASIC,
-  WEB_TOKEN,
-  PREFIXED_TOKEN,
-  URL_PASSWORD,
-  LABELLED_CREDENTIAL,
+  matched(BEARER),
+  matched(BASIC),
+  matched(WEB_TOKEN),
+  matched(PREFIXED_TOKEN),
+  matched(URL_PASSWORD),
+  matched(LABELLED_CREDENTIAL),
 ]
 
 /**
@@ -270,20 +365,19 @@ interface Found {
  * The stretches one shape hides in a text, in order. Each search goes on from the last name of
  * the match before (`resumeAt`), or, read as the oracle reads, from its end.
  */
-function* shapeFound(text: string, pattern: RegExp, resume: boolean): Steps<Found> {
+function* shapeFound(text: string, shape: Shape, resume: boolean): Steps<Found> {
   const spans: Span[] = []
   let resumed = false
   let from = 0
   let reached = 0
   for (;;) {
-    const match = matchFrom(pattern, text, from)
+    const match = shape(text, from)
     if (match === null) break
-    const end = match.index + match[0].length
-    const hiddenFrom = match.index + (match.groups?.['keep']?.length ?? 0)
+    const { start, hiddenFrom, end } = match
     spans.push([hiddenFrom, end])
-    if (match.index < reached) resumed = true
+    if (start < reached) resumed = true
     reached = Math.max(reached, end)
-    from = resume ? resumeAt(text, match.index, hiddenFrom, end) : end
+    from = resume ? resumeAt(text, start, hiddenFrom, end) : end
     if (due()) yield
   }
   // A step at the end: the pattern may have crossed the whole text without a match.
@@ -292,8 +386,8 @@ function* shapeFound(text: string, pattern: RegExp, resume: boolean): Steps<Foun
 }
 
 /** The stretches one shape hides in a text, in order. */
-function* shapeSpans(text: string, pattern: RegExp): Steps<ReadonlyArray<Span>> {
-  return (yield* shapeFound(text, pattern, true)).spans
+function* shapeSpans(text: string, shape: Shape): Steps<ReadonlyArray<Span>> {
+  return (yield* shapeFound(text, shape, true)).spans
 }
 
 /** An escaped quote: the only place where the two ways of reading a header's value part. */
@@ -311,8 +405,8 @@ function* asTheOracleReads(
 ): Steps<ReadonlyArray<Span>> {
   let view = knownHidden.length > 0 ? yield* writtenOver(text, knownHidden) : text
   let hidden = knownHidden
-  for (const pattern of SHAPES) {
-    const read = pattern === CREDENTIAL_HEADER ? CREDENTIAL_HEADER_TO_A_QUOTE : pattern
+  for (const shape of SHAPES) {
+    const read = shape === CREDENTIAL_HEADER ? CREDENTIAL_HEADER_TO_A_QUOTE : shape
     const { spans } = yield* shapeFound(view, read, false)
     if (spans.length > 0) {
       hidden = yield* union(hidden, spans)
@@ -367,11 +461,11 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
     written = true
   }
   let resumed = false
-  for (const pattern of SHAPES) {
-    const found = yield* shapeFound(text, pattern, true)
+  for (const shape of SHAPES) {
+    const found = yield* shapeFound(text, shape, true)
     spans = yield* union(spans, found.spans)
     closed = yield* union(closed, yield* closedSpans(text, found.spans))
-    const foundInTurn = written ? yield* shapeFound(view, pattern, true) : found
+    const foundInTurn = written ? yield* shapeFound(view, shape, true) : found
     if (foundInTurn.resumed) resumed = true
     if (foundInTurn.spans.length > 0) {
       inTurn = yield* union(inTurn, foundInTurn.spans)
@@ -389,7 +483,7 @@ function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<Readonl
   // Nothing closed: the third reading would read the text as the first did.
   if (closed.length === 0) return spans
   const opened = yield* writtenOver(text, closed)
-  for (const pattern of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, pattern))
+  for (const shape of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, shape))
   return spans
 }
 
@@ -553,8 +647,8 @@ function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> 
 function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> {
   const has = (value: string) => text.includes(value)
   if (known.some(has) || escapedForms(known).some(has)) return false
-  for (const pattern of SHAPES) {
-    if (matchFrom(pattern, text, 0) !== null) return false
+  for (const shape of SHAPES) {
+    if (shape(text, 0) !== null) return false
     // A step after each pattern on a long text: each crosses all of it.
     if (text.length > CHARACTERS_A_STEP) yield
   }
@@ -807,7 +901,10 @@ const BACKSLASHES = /\\/g
 /** What ends what a JSON string may hold: a quote, or a line end. */
 const DELIMITERS = /["\r\n]/g
 
-/** Whether the quote at `at` is escaped: an odd run of backslashes before it, back to `floor`. */
+/**
+ * Whether the quote (or any character) at `at` is escaped: an odd run of backslashes before it,
+ * back to `floor`. Each backslash takes the character after it, so only that run's length counts.
+ */
 const escapedAt = (text: string, floor: number, at: number): boolean => {
   let before = at
   while (before > floor && text.charAt(before - 1) === '\\') before -= 1
@@ -829,9 +926,11 @@ const escapedAt = (text: string, floor: number, at: number): boolean => {
  *   other way crosses the others, and gives way; of two held values that cross, the longer stays;
  * - between all those, every string opened by a quote no backslash escapes and closed before the
  *   next of them.
+ *
+ * On top, the values that keys naming a credential hold, in any reading (`containersIn`).
  */
-function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
-  const { complete, held } = yield* containersIn(text)
+function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<Written> {
+  const { complete, held, keyed } = yield* containersIn(text)
   const outer: Span[] = []
   for (const value of yield* inOrder(yield* byStart(complete), lines, ([start]) => start)) {
     if (value[0] >= (outer.at(-1)?.[1] ?? 0)) outer.push(value)
@@ -875,7 +974,14 @@ function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<ReadonlyA
     gapStart = values[index]?.[1] ?? text.length
     if (due()) yield
   }
-  return yield* inOrder(values, strings, ([start]) => start)
+  return { values: yield* inOrder(values, strings, ([start]) => start), keyed }
+}
+
+/** The JSON values written in a text, and the values keys that name a credential hold. */
+interface Written {
+  readonly values: ReadonlyArray<Span>
+  /** In any reading of the text's quotes, in order and apart (`containersIn`). */
+  readonly keyed: ReadonlyArray<Span>
 }
 
 /**
@@ -923,6 +1029,13 @@ interface Reader {
   expected: Expected
   /** Where it reads on; in a string, once the string ends there. */
   at: number
+  /** Whether the value it reads next is held by a key that names a credential. */
+  keyed: boolean
+  /**
+   * The containers open that such a key holds, two numbers each: how many containers were open
+   * once it opened, then where it starts.
+   */
+  readonly secrets: number[]
 }
 
 /** What closes the innermost container open in a reader, if one is. */
@@ -954,6 +1067,14 @@ interface Readers {
 interface Containers {
   readonly complete: ReadonlyArray<Span>
   readonly held: ReadonlyArray<Span>
+  /** The values keys that name a credential hold, in any reader, in order and apart. */
+  readonly keyed: ReadonlyArray<Span>
+}
+
+/** The name a key of the text says, from its quote to after its closing quote. */
+function* keyName(text: string, start: number, end: number): Steps<string> {
+  const plain = text.slice(start + 1, end - 1)
+  return plain.includes('\\') ? (yield* readString(text, start, end)).read : plain
 }
 
 /**
@@ -965,6 +1086,10 @@ interface Containers {
  * strings where the other reads between them. So two readers at most run at once, one between
  * strings and one in a string, and they swap at each quote: each character is read once by each,
  * and the text is crossed twice at most.
+ *
+ * The two readers are the two ways the quotes pair, and both are weighed (#412): a key that names a
+ * credential in either hides the value it holds, from where it begins to where it ends, or to where
+ * the reader broke when it broke first, as a field so named is masked whole in JSON.
  */
 function* containersIn(text: string): Steps<Containers> {
   const complete: Span[] = []
@@ -977,10 +1102,18 @@ function* containersIn(text: string): Steps<Containers> {
    * kept to the end in one list: millions of readers may break, most holding one value or none.
    */
   const broken: number[] = []
-  const broke = (reader: Reader) => {
+  /** The values keys that name a credential hold, as the readers find them. */
+  const keyed: Span[] = []
+  const secret = (start: number, end: number) => {
+    if (end > start) keyed.push([start, end])
+  }
+  /** A reader broke at `at`: what it held whole is kept, and a credential's value open hidden to there. */
+  const broke = (reader: Reader, at: number) => {
     for (let index = 0; index + 2 < reader.held.length; index += 3) {
       broken.push(reader.held[index + 1] ?? 0, reader.held[index + 2] ?? 0)
     }
+    // The values open run to the same place: the outermost holds all the others.
+    if (reader.secrets.length > 0) secret(reader.secrets[1] ?? at, at)
   }
   /** The innermost container open in a reader holds a value whole. */
   const hold = (reader: Reader, start: number, end: number) => {
@@ -1018,8 +1151,16 @@ function* containersIn(text: string): Steps<Containers> {
           held: [],
           expected: 'value',
           at: opener,
+          keyed: false,
+          secrets: [],
         }
-      } else return { complete, held: yield* heldIn(broken) }
+      } else {
+        return {
+          complete,
+          held: yield* heldIn(broken),
+          keyed: yield* union(yield* byStart(keyed), []),
+        }
+      }
       continue
     }
     const at = jsonSpace(text, reader.at)
@@ -1028,9 +1169,14 @@ function* containersIn(text: string): Steps<Containers> {
     if ((first === '{' || first === '[') && reader.expected === 'value') {
       const closes = first === '{' ? '}' : ']'
       const inside = jsonSpace(text, at + 1)
-      if (text.charAt(inside) === closes) read(reader, at, inside + 1)
-      else {
+      const keyedHere = reader.keyed
+      reader.keyed = false
+      if (text.charAt(inside) === closes) {
+        if (keyedHere) secret(at, inside + 1)
+        read(reader, at, inside + 1)
+      } else {
         reader.starts.push(at)
+        if (keyedHere) reader.secrets.push(reader.starts.length, at)
         reader.expected = closes === '}' ? 'key' : 'value'
         reader.at = at + 1
       }
@@ -1038,6 +1184,10 @@ function* containersIn(text: string): Steps<Containers> {
       // What it held goes with it: it is now held whole itself.
       const depth = reader.starts.length
       while (reader.held.length > 0 && reader.held.at(-3) === depth) reader.held.length -= 3
+      if (reader.secrets.at(-2) === depth) {
+        secret(reader.secrets.at(-1) ?? at, at + 1)
+        reader.secrets.length -= 2
+      }
       read(reader, reader.starts.pop() ?? at, at + 1)
     } else if (closing !== undefined && first === ',' && reader.expected === 'after') {
       reader.expected = closing === '}' ? 'key' : 'value'
@@ -1050,19 +1200,28 @@ function* containersIn(text: string): Steps<Containers> {
       const other = readers.inString
       readers.inString = null
       const { stop, closed } = stringStop(text, at)
+      // A credential's value that is a string, closed or cut where it stops.
+      if (reader.expected === 'value' && reader.keyed) secret(at, stop)
+      reader.keyed = false
       if (closed && (reader.expected === 'value' || reader.expected === 'key')) {
         if (reader.starts.length > 0) hold(reader, at, stop)
+        if (reader.expected === 'key') {
+          reader.keyed = CREDENTIAL_FIELD.test(yield* keyName(text, at, stop))
+        }
         reader.expected = reader.expected === 'key' ? 'colon' : 'after'
         reader.at = stop
         readers.inString = reader
-      } else broke(reader)
+      } else broke(reader, closed ? at : stop)
       stops(at + 1)
       if (other?.at === at + 1) readers.between = other
-      else if (other !== null) broke(other)
+      else if (other !== null) broke(other, other.at)
     } else if (reader.expected === 'value' && jsonScalarEnd(text, at) !== -1) {
-      read(reader, -1, jsonScalarEnd(text, at))
+      const end = jsonScalarEnd(text, at)
+      if (reader.keyed) secret(at, end)
+      reader.keyed = false
+      read(reader, -1, end)
     } else {
-      broke(reader)
+      broke(reader, at)
       stops(at)
     }
   }
@@ -1265,8 +1424,10 @@ function* printedMasked(
 ): Steps<string> {
   const allJson = yield* jsonRead(text)
   const { lines, mixed } = allJson ? { lines: [], mixed: false } : yield* jsonLines(text)
-  const values: ReadonlyArray<Span> = allJson ? [[0, text.length]] : yield* writtenJson(text, lines)
-  const shapes = yield* union(yield* hiddenSpans(text, known), hiddenAbove)
+  const { values, keyed }: Written = allJson
+    ? { values: [[0, text.length]], keyed: [] }
+    : yield* writtenJson(text, lines)
+  const shapes = yield* union(yield* union(yield* hiddenSpans(text, known), hiddenAbove), keyed)
   const hidden = allJson ? shapes : yield* union(shapes, yield* readAsStrings(text, values, known))
   const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
   const edits: Edit[] = []
