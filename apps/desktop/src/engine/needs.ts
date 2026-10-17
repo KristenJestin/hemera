@@ -22,6 +22,7 @@ import {
   type NeedOwner,
   NEED_STATES,
   MissionOwner,
+  NEED_FIXED,
   NeedAnswer,
   NeedAnswerRefused,
   NeedFields,
@@ -418,7 +419,10 @@ const insertNeed = (
 ) =>
   Effect.gen(function* () {
     // What a need says may quote what an agent, a command or Git wrote: it is masked before it is kept.
-    const masked = maskedJson((yield* Secrets).maskRecord(fields))
+    // Only a need Hemera writes keeps the settings section it fixes; an agent's is masked (#416).
+    const masked = maskedJson(
+      (yield* Secrets).maskRecord(fields, by === BY_HEMERA ? NEED_FIXED : undefined),
+    )
     const written = yield* mutate('writing a need', (transaction) =>
       needWritten(transaction, { service, owner, fields, masked, requestedBy, by }).pipe(
         Effect.map(({ id, events }) => ({ result: id, events })),
@@ -440,7 +444,7 @@ export const createNeedIn = (
   requestedBy: string | null = null,
 ) =>
   Secrets.useSync((secrets) => {
-    const masked = maskedJson(secrets.maskRecord(fields))
+    const masked = maskedJson(secrets.maskRecord(fields, NEED_FIXED))
     return (transaction: EngineTransaction) =>
       needWritten(transaction, {
         service,

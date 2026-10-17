@@ -51,9 +51,9 @@ export function watchedSecrets(register: (secrets: SecretsRegistry) => void) {
       if (text.length >= LARGE_TEXT) watch.syncOnLarge += 1
       return real.mask(text)
     },
-    maskRecord: (record) => {
+    maskRecord: (record, fixed) => {
       if (large(record)) watch.syncOnLarge += 1
-      return real.maskRecord(record)
+      return real.maskRecord(record, fixed)
     },
     maskArguments: (record) => {
       if (large(record)) watch.syncOnLarge += 1
