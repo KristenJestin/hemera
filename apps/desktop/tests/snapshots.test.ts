@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -1479,6 +1480,223 @@ describe('A snapshot adds only the paths it listed and checked', () => {
     const files = treeFiles(store, seen.tree, objectsOf(main))
     expect(files).toContain('form.txt')
     expect(files).not.toContain('build.tmp')
+  })
+  describe('A checkpoint never stores a file reached through a link leading outside (#449)', () => {
+    /** A folder outside the repository holding a plain `notes.txt` with this marker. */
+    const outsideNotes = (name: string, marker: string) => {
+      const outside = join(work, name)
+      mkdirSync(outside)
+      writeFileSync(join(outside, 'notes.txt'), `${marker}\n`)
+      return outside
+    }
+
+    /** The tree's entry at a path as `ls-tree` prints it, its mode first; '' when it has none. */
+    const entryAt = (projectId: string, main: string, tree: string, path: string) =>
+      execInStore(
+        join(data, 'snapshots', `${projectId}.git`),
+        objectsOf(main),
+        'ls-tree',
+        tree,
+        '--',
+        path,
+      )
+
+    /** The files of a snapshot's tree, by path. */
+    const filesOf = (projectId: string, main: string, tree: string) =>
+      treeFiles(join(data, 'snapshots', `${projectId}.git`), tree, objectsOf(main))
+
+    test('an untracked junction to an outside folder: the link is kept, notes.txt is not', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      symlinkSync(outsideNotes('outside-a', 'OUTSIDE-NOTES-11'), join(worktree, 'link'), 'junction')
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('link/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'link')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-11')
+    })
+
+    test('a tracked file replaced by a junction to an outside folder: the link is kept, notes.txt is not', async () => {
+      const { main, worktree } = withSettings()
+      rmSync(join(worktree, 'settings'))
+      symlinkSync(
+        outsideNotes('outside-b', 'OUTSIDE-NOTES-12'),
+        join(worktree, 'settings'),
+        'junction',
+      )
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('settings/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'settings')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-12')
+    })
+
+    test('a junction nested below a normal folder: its neighbour is kept, notes.txt is not', async () => {
+      const { main, worktree } = workspace()
+      mkdirSync(join(worktree, 'a', 'b'), { recursive: true })
+      writeFileSync(join(worktree, 'a', 'b', 'plain.txt'), 'plain\n')
+      symlinkSync(
+        outsideNotes('outside-c', 'OUTSIDE-NOTES-13'),
+        join(worktree, 'a', 'b', 'link'),
+        'junction',
+      )
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('a/b/plain.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('a/b/link/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'a/b/link')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-13')
+    })
+
+    test('a tracked folder replaced by a junction to an outside folder: the snapshot is taken with the link alone', async () => {
+      const { main, worktree } = workspace()
+      mkdirSync(join(worktree, 'docs'))
+      writeFileSync(join(worktree, 'docs', 'notes.txt'), 'the committed notes\n')
+      git(worktree, 'add', 'docs')
+      git(worktree, 'commit', '-q', '-m', 'docs')
+      rmSync(join(worktree, 'docs'), { recursive: true })
+      symlinkSync(outsideNotes('outside-d', 'OUTSIDE-NOTES-14'), join(worktree, 'docs'), 'junction')
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('docs/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'docs')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-14')
+    })
+
+    test('a link swapped for a folder between the listing and the add: nothing under it is added', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      symlinkSync(
+        outsideNotes('outside-e', 'OUTSIDE-NOTES-15'),
+        join(worktree, 'cache'),
+        'junction',
+      )
+
+      const seen = await takenWith(main, worktree, () => {
+        rmSync(join(worktree, 'cache'))
+        mkdirSync(join(worktree, 'cache'))
+        writeFileSync(join(worktree, 'cache', '.env'), 'TOKEN=swapped-in-65\n')
+        writeFileSync(join(worktree, 'cache', 'notes.txt'), 'swapped-notes-66\n')
+      })
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      const objects = storeObjects(seen.projectId)
+      expect(objects).not.toContain('swapped-in-65')
+      expect(objects).not.toContain('swapped-notes-66')
+      expect(objects).not.toContain('OUTSIDE-NOTES-15')
+    })
+
+    test('a file swapped for a junction to an outside folder between the listing and the add: notes.txt is not stored', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      writeFileSync(join(worktree, 'report'), 'the report\n')
+      const outside = outsideNotes('outside-f', 'OUTSIDE-NOTES-16')
+
+      const seen = await takenWith(main, worktree, () => {
+        rmSync(join(worktree, 'report'))
+        symlinkSync(outside, join(worktree, 'report'), 'junction')
+      })
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('report/notes.txt')
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-16')
+    })
+
+    test('a folder on the way swapped for a junction to an outside folder between the listing and the add: notes.txt is not stored', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      mkdirSync(join(worktree, 'a', 'b'), { recursive: true })
+      writeFileSync(join(worktree, 'a', 'b', 'notes.txt'), 'the inside notes\n')
+      const outside = outsideNotes('outside-g', 'OUTSIDE-NOTES-17')
+
+      const seen = await takenWith(main, worktree, () => {
+        rmSync(join(worktree, 'a', 'b'), { recursive: true })
+        symlinkSync(outside, join(worktree, 'a', 'b'), 'junction')
+      })
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('a/b/notes.txt')
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-17')
+    })
+
+    test('a link to a file outside: the checkpoint keeps the link, and its copy never holds the file', async (context) => {
+      const { main, worktree } = workspace()
+      const target = join(outsideNotes('outside-h', 'OUTSIDE-NOTES-18'), 'notes.txt')
+      try {
+        symlinkSync(target, join(worktree, 'notes-link'), 'file')
+      } catch {
+        context.skip()
+      }
+      const copy = join(work, 'copy')
+
+      const seen = await commandsEngine(data)(({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { projectId, missionId } = yield* missionOf(main)
+            const repository = { name: 'acme', folder: worktree }
+            const tree = yield* Snapshots.use((snapshots) =>
+              snapshots.take(repository, attempt(missionId, 'end')),
+            )
+            yield* Snapshots.use((snapshots) =>
+              snapshots.materialize(missionId, repository, tree, copy),
+            )
+            return { projectId, tree }
+          }),
+        ),
+      )
+
+      expect(entryAt(seen.projectId, main, seen.tree, 'notes-link')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-18')
+      // The copy holds the link back, which the reviewers' reads refuse to follow, never the file.
+      const copied = join(copy, 'notes-link')
+      expect(lstatSync(copied).isFile() ? readFileSync(copied, 'utf8') : '').not.toContain(
+        'OUTSIDE-NOTES-18',
+      )
+    })
+
+    test('a link inside the repository is kept as the link Git stores', async (context) => {
+      const { main, worktree } = workspace()
+      mkdirSync(join(worktree, 'inner'))
+      writeFileSync(join(worktree, 'inner', 'x.txt'), 'x\n')
+      symlinkSync(join(worktree, 'inner'), join(worktree, 'alias'), 'junction')
+      try {
+        symlinkSync('tracked.txt', join(worktree, 'tracked-link'), 'file')
+        symlinkSync(join(worktree, 'inner'), join(worktree, 'inner-link'), 'dir')
+      } catch {
+        context.skip()
+      }
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      const files = filesOf(seen.projectId, main, seen.tree)
+      expect(files).toEqual(expect.arrayContaining(['inner/x.txt', 'alias', 'tracked-link']))
+      expect(files).not.toContain('alias/x.txt')
+      const blob = execFileSync('git', ['hash-object', '--stdin'], {
+        cwd: worktree,
+        input: 'tracked.txt',
+        encoding: 'utf8',
+      }).trim()
+      expect(entryAt(seen.projectId, main, seen.tree, 'tracked-link')).toBe(
+        `120000 blob ${blob}\ttracked-link`,
+      )
+      expect(entryAt(seen.projectId, main, seen.tree, 'alias')).toMatch(/^120000 blob /)
+      // A folder link to an absolute target, as Git itself stores it (`/` on Windows too).
+      const own = { ...process.env, GIT_INDEX_FILE: join(work, 'own-index') }
+      execFileSync('git', ['add', '--', 'inner-link'], { cwd: worktree, env: own })
+      const stored = execFileSync('git', ['ls-files', '-s', '--', 'inner-link'], {
+        cwd: worktree,
+        env: own,
+        encoding: 'utf8',
+      })
+      expect(entryAt(seen.projectId, main, seen.tree, 'inner-link')).toBe(
+        stored.trim().replace(/^120000 (\w+) 0\t/, '120000 blob $1\t'),
+      )
+    })
   })
 })
 
