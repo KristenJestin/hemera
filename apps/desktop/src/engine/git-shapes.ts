@@ -324,6 +324,17 @@ function realOrNull(path: string): string | null {
   }
 }
 
+/** The checkout a folder is in: the nearest folder at or above it with a `.git`; null outside any. */
+export function checkoutOf(folder: string): string | null {
+  let at = realOf(resolve(folder))
+  for (;;) {
+    if (gitDirOf(at) !== null) return at
+    const up = dirname(at)
+    if (up === at) return null
+    at = up
+  }
+}
+
 /** The common Git folder of a Git folder Git is handed (`--git-dir`, `GIT_DIR`), as its real path. */
 export function commonOf(gitDir: string): string {
   return realOf(commonDirOf(gitDir))
@@ -409,6 +420,27 @@ export function hooksPathsOf(text: string): ReadonlyArray<string> {
       ? [entry.value]
       : [],
   )
+}
+
+/** The entries `git worktree add` writes itself under `worktree.useRelativePaths`. */
+const WORKTREE_FORMAT = new Set(['extensions.relativeworktrees', 'core.repositoryformatversion'])
+
+/**
+ * Whether two texts of a configuration differ only by what `git worktree add` writes itself when
+ * worktrees name their repository by a relative path: `extensions.relativeWorktrees` and the
+ * repository's format version. Compared entry by entry, in order.
+ */
+export function onlyWorktreeFormat(was: string, now: string): boolean {
+  const kept = (text: string) =>
+    entriesOf(text)
+      .filter(
+        (entry) =>
+          entry.subsection !== null || !WORKTREE_FORMAT.has(`${entry.section}.${entry.key}`),
+      )
+      .map((entry) => JSON.stringify(entry))
+  const before = kept(was)
+  const after = kept(now)
+  return before.length === after.length && before.every((one, at) => one === after[at])
 }
 
 /** One entry of a Git configuration: its section and key lowercased, the subsection as written. */

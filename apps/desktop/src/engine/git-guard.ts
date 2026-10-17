@@ -62,7 +62,9 @@ import {
   type ShapeChange,
   type ShapeHome,
   type Shapes,
+  checkoutOf,
   commonOf,
+  onlyWorktreeFormat,
   realPathOf,
   repositoryOf,
   shapeChanges,
@@ -276,12 +278,68 @@ const targetOf = (
   return gitDir === '' ? repositoryOf(folder) : commonOf(resolve(folder, gitDir))
 }
 
+/** The worktree a `worktree add` or `worktree remove` names, as a real path; null for another. */
+const worktreeNamed = (folder: string, args: ReadonlyArray<string>): string | null => {
+  if (args[1] !== 'add' && args[1] !== 'remove') return null
+  for (let at = 2; at < args.length; at += 1) {
+    const arg = args[at] ?? ''
+    if (arg === '-b' || arg === '-B' || arg === '--reason') at += 1
+    else if (arg === '--') return realPathOf(resolve(folder, args[at + 1] ?? ''))
+    else if (!arg.startsWith('-')) return realPathOf(resolve(folder, arg))
+  }
+  return null
+}
+
+/**
+ * What an engine `worktree` call may add or remove of a repository's files: the administrative
+ * folder whose `gitdir` names the worktree the call names, and that worktree's `.git`; for a
+ * `prune`, the administrative folders whose worktree's `.git` was already gone.
+ */
+const ownedByCall = (
+  common: string,
+  folder: string,
+  args: ReadonlyArray<string>,
+  pre: Shapes,
+  post: Shapes,
+): ReadonlyArray<string> => {
+  const worktrees = join(common, 'worktrees')
+  const adminsLeadingTo = (shapes: Shapes, leads: (dotGit: string) => boolean) =>
+    [...shapes].flatMap(([path, shape]) => {
+      if (!inside(worktrees, path) || !path.endsWith(`${sep}gitdir`) || shape.text === null) {
+        return []
+      }
+      const admin = path.slice(0, -`${sep}gitdir`.length)
+      return leads(resolve(admin, shape.text.trim())) ? [admin] : []
+    })
+  if (args[1] === 'prune') return adminsLeadingTo(pre, (dotGit) => !post.has(dotGit))
+  const named = worktreeNamed(folder, args)
+  if (named === null) return []
+  const dotGit = join(named, '.git')
+  return [
+    ...adminsLeadingTo(
+      args[1] === 'add' ? post : pre,
+      (leads) => realPathOf(leads) === dotGit || leads === dotGit,
+    ),
+    dotGit,
+  ]
+}
+
 /** The guard: its scopes and holds in memory, the spawns' check, and the records' writer. */
-export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) => string) =>
+export const engineGitGuard = (
+  home: ShapeHome,
+  log: Log,
+  mask: (text: string) => string,
+  own: ReadonlyArray<string>,
+) =>
   Effect.gen(function* () {
     const errands = yield* Queue.unbounded<Errand>()
     const scopes = new Map<string, Scope>()
     const holds = new Map<string, Hold>()
+    /** The engine's `worktree` calls going on, by scope: their folder and arguments. */
+    const flying = new Map<
+      string,
+      Set<{ readonly folder: string; readonly args: ReadonlyArray<string> }>
+    >()
     /** The actions going on, each with the scopes of its place. */
     const windows = new Set<{ readonly action: GuardedAction; readonly keys: Set<string> }>()
 
@@ -313,6 +371,35 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
       })
     }
 
+    /** Whether a path is in the engine's own folders (its data, its scratch folders). */
+    const owned = (path: string) => own.some((prefix) => path.startsWith(prefix))
+
+    /**
+     * Whether a change is the engine's own bookkeeping of a worktree it keeps in its own folders (a
+     * Probe's): that worktree's `.git`, which the engine never trusts and reads past with the Git
+     * folder it made (#439), and the `commondir` and `gitdir` of its administrative folder added or
+     * removed whole. Its `config.worktree` is guarded as any.
+     */
+    const theEngines = (scope: Scope, change: ShapeChange, now: Shapes): boolean => {
+      if (change.path.endsWith(`${sep}.git`) && owned(change.path)) return true
+      if (change.was !== null && change.now !== null) return false
+      const worktrees = join(scope.key, 'worktrees')
+      if (!inside(worktrees, change.path)) return false
+      const name = change.path.slice(change.path.lastIndexOf(sep) + 1)
+      if (name !== 'commondir' && name !== 'gitdir') return false
+      const admin = change.path.slice(0, -(name.length + 1))
+      const gitdir = join(admin, 'gitdir')
+      const text = (now.get(gitdir) ?? scope.baseline.get(gitdir))?.text ?? null
+      return text !== null && owned(resolve(admin, text.trim()))
+    }
+
+    /** Whether a change is the repository format a `worktree add` writes into its `config`. */
+    const worktreeFormat = (scope: Scope, change: ShapeChange): boolean =>
+      change.path === join(scope.key, 'config') &&
+      change.was?.text != null &&
+      change.now?.text != null &&
+      onlyWorktreeFormat(change.was.text, change.now.text)
+
     /** What a change found now is said to come from: the actions still going on there, if any. */
     const whatFor = (scope: Scope): string => {
       const going = [...windows].filter((one) => one.keys.has(scope.key))
@@ -328,7 +415,17 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
      */
     const compare = (scope: Scope, what: string): Shapes => {
       const now = fingerprintOf(scope)
-      const changes = shapeChanges(scope.baseline, now)
+      // What an engine `worktree` call still going on adds or removes whole is its own, not asked.
+      const calls = [...(flying.get(scope.key) ?? [])]
+      const ofCalls = calls.flatMap((call) =>
+        ownedByCall(scope.key, call.folder, call.args, scope.baseline, now),
+      )
+      const changes = shapeChanges(scope.baseline, now).filter(
+        (one) =>
+          !((one.was === null || one.now === null) && ofCalls.some((o) => inside(o, one.path))) &&
+          !(calls.length > 0 && worktreeFormat(scope, one)) &&
+          !theEngines(scope, one, now),
+      )
       const hold = holds.get(scope.key)
       if (hold === undefined) {
         if (changes.length === 0) return now
@@ -369,6 +466,57 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
       return now
     }
 
+    /** A scope first seen: what it has now is its baseline. */
+    const sightedScope = (key: string, checkout: string | null, projectId: string): Scope => {
+      const scope: Scope = {
+        key,
+        home: key === HOME,
+        checkouts: new Set(checkout === null ? [] : [checkout]),
+        projectId,
+        baseline: new Map(),
+      }
+      scope.baseline = fingerprintOf(scope)
+      scopes.set(key, scope)
+      return scope
+    }
+
+    /**
+     * Sees the checkouts of a place: a scope not seen yet takes what it has as its baseline, a
+     * known one is compared and a checkout it did not have adds only the paths it did not have. A
+     * checkout with no repository is a scope of its own only when `bare` says so (an agent's place).
+     * Answers the scopes of the place, the home's first, and those whose baseline moved.
+     */
+    const sightIn = (checkouts: ReadonlyArray<string>, projectId: string, bare: boolean) => {
+      const keys = new Set<string>([HOME])
+      const moved: Scope[] = []
+      const homeScope = scopes.get(HOME)
+      if (homeScope === undefined) moved.push(sightedScope(HOME, null, projectId))
+      else compare(homeScope, FOUND)
+      for (const checkout of checkouts.map(realPathOf)) {
+        const repository = repositoryOf(checkout)
+        if (repository === null && !bare) continue
+        const key = repository ?? `checkout:${checkout}`
+        keys.add(key)
+        const scope = scopes.get(key)
+        if (scope === undefined) {
+          moved.push(sightedScope(key, checkout, projectId))
+          continue
+        }
+        if (scope.projectId === '') scope.projectId = projectId
+        const had = compare(scope, FOUND)
+        if (scope.checkouts.has(checkout)) continue
+        // A checkout first seen in a known repository: what it adds is taken as it is.
+        scope.checkouts.add(checkout)
+        const baseline = new Map(scope.baseline)
+        for (const [path, shape] of fingerprintOf(scope)) {
+          if (!had.has(path)) baseline.set(path, shape)
+        }
+        scope.baseline = baseline
+        moved.push(scope)
+      }
+      return { keys, moved }
+    }
+
     const covers = (hold: Hold, folder: string, target: string | null) =>
       hold.everywhere ||
       hold.key === target ||
@@ -378,6 +526,12 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
       before: (folder, args, env) => {
         const real = realPathOf(folder)
         const target = targetOf(real, args, env)
+        // A repository the engine works on that has no baseline yet takes one now, before the
+        // call runs: what is compared is never nothing.
+        if (target !== null && !scopes.has(target) && !owned(target)) {
+          const checkout = repositoryOf(real) === target ? checkoutOf(real) : null
+          keep(sightedScope(target, checkout, ''))
+        }
         const seen = new Map<Scope, Shapes>()
         for (const scope of scopes.values()) {
           const touched =
@@ -400,21 +554,29 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
             after: () => {},
           }
         }
-        // A worktree the engine adds or removes: its administrative files, added or removed
-        // whole by this very call, are taken into the baseline.
+        // A worktree the engine adds, removes or prunes: the administrative folder of the worktree
+        // the call names, and its `.git`, added or removed whole by this very call, are taken into
+        // the baseline; nothing else.
         const scope = target === null ? undefined : scopes.get(target)
         const pre = scope === undefined ? undefined : seen.get(scope)
         if (args[0] !== 'worktree' || scope === undefined || pre === undefined) {
           return { refused: null, after: () => {} }
         }
+        const call = { folder: real, args }
+        const calls = flying.get(scope.key) ?? new Set()
+        calls.add(call)
+        flying.set(scope.key, calls)
         return {
           refused: null,
           after: () => {
+            calls.delete(call)
+            const post = fingerprintOf(scope)
+            const callOwns = ownedByCall(scope.key, real, args, pre, post)
             const baseline = new Map(scope.baseline)
-            for (const { path, was, now } of shapeChanges(pre, fingerprintOf(scope))) {
-              if (was !== null && now !== null) continue
-              const administrative = inside(join(scope.key, 'worktrees'), path)
-              if (!administrative && !path.endsWith(`${sep}.git`)) continue
+            for (const { path, was, now } of shapeChanges(pre, post)) {
+              if (was !== null && now !== null) {
+                if (!worktreeFormat(scope, { path, was, now })) continue
+              } else if (!callOwns.some((one) => inside(one, path))) continue
               if (now === null) baseline.delete(path)
               else baseline.set(path, now)
             }
@@ -452,52 +614,20 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
           )
       })
 
+    const keepNow = (scopesMoved: ReadonlyArray<Scope>) =>
+      Effect.forEach(scopesMoved, (scope) =>
+        writeBaseline(scope).pipe(
+          Effect.catch((failed) =>
+            Effect.sync(() => log(`the Git guard could not keep a baseline: ${failed.message}`)),
+          ),
+        ),
+      ).pipe(Effect.asVoid)
+
     const open = (action: GuardedAction) =>
       Effect.gen(function* () {
-        const keys = new Set<string>([HOME])
-        const first: Scope[] = []
-        const sighted = (key: string, checkout: string | null) => {
-          const scope: Scope = {
-            key,
-            home: checkout === null,
-            checkouts: new Set(checkout === null ? [] : [checkout]),
-            projectId: action.projectId,
-            baseline: new Map(),
-          }
-          scope.baseline = fingerprintOf(scope)
-          scopes.set(key, scope)
-          first.push(scope)
-        }
-        const homeScope = scopes.get(HOME)
-        if (homeScope === undefined) sighted(HOME, null)
-        else compare(homeScope, FOUND)
-        for (const checkout of action.checkouts.map(realPathOf)) {
-          const key = repositoryOf(checkout) ?? `checkout:${checkout}`
-          keys.add(key)
-          const scope = scopes.get(key)
-          if (scope === undefined) {
-            sighted(key, checkout)
-            continue
-          }
-          const had = compare(scope, FOUND)
-          if (scope.checkouts.has(checkout)) continue
-          // A checkout first seen in a known repository: what it adds is taken as it is.
-          scope.checkouts.add(checkout)
-          const baseline = new Map(scope.baseline)
-          for (const [path, shape] of fingerprintOf(scope)) {
-            if (!had.has(path)) baseline.set(path, shape)
-          }
-          scope.baseline = baseline
-          first.push(scope)
-        }
+        const { keys, moved } = sightIn(action.checkouts, action.projectId, true)
         // A first sighting is kept before the action starts: a change it makes is a change.
-        for (const scope of first) {
-          yield* writeBaseline(scope).pipe(
-            Effect.catch((failed) =>
-              Effect.sync(() => log(`the Git guard could not keep a baseline: ${failed.message}`)),
-            ),
-          )
-        }
+        yield* keepNow(moved)
         const window = { action, keys }
         windows.add(window)
         return Effect.sync(() => {
@@ -509,6 +639,18 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
           }
         })
       })
+
+    /**
+     * Sees the repositories of the places Hemera knows (each Project's main checkout and
+     * Workspaces): at the start, and as they are added, so none waits for an agent's action to be
+     * given its baseline.
+     */
+    const sight = (
+      places: ReadonlyArray<{
+        readonly projectId: string
+        readonly checkouts: ReadonlyArray<string>
+      }>,
+    ) => keepNow(places.flatMap((place) => sightIn(place.checkouts, place.projectId, false).moved))
 
     /** The question of a hold, as the need shows it. */
     const fieldsOf = (hold: Hold) => {
@@ -627,15 +769,25 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
         }
       })
 
-    const questions = Effect.forever(
-      Effect.flatMap(Queue.take(errands), (errand) =>
-        done(errand).pipe(
-          Effect.catch((failed) =>
-            Effect.sync(() => log(`the Git guard could not write its records: ${failed.message}`)),
-          ),
+    /** One errand written whole: a stop of the engine waits for it rather than cutting it. */
+    const handled = (errand: Errand) =>
+      done(errand).pipe(
+        Effect.catch((failed) =>
+          Effect.sync(() => log(`the Git guard could not write its records: ${failed.message}`)),
         ),
-      ),
-    )
+        Effect.uninterruptible,
+      )
+
+    const questions = Effect.forever(Effect.flatMap(Queue.take(errands), handled))
+
+    /** What is still to be written when the engine stops, written: no baseline that moved is lost. */
+    const flush = Effect.gen(function* () {
+      for (;;) {
+        const next = yield* Queue.poll(errands)
+        if (Option.isNone(next)) return
+        yield* handled(next.value)
+      }
+    })
 
     const handler: NeedHandler = {
       deliver: (need, transaction) =>
@@ -762,6 +914,8 @@ export const engineGitGuard = (home: ShapeHome, log: Log, mask: (text: string) =
       spawn,
       handler,
       questions,
+      flush,
       restore,
+      sight,
     }
   })

@@ -27,6 +27,7 @@ import { PermissionAnswer } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
 import { Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+import { eq } from 'drizzle-orm'
 
 import { Git } from '../src/engine/git.ts'
 import { SHOWN_CAP, questionText } from '../src/engine/git-guard.ts'
@@ -34,8 +35,9 @@ import { answerNeed, listNeeds, withdrawNeed } from '../src/engine/needs.ts'
 import { Judge } from '../src/engine/permissions/ports.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { DATABASE_FILE } from '../src/engine/migrate.ts'
+import { createProject } from '../src/engine/projects.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { gitHolds } from '../src/engine/storage/schema.ts'
+import { gitBaselines, gitHolds } from '../src/engine/storage/schema.ts'
 import { commandsEngine, until } from './commands-engine.ts'
 import { git, remote, repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -878,5 +880,124 @@ describe('The question is masked before it is cut (#457, round 2)', () => {
     const shownText = questionText(text, (said) => said.replaceAll(secret, '[secret]'))
     expect(shownText).not.toContain('sk-live')
     expect(shownText).toContain('… (cut)')
+  })
+})
+
+/** Waits until the guard keeps a baseline of the repository at `checkout`. */
+const sighted = (checkout: string) =>
+  until(
+    Database.use((database) =>
+      database
+        .select()
+        .from(gitBaselines)
+        .where(eq(gitBaselines.id, realpathSync.native(join(checkout, '.git')))),
+    ),
+    (rows) => rows.length > 0,
+  ).pipe(
+    Effect.flatMap((rows) =>
+      rows.length > 0 ? Effect.void : Effect.die(new Error(`no baseline of ${checkout}`)),
+    ),
+  )
+
+describe('Every repository Hemera knows has a baseline before anything can change it (#457, round 3)', () => {
+  test('a repository of another Project no agent ever worked in, changed by an agent’s program, stops the engine’s Git there', async () => {
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        const other = repository(join(work, 'other'))
+        yield* createProject({ name: 'Other', mainCheckout: other, repositories: [] })
+        yield* sighted(other)
+        yield* runScript(
+          builder,
+          main,
+          `import { appendFileSync } from 'node:fs'
+appendFileSync(${JSON.stringify(join(other, '.git', 'config'))}, '[core]\\n\\thooksPath = h\\n')
+`,
+        )
+        return { status: yield* engineStatus(other), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/other/.git/config')
+  })
+
+  test('a Project’s repository is given its baseline at the start: one changed afterwards stops the engine’s Git', async () => {
+    await withBuilder(() =>
+      Effect.gen(function* () {
+        const other = repository(join(work, 'other'))
+        yield* createProject({ name: 'Other', mainCheckout: other, repositories: [] })
+      }),
+    )
+    // As before this version: no baseline kept for it.
+    const database = new DatabaseSync(join(data, DATABASE_FILE))
+    database.exec('DELETE FROM git_baselines')
+    database.close()
+    const other = join(work, 'other')
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        yield* sighted(other)
+        writeFileSync(join(other, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho later\n')
+        return { status: yield* engineStatus(other), needs: yield* asked }
+      }),
+    )
+    expect(reopened.status).toContain('Hemera stopped its Git')
+    expect(shown(reopened.needs[0])).toContain('~/other/.git/hooks/pre-commit')
+  })
+
+  test('a repository no Project names takes its baseline at the engine’s first Git call there, before it runs', async () => {
+    const result = await withBuilder(() =>
+      Effect.gen(function* () {
+        const loose = repository(join(work, 'loose'))
+        const first = yield* engineStatus(loose)
+        writeFileSync(join(loose, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho later\n')
+        return { first, status: yield* engineStatus(loose), needs: yield* asked }
+      }),
+    )
+    expect(result.first).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+  })
+})
+
+describe('A worktree the engine adds takes in only its own administrative files (#457, round 3)', () => {
+  test('another worktree’s config.worktree written while the engine adds a worktree is asked', async () => {
+    const main = repository(join(work, 'acme'))
+    git(main, 'worktree', 'add', '-q', join(work, 'acme-wt'), '-b', 'side')
+    const started = join(work, 'started')
+    const release = join(work, 'release')
+    // The engine's `worktree add` is held inside, by the repository's own hook, wherever the
+    // machine's own configuration puts hooks.
+    git(main, 'config', 'core.hooksPath', join(main, '.git', 'hooks'))
+    writeFileSync(
+      join(main, '.git', 'hooks', 'post-checkout'),
+      `#!/bin/sh\n: > "${started}"\nwhile [ ! -f "${release}" ]; do sleep 0.05; done\n`,
+      { mode: 0o755 },
+    )
+    const result = await reopen(
+      Effect.gen(function* () {
+        yield* createProject({ name: 'Acme', mainCheckout: main, repositories: [] })
+        yield* sighted(main)
+        const adding = yield* Git.use((service) =>
+          service.worktreeAdd(main, 'mission/other', join(work, 'acme-other'), 'HEAD'),
+        ).pipe(Effect.forkChild)
+        if (
+          !(yield* until(
+            Effect.sync(() => existsSync(started)),
+            (there) => there,
+          ))
+        ) {
+          return yield* Effect.die(new Error('the worktree add was never held'))
+        }
+        // A command still running writes another worktree's configuration meanwhile.
+        writeFileSync(
+          join(main, '.git', 'worktrees', 'acme-wt', 'config.worktree'),
+          '[core]\n\tfsmonitor = x\n',
+        )
+        writeFileSync(release, '')
+        yield* Fiber.join(adding)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/worktrees/acme-wt/config.worktree')
+    expect(shown(result.needs[0])).not.toContain('acme-other')
   })
 })
