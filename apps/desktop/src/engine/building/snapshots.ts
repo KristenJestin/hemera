@@ -914,8 +914,10 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                   GIT_INDEX_FILE: copy,
                   GIT_OBJECT_DIRECTORY: join(store, 'objects'),
                 }
-                // A sensitive file Git would add (untracked, or changed) is left out of `add`, and
-                // a stand-in holding only its fingerprint takes its place in the copied index.
+                // What Git would add (untracked, or changed), listed once: only those paths are
+                // added, never the folder, so a file or a link made there since is left to the
+                // next snapshot. A sensitive one is left out of `add`, and a stand-in holding only
+                // its fingerprint takes its place in the copied index.
                 const pending = fields(
                   text(
                     yield* run(
@@ -924,6 +926,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                         '--no-optional-locks',
                         'ls-files',
                         '-z',
+                        '-t',
                         '--others',
                         '--modified',
                         '--exclude-standard',
@@ -932,33 +935,47 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                       { env },
                     ),
                   ),
-                )
-                const touched = [...new Set(pending)].filter(sensitive)
+                ).map((line) => ({ untracked: line.startsWith('? '), path: line.slice(2) }))
+                const touched = [...new Set(pending.map(({ path }) => path))].filter(sensitive)
                 const withheld = touched.flatMap((path) => {
                   const real = regularFileIn(repository.folder, path)
                   return real === null ? [] : [{ path, real }]
                 })
                 // A sensitive path that is not a regular file of the repository (a link, or a file a
-                // folder link leads to, which Git for Windows follows through a junction) is never
-                // handed to `add`, which would copy what it leads to: the first link on its way is
-                // left out of `add`, and the path out of the tree.
+                // folder link leads to, which Git for Windows follows through a junction) is left
+                // out of the tree, as it is out of `add`, which would copy what it leads to.
                 const dropped = touched.filter((path) => !withheld.some((one) => one.path === path))
-                const excluded = new Set([
-                  ...withheld.map(({ path }) => path),
-                  ...dropped.map((path) => linkOnTheWay(repository.folder, path)),
-                ])
-                yield* run(
-                  repository.folder,
-                  [
-                    ...WHOLE_INDEX,
-                    'add',
-                    '--all',
-                    '--',
-                    '.',
-                    ...[...excluded].map((path) => `:(exclude,literal)${path}`),
-                  ],
-                  'work',
-                  { env },
+                const addOnly = (paths: ReadonlyArray<string>) =>
+                  paths.length === 0
+                    ? Effect.void
+                    : run(
+                        repository.folder,
+                        [
+                          ...WHOLE_INDEX,
+                          'add',
+                          '--all',
+                          '--pathspec-from-file=-',
+                          '--pathspec-file-nul',
+                        ],
+                        'work',
+                        {
+                          env,
+                          input: Buffer.from(paths.map((path) => `:(literal)${path}\0`).join('')),
+                        },
+                      ).pipe(Effect.asVoid)
+                const ordinary = pending.filter(({ path }) => !sensitive(path))
+                // Git refuses a listed path that matches nothing: an untracked file removed since
+                // it was listed. The add is asked once more without those.
+                yield* addOnly(ordinary.map(({ path }) => path)).pipe(
+                  Effect.catchTag('GitFailed', () =>
+                    addOnly(
+                      ordinary
+                        .filter(
+                          ({ untracked, path }) => !untracked || present(repository.folder, path),
+                        )
+                        .map(({ path }) => path),
+                    ),
+                  ),
                 )
                 if (dropped.length > 0) {
                   yield* run(
@@ -1279,22 +1296,14 @@ function regularFileIn(folder: string, path: string): string | null {
   }
 }
 
-/**
- * The first link (a symbolic link, or a junction on Windows) on the way of a repository's path,
- * as a path of the repository; the path itself when none stands there. Git refuses a pathspec
- * beyond a symbolic link, and Git for Windows walks into a junction as into a folder.
- */
-function linkOnTheWay(folder: string, path: string): string {
-  const names = path.split('/')
-  for (let at = 1; at <= names.length; at += 1) {
-    const way = names.slice(0, at).join('/')
-    try {
-      if (lstatSync(join(folder, way)).isSymbolicLink()) return way
-    } catch {
-      return path
-    }
+/** Whether something, a link included, stands at a repository's path. */
+function present(folder: string, path: string): boolean {
+  try {
+    lstatSync(join(folder, path))
+    return true
+  } catch {
+    return false
   }
-  return path
 }
 
 /**
