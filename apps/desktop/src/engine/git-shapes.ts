@@ -7,12 +7,14 @@
  * `gitdir` and `config.worktree`; in the common folder, `config`, `config.worktree`, every
  * worktree's `config.worktree`, `commondir` and `gitdir` and the `.git` file that `gitdir` names,
  * `hooks/` whole, `info/attributes` and `info/exclude`; the files every `include.path` and
- * `includeIf.*.path` of those configurations names, followed as deep as Git follows them; and the
- * home's `.gitconfig`, `git/config` and `git/attributes`. What the engine's own Git writes (the
+ * `includeIf.*.path` of those configurations names, followed as deep as Git follows them; the
+ * home's `.gitconfig`, `git/config` and `git/attributes`; and every folder a `core.hooksPath` of
+ * any of them names, whole, relative to each checkout and linked worktree, or from the home. What the engine's own Git writes (the
  * index, the refs, `ORIG_HEAD`, `FETCH_HEAD`, the logs, `packed-refs`, the objects) is none of it.
  *
  * Every file is read on the engine's own behalf (`readOwnSync`): never a link as its last name,
- * never waiting on a pipe, never more than `SHAPE_CAP`. A link is fingerprinted by what it says
+ * never waiting on a pipe, never more than `SHAPE_CAP`; a hooks folder is walked to `WALKED`
+ * entries at most, a link to a folder walked where it leads. A link is fingerprinted by what it says
  * and by the content where it leads, which is never kept as text: what the question shows is only
  * what sits in the files themselves. A pipe, a device or a socket is fingerprinted by its kind,
  * never opened; a file past the cap by its size and times.
@@ -32,6 +34,9 @@ export const SHAPE_CAP = 8 * 1024 * 1024
 
 /** The most of one file kept as text for the question: past it, its change is said, not shown. */
 const TEXT_KEPT = 64 * 1024
+
+/** The most entries walked under one hooks folder: past it, the folder stands as one, too large. */
+const WALKED = 20_000
 
 /** How deep includes are followed: Git's own limit (`MAX_INCLUDE_DEPTH`). */
 const INCLUDE_DEPTH = 10
@@ -178,8 +183,15 @@ function realOf(path: string): string {
   }
 }
 
-/** The fingerprint of what shapes the engine's Git in these checkouts and in the home. */
-export function shapesOf(checkouts: ReadonlyArray<string>, home: ShapeHome): Shapes {
+/**
+ * The fingerprint of what shapes the engine's Git in these checkouts and in the home, and in these
+ * common Git folders whichever checkouts still lead to them.
+ */
+export function shapesOf(
+  checkouts: ReadonlyArray<string>,
+  home: ShapeHome,
+  repositories: ReadonlyArray<string> = [],
+): Shapes {
   const shapes = new Map<string, Shape>()
   const bytes = new Map<string, Buffer>()
   const add = (path: string, everywhere = false): void => {
@@ -193,26 +205,45 @@ export function shapesOf(checkouts: ReadonlyArray<string>, home: ShapeHome): Sha
     shapes.set(path, { ...entry.shape, everywhere })
     if (entry.bytes !== null) bytes.set(path, entry.bytes)
   }
-  /** A folder and everything under it, links as themselves, never followed. */
-  const walk = (folder: string): void => {
-    add(folder)
-    if (shapes.get(folder)?.kind !== 'folder') return
-    for (const name of namesIn(folder)) {
-      const path = join(folder, name)
-      add(path)
-      if (shapes.get(path)?.kind === 'folder') walk(path)
+  /**
+   * A folder and everything under it, at most `WALKED` entries. A link is kept as itself and judged
+   * where it leads: a folder it leads to is walked there, each real folder once.
+   */
+  const walk = (start: string, everywhere: boolean): void => {
+    const walked = new Set<string>()
+    let entries = 0
+    const into = (folder: string): void => {
+      if (entries > WALKED) return
+      add(folder, everywhere)
+      const shape = shapes.get(folder)
+      if (shape === undefined) return
+      let real = folder
+      if (shape.kind === 'link') {
+        const leads = realOrNull(folder)
+        if (leads === null || entryOf(leads)?.shape.kind !== 'folder') return
+        real = leads
+        add(real, everywhere)
+      } else if (shape.kind !== 'folder') return
+      if (walked.has(real)) return
+      walked.add(real)
+      for (const name of namesIn(real)) {
+        entries += 1
+        if (entries > WALKED) {
+          shapes.set(start, { ...shapeOf('over', `over:entries:${String(WALKED)}`), everywhere })
+          return
+        }
+        into(join(real, name))
+        if (entries > WALKED) return
+      }
     }
+    into(start)
   }
   const configs: string[] = []
   const commons = new Set<string>()
-  for (const checkout of checkouts.map(realOf)) {
-    add(join(checkout, '.git'))
-    const gitDir = gitDirOf(checkout)
-    if (gitDir === null) continue
-    const common = commonDirOf(gitDir)
-    for (const name of ['commondir', 'gitdir', 'config.worktree']) add(join(gitDir, name))
-    configs.push(join(gitDir, 'config.worktree'))
-    if (commons.has(common)) continue
+  /** Where hooks run from: every checkout, and every linked worktree of their repositories. */
+  const tops = new Set<string>()
+  const commonOnce = (common: string): void => {
+    if (commons.has(common)) return
     commons.add(common)
     for (const name of ['config', 'config.worktree']) {
       add(join(common, name))
@@ -220,16 +251,29 @@ export function shapesOf(checkouts: ReadonlyArray<string>, home: ShapeHome): Sha
     }
     add(join(common, 'info', 'attributes'))
     add(join(common, 'info', 'exclude'))
-    walk(join(common, 'hooks'))
+    walk(join(common, 'hooks'), false)
     const worktrees = join(common, 'worktrees')
     for (const name of namesIn(worktrees)) {
       const admin = join(worktrees, name)
       for (const file of ['commondir', 'gitdir', 'config.worktree']) add(join(admin, file))
       configs.push(join(admin, 'config.worktree'))
       const pointer = lineOf(join(admin, 'gitdir'))
-      if (pointer !== null && pointer !== '') add(resolve(admin, pointer))
+      if (pointer === null || pointer === '') continue
+      const named = resolve(admin, pointer)
+      add(named)
+      tops.add(dirname(named))
     }
   }
+  for (const checkout of checkouts.map(realOf)) {
+    tops.add(checkout)
+    add(join(checkout, '.git'))
+    const gitDir = gitDirOf(checkout)
+    if (gitDir === null) continue
+    for (const name of ['commondir', 'gitdir', 'config.worktree']) add(join(gitDir, name))
+    configs.push(join(gitDir, 'config.worktree'))
+    commonOnce(realOf(commonDirOf(gitDir)))
+  }
+  for (const common of repositories) commonOnce(common)
   const homeConfigs = [join(home.home, '.gitconfig'), join(home.configHome, 'git', 'config')]
   for (const path of homeConfigs) add(path, true)
   add(join(home.configHome, 'git', 'attributes'), true)
@@ -239,13 +283,15 @@ export function shapesOf(checkouts: ReadonlyArray<string>, home: ShapeHome): Sha
     ...configs.map((path) => ({ path, depth: 0, everywhere: false })),
   ]
   const followed = new Set<string>()
+  const read: Array<{ readonly text: string; readonly everywhere: boolean }> = []
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
     const seen = `${String(next.everywhere)}\0${next.path}`
     if (followed.has(seen)) continue
     followed.add(seen)
-    const text = bytes.get(next.path)
+    const text = bytes.get(next.path)?.toString('utf8')
     if (text === undefined) continue
-    for (const named of includesOf(text.toString('utf8'))) {
+    read.push({ text, everywhere: next.everywhere })
+    for (const named of includesOf(text)) {
       const path = named.startsWith('~/')
         ? join(home.home, named.slice(2))
         : isAbsolute(named)
@@ -257,7 +303,35 @@ export function shapesOf(checkouts: ReadonlyArray<string>, home: ShapeHome): Sha
       }
     }
   }
+  // Every folder a `core.hooksPath` names, whichever configuration set it: one named from the
+  // home's shapes every repository; one relative to where the hooks run, each checkout.
+  for (const { text, everywhere } of read) {
+    for (const named of hooksPathsOf(text)) {
+      if (named.startsWith('~/')) walk(join(home.home, named.slice(2)), everywhere)
+      else if (isAbsolute(named)) walk(resolve(named), everywhere)
+      else for (const top of tops) walk(resolve(top, named), false)
+    }
+  }
   return shapes
+}
+
+/** The real path of what is there, or null. */
+function realOrNull(path: string): string | null {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return null
+  }
+}
+
+/** The common Git folder of a Git folder Git is handed (`--git-dir`, `GIT_DIR`), as its real path. */
+export function commonOf(gitDir: string): string {
+  return realOf(commonDirOf(gitDir))
+}
+
+/** The real path of a folder that exists; as given otherwise. */
+export function realPathOf(path: string): string {
+  return realOf(path)
 }
 
 /** One path as it stands now, as a fingerprint has it; null when it is not there. */
@@ -267,13 +341,14 @@ export function shapeAt(path: string): Shape | null {
 
 /**
  * The common Git folder of the repository a folder is in, read from the `.git` of the folder or
- * of the nearest one above it; null outside any. Git is not asked: it is what is guarded.
+ * of the nearest one above it, as its real path; null outside any. Git is not asked: it is what
+ * is guarded.
  */
 export function repositoryOf(folder: string): string | null {
   let at = realOf(resolve(folder))
   for (;;) {
     const gitDir = gitDirOf(at)
-    if (gitDir !== null) return commonDirOf(gitDir)
+    if (gitDir !== null) return realOf(commonDirOf(gitDir))
     const up = dirname(at)
     if (up === at) return null
     at = up
@@ -312,8 +387,42 @@ const ESCAPED = new Map([
  * taken as met. Where Git would refuse the file, reading stops: Git runs nothing from it.
  */
 export function includesOf(text: string): ReadonlyArray<string> {
+  return entriesOf(text).flatMap((entry) =>
+    ((entry.section === 'include' && entry.subsection === null) ||
+      (entry.section === 'includeif' && entry.subsection !== null)) &&
+    entry.key === 'path' &&
+    entry.value !== null &&
+    entry.value !== ''
+      ? [entry.value]
+      : [],
+  )
+}
+
+/** Every `core.hooksPath` a Git configuration sets, read as `includesOf` reads it. */
+export function hooksPathsOf(text: string): ReadonlyArray<string> {
+  return entriesOf(text).flatMap((entry) =>
+    entry.section === 'core' &&
+    entry.subsection === null &&
+    entry.key === 'hookspath' &&
+    entry.value !== null &&
+    entry.value !== ''
+      ? [entry.value]
+      : [],
+  )
+}
+
+/** One entry of a Git configuration: its section and key lowercased, the subsection as written. */
+interface ConfigEntry {
+  readonly section: string
+  readonly subsection: string | null
+  readonly key: string
+  readonly value: string | null
+}
+
+/** Every entry of a Git configuration, in order, up to where Git would refuse the file. */
+function entriesOf(text: string): ReadonlyArray<ConfigEntry> {
   const source = text.replaceAll('\r\n', '\n')
-  const found: string[] = []
+  const found: ConfigEntry[] = []
   let at = source.startsWith('﻿') ? 1 : 0
   let base = ''
   let sub: string | null = null
@@ -409,8 +518,7 @@ export function includesOf(text: string): ReadonlyArray<string> {
       said = value()
       if (said === null) return found
     }
-    const included = (base === 'include' && sub === null) || (base === 'includeif' && sub !== null)
-    if (included && key.toLowerCase() === 'path' && said !== null && said !== '') found.push(said)
+    found.push({ section: base, subsection: sub, key: key.toLowerCase(), value: said })
   }
   return found
 }
