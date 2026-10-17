@@ -16,7 +16,7 @@ import {
   chatMustAskThroughScripts,
   deletesGit,
   effectiveAction,
-  gitConfigWrites,
+  gitSettingsWrites,
   missionRefusal,
   neverMatch,
   plainListing,
@@ -151,9 +151,9 @@ describe('A deletion of .git is refused wherever it hides', () => {
   })
 })
 
-describe('A git config that writes is told with the file it writes, wherever it hides (#448)', () => {
+describe('A git config that writes, or a template that brings hooks, is told with what it writes, wherever it hides (#448)', () => {
   const writesOf = (words: ReadonlyArray<string>, context = LINUX) =>
-    gitConfigWrites(effectiveAction(words, context).sequences)
+    gitSettingsWrites(effectiveAction(words, context).sequences)
 
   test.each([
     [
@@ -218,6 +218,58 @@ describe('A git config that writes is told with the file it writes, wherever it 
       ['powershell', '-Command', 'git config core.fsmonitor x'],
       { file: 'repository', folders: [], gitDir: null },
     ],
+    // `--show-*` never makes a read: Git takes `--show-scope` with a write (#448, round 3).
+    [
+      ['git', 'config', '--show-scope', 'core.fsmonitor', 'y'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['git', 'config', '--show-scope', 'filter.x.clean', 'evil'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['git', 'config', '--show-origin', 'core.hooksPath', 'hooks'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [['git', 'config', '--show-scope'], { file: 'repository', folders: [], gitDir: null }],
+    // A read action with a write form, or more words than it takes, asks.
+    [
+      ['git', 'config', '--get', 'a.b', 'c', 'd'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [['git', 'config', '--list', 'a.b'], { file: 'repository', folders: [], gitDir: null }],
+    [
+      ['git', 'config', '--get', '--unset', 'a.b'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [['git', 'config', 'get', 'a.b', 'c'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '-e', '--list'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', 'edit'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', 'unset', 'a.b'], { file: 'repository', folders: [], gitDir: null }],
+    // A template puts its hooks into the repository's own hooks folder.
+    [['git', 'init', '--template=/tmp/t'], { file: 'hooks', folders: [], gitDir: null }],
+    [['git', 'init', '--template', '/tmp/t'], { file: 'hooks', folders: [], gitDir: null }],
+    [
+      ['git', '-C', 'api', 'init', '--template=t'],
+      { file: 'hooks', folders: ['api'], gitDir: null },
+    ],
+    [
+      ['git', 'clone', '--template=/tmp/t', 'https://example.test/r.git'],
+      { file: 'hooks', folders: [], gitDir: null },
+    ],
+    [
+      ['git', '-c', 'init.templateDir=/tmp/t', 'init'],
+      { file: 'hooks', folders: [], gitDir: null },
+    ],
+    [
+      ['git', '-c', 'INIT.TEMPLATEDIR=/tmp/t', 'clone', 'x'],
+      { file: 'hooks', folders: [], gitDir: null },
+    ],
+    [['GIT_TEMPLATE_DIR=/tmp/t', 'git', 'init'], { file: 'hooks', folders: [], gitDir: null }],
+    [
+      ['env', 'GIT_TEMPLATE_DIR=/tmp/t', 'git', 'init'],
+      { file: 'hooks', folders: [], gitDir: null },
+    ],
   ] as const)('%j writes %j', (words, write) => {
     expect(writesOf(words)).toEqual([write])
   })
@@ -229,6 +281,27 @@ describe('A git config that writes is told with the file it writes, wherever it 
     ['git', 'config', '--list'],
     ['git', 'config', '-l'],
     ['git', 'config', '--show-origin', '--list'],
+    // The usual reads of an agent: none asks (#448, round 3).
+    ['git', 'config', 'user.name'],
+    ['git', 'config', '--show-origin', 'user.name'],
+    ['git', 'config', '--get', 'user.email'],
+    ['git', 'config', '--global', '--get', 'user.name'],
+    ['git', '-C', 'api', 'config', '--get', 'remote.origin.url'],
+    ['git', 'config', '-l', '--show-origin'],
+    ['git', 'config', '--list', '--show-scope'],
+    ['git', 'config', '--get-regexp', '^remote', 'origin'],
+    ['git', 'config', 'list', '--show-origin'],
+    ['git', 'config', 'get', '--all', 'remote.origin.fetch'],
+    ['git', 'config', '--get-urlmatch', 'http.proxy', 'https://example.test'],
+    ['git', 'config', '--get-color', 'color.diff.new', 'green'],
+    ['git', 'config', '--type=bool', '--get', 'core.bare'],
+    ['git', 'config', '-f', '.gitmodules', '--get-regexp', 'path'],
+    ['git', 'init'],
+    ['git', 'init', 'sub'],
+    ['git', 'clone', 'https://example.test/r.git', 'r'],
+    ['git', 'clone', '--depth', '1', 'https://example.test/r.git'],
+    ['git', 'submodule', 'update', '--init'],
+    ['git', 'submodule', 'status'],
     ['git', 'config', 'get', 'core.fsmonitor'],
     ['git', 'config', 'list'],
     ['git', '-C', 'api', 'config', '--global', '--get', 'user.name'],

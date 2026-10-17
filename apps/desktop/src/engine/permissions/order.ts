@@ -37,8 +37,8 @@ import {
   deletesGit,
   effectiveAction,
   chatMustAskThroughScripts,
-  type GitConfigWrite,
-  gitConfigWrites,
+  type GitSettingsWrite,
+  gitSettingsWrites,
   missionRefusal,
   namesGit,
   neverMatch,
@@ -161,8 +161,8 @@ const ownFolder = (call: JudgedCall): boolean => {
   )
 }
 
-/** The configuration a `git config` writes, as the human is shown it, from its run folder. */
-const configWritten = (write: GitConfigWrite, folder: string, home: string): string => {
+/** What a Git command writes of Git's own, as the human is shown it, from its run folder. */
+const configWritten = (write: GitSettingsWrite, folder: string, home: string): string => {
   switch (write.file) {
     case 'global':
       return shownPath(join(home, '.gitconfig'), home)
@@ -172,11 +172,12 @@ const configWritten = (write: GitConfigWrite, folder: string, home: string): str
       return 'a git config whose file does not read'
     case 'named':
       return shownPath(resolve(folder, ...write.folders, write.path), home)
-    case 'repository': {
+    case 'repository':
+    case 'hooks': {
       const repository = resolve(folder, ...write.folders)
       const gitDir =
         write.gitDir === null ? join(repository, '.git') : resolve(repository, write.gitDir)
-      return shownPath(join(gitDir, 'config'), home)
+      return shownPath(join(gitDir, write.file === 'hooks' ? 'hooks' : 'config'), home)
     }
   }
 }
@@ -381,9 +382,9 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               const written = isAbsolute(path) ? resolve(path) : resolve(folder.path, path)
               yield* pointAt(written, resolved)
             }
-            // A `git config` that writes always asks, as the configuration it writes (#448).
+            // A `git config` that writes, or a template's hooks, always asks, as what it writes (#448).
             const sequences = effectiveAction(wordsOf(call.line ?? ''), context).sequences
-            for (const write of gitConfigWrites(sequences)) {
+            for (const write of gitSettingsWrites(sequences)) {
               sensitive.push(`sensitive place: ${configWritten(write, folder.path, home)}`)
             }
           }

@@ -235,14 +235,15 @@ const GIT_VALUES = new Set([
 ])
 
 /**
- * A `git config` that writes, and the file it writes as the line says it (#448): the repository's
- * own (`-C` folders from the run folder, and `--git-dir` from them), a file it names, the user's
- * or the system's, or `unread` when its words do not say. What it writes is a configuration Git
- * reads at every command, the engine's own included, and may run a program it names.
+ * A write a Git command makes to what Git reads as its own (#448), as the line says it: a
+ * configuration Git reads at every command, the engine's own included, and whose programs it runs
+ * (the repository's, from the run folder, its `-C` folders and `--git-dir`; a file it names; the
+ * user's or the system's), the hooks a template puts into the repository's hooks folder, or
+ * `unread` when its words do not say.
  */
-export type GitConfigWrite =
+export type GitSettingsWrite =
   | {
-      readonly file: 'repository'
+      readonly file: 'repository' | 'hooks'
       readonly folders: ReadonlyArray<string>
       readonly gitDir: string | null
     }
@@ -251,23 +252,65 @@ export type GitConfigWrite =
   | { readonly file: 'system' }
   | { readonly file: 'unread' }
 
-/** What makes a `git config` only read: a get, a list, a show, in either syntax. */
-const CONFIG_READS = /^(?:--get|--list$|-l$|--show-)/
+/**
+ * The read actions of `git config`, by how many words after them they take at most: a name, and a
+ * value pattern or a URL or a default. `--show-*` is none: Git takes `--show-scope` with a write.
+ */
+const CONFIG_READS: ReadonlyMap<string, number> = new Map([
+  ['--get', 2],
+  ['--get-all', 2],
+  ['--get-regexp', 2],
+  ['--get-urlmatch', 2],
+  ['--get-color', 2],
+  ['--get-colorbool', 2],
+  ['--list', 0],
+  ['-l', 0],
+])
+/** The read subcommands of `git config`, as `CONFIG_READS` says them. */
+const CONFIG_READ_COMMANDS: ReadonlyMap<string, number> = new Map([
+  ['get', 1],
+  ['list', 0],
+])
+/** What makes a `git config` write, whatever else it holds. */
+const CONFIG_WRITES = new Set([
+  '--add',
+  '--replace-all',
+  '--unset',
+  '--unset-all',
+  '--rename-section',
+  '--remove-section',
+  '--edit',
+  '-e',
+])
+const CONFIG_WRITE_COMMANDS = new Set(['set', 'unset', 'rename-section', 'remove-section', 'edit'])
 /** The options of `git config` that take the next word as their value. */
 const CONFIG_VALUES = new Set([
   '-f',
   '--file',
   '--blob',
+  '-t',
   '--type',
   '--default',
   '--comment',
   '--value',
+  '--url',
 ])
 
-/** The `git config` write of Git's arguments, null when they are no such write. */
-function gitConfigWrite(args: ReadonlyArray<string>): GitConfigWrite | null {
+/** Whether a setting Git is handed (`-c`, `--config-env`) names the template folder. */
+const namesTemplates = (setting: string): boolean => /^init\.templatedir=/i.test(setting)
+
+/**
+ * The write a Git command's arguments make, null when none: `git config` unless it only reads,
+ * or `git init` and `git clone` with a template. `before` are the words before `git`, its
+ * environment among them.
+ */
+function gitSettingsWrite(
+  before: ReadonlyArray<string>,
+  args: ReadonlyArray<string>,
+): GitSettingsWrite | null {
   const folders: string[] = []
   let gitDir: string | null = null
+  let templates = before.some((word) => /^GIT_TEMPLATE_DIR=/i.test(word))
   let at = 0
   while (at < args.length) {
     const word = args[at] ?? ''
@@ -280,45 +323,76 @@ function gitConfigWrite(args: ReadonlyArray<string>): GitConfigWrite | null {
     } else if (word.startsWith('--git-dir=')) {
       gitDir = word.slice('--git-dir='.length)
       at += 1
+    } else if (word.startsWith('--config-env=')) {
+      templates ||= namesTemplates(word.slice('--config-env='.length))
+      at += 1
     } else if (GIT_VALUES.has(word)) {
       if (value === undefined) return { file: 'unread' }
+      if (word === '-c' || word === '--config-env') templates ||= namesTemplates(value)
       at += 2
     } else if (word.startsWith('-')) at += 1
     else break
   }
   if (at >= args.length) return null
-  if ((args[at] ?? '').toLowerCase() !== 'config') return null
+  const sub = (args[at] ?? '').toLowerCase()
   const rest = args.slice(at + 1)
-  let file: GitConfigWrite = { file: 'repository', folders, gitDir }
-  let first: string | null = null
+  if (sub === 'init' || sub === 'clone') {
+    templates ||= rest.some((word) => word === '--template' || word.startsWith('--template='))
+    return templates ? { file: 'hooks', folders, gitDir } : null
+  }
+  if (sub !== 'config') return null
+  let file: GitSettingsWrite = { file: 'repository', folders, gitDir }
+  let reads: number | null = null
+  let writes = false
+  const positional: string[] = []
+  let options = true
   for (let index = 0; index < rest.length; index += 1) {
     const word = rest[index] ?? ''
-    if (CONFIG_READS.test(word)) return null
-    if (word === '--global') file = { file: 'global' }
+    if (!options || !word.startsWith('-')) {
+      positional.push(word)
+      continue
+    }
+    if (word === '--') options = false
+    else if (word === '--global') file = { file: 'global' }
     else if (word === '--system') file = { file: 'system' }
     else if (word.startsWith('--file=')) file = { file: 'named', folders, path: word.slice(7) }
-    if (CONFIG_VALUES.has(word)) {
+    else if (CONFIG_WRITES.has(word)) writes = true
+    else if (CONFIG_READS.has(word)) reads = reads === null ? (CONFIG_READS.get(word) ?? 0) : -1
+    else if (CONFIG_VALUES.has(word)) {
       const value = rest[index + 1]
       if (value === undefined) return { file: 'unread' }
       if (word === '-f' || word === '--file') file = { file: 'named', folders, path: value }
       index += 1
-    } else if (!word.startsWith('-')) first ??= word
+    }
   }
-  return first === 'get' || first === 'list' ? null : file
+  const command = (positional[0] ?? '').toLowerCase()
+  if (CONFIG_WRITE_COMMANDS.has(command)) return file
+  const named = CONFIG_READ_COMMANDS.get(command)
+  const read =
+    writes || (named !== undefined && reads !== null)
+      ? false
+      : named !== undefined
+        ? positional.length - 1 <= named
+        : reads === null
+          ? // `git config <name>` alone gets its value.
+            positional.length === 1
+          : reads >= 0 && positional.length <= reads
+  return read ? null : file
 }
 
 /**
- * Every `git config` a line's commands would run that writes, through any wrapper or shell, read
- * at every word as the refusals read them: a write always asks, as a sensitive place does.
+ * Every write a line's commands would make to what Git reads as its own, through any wrapper or
+ * shell, read at every word as the refusals read them: each always asks, as a sensitive place
+ * does. A `git config` is a read only when it says so and holds no write form; anything else asks.
  */
-export function gitConfigWrites(
+export function gitSettingsWrites(
   sequences: ReadonlyArray<ReadonlyArray<string>>,
-): ReadonlyArray<GitConfigWrite> {
-  const writes: GitConfigWrite[] = []
+): ReadonlyArray<GitSettingsWrite> {
+  const writes: GitSettingsWrite[] = []
   for (const words of sequences) {
     for (const [at, word] of words.entries()) {
       if (programName(word) !== 'git') continue
-      const write = gitConfigWrite(words.slice(at + 1))
+      const write = gitSettingsWrite(words.slice(0, at), words.slice(at + 1))
       if (write !== null) writes.push(write)
     }
   }
