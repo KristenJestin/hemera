@@ -96,6 +96,13 @@ const callKeyIn = (meta: Schema.Json | undefined): string | null =>
 
 const readJson = Schema.decodeUnknownOption(Schema.Json)
 
+/**
+ * Reads the arguments of a call as the agent sent them. It is the one decoding they go through:
+ * the gate takes them typed as read, and a suite counts the decodings by handing its own (#440).
+ */
+export const readArguments = readJson
+export type ArgumentsReader = typeof readArguments
+
 /** One tool as `tools/list` shows it. */
 const listed = (name: ToolName) => {
   const inputSchema = toToolInputSchema(TOOLS[name].input)
@@ -146,7 +153,11 @@ const asNodeResponse = (response: ServerResponse): NodeServerResponseLike => ({
   },
 })
 
-export const toolServerLayer = (log: Log, version: string) =>
+export const toolServerLayer = (
+  log: Log,
+  version: string,
+  readingArguments: ArgumentsReader = readArguments,
+) =>
   Layer.effect(
     ToolServer,
     Effect.gen(function* () {
@@ -174,7 +185,10 @@ export const toolServerLayer = (log: Log, version: string) =>
               gate.call({
                 grantId: grant?.id ?? '',
                 tool: request.params.name,
-                arguments: Option.getOrElse(readJson(request.params.arguments ?? {}), () => ({})),
+                arguments: Option.getOrElse(
+                  readingArguments(request.params.arguments ?? {}),
+                  () => ({}),
+                ),
                 // oxlint-disable-next-line eslint/no-underscore-dangle -- `_meta` is the protocol's own name for its extension slot
                 callKey: callKeyIn(Option.getOrUndefined(readJson(call.mcpReq._meta))),
               }),

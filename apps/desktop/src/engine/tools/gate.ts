@@ -244,7 +244,6 @@ const REASON_KEPT = 500
 /** How much of a call's arguments its record keeps: enough to read it, never a whole file. */
 const ARGUMENTS_KEPT = 2000
 
-const readArgumentFields = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
 const readProposedChanges = Schema.decodeUnknownOption(
   Schema.Struct({ changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)) }),
 )
@@ -278,6 +277,9 @@ const ARGUMENTS_WALKED = 2 * ARGUMENTS_KEPT
 
 /** `Array.isArray` does not narrow a read-only array out of a union: this does. */
 const isJsonList = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+/** Whether a value is a record of fields, not a list; the arguments are JSON already, decoded once. */
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value)
 
 /**
  * A call's arguments cut to what a record keeps of them, before they are masked (#392): a string
@@ -337,12 +339,13 @@ const cutForRecord = (secrets: SecretsRegistry, record: Schema.JsonObject) => {
 /**
  * A call's arguments as its record keeps them: cut (`cutForRecord`), masked, then cut again at
  * what a record holds. A request of 16 MiB is never masked whole, at once, for the 2,000
- * characters a record holds of it (#392).
+ * characters a record holds of it (#392). They arrive typed `Schema.Json`, decoded once by the
+ * server that read them off the wire: they are not decoded again here (#440).
  */
 const argumentsKept = (secrets: SecretsRegistry, tool: string, given: Schema.Json) =>
   Effect.gen(function* () {
     const args = withoutProposedValues(tool, given)
-    const fields = readArgumentFields(args)
+    const fields = isJsonObject(args) ? Option.some(args) : Option.none()
     const masked = Option.isNone(fields)
       ? yield* maskedHead(secrets, agentText(args), ARGUMENTS_KEPT + 1)
       : maskedJson(secrets.maskArguments(yield* cutForRecord(secrets, fields.value)))

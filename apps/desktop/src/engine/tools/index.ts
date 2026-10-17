@@ -78,7 +78,7 @@ import {
   noSetupDesk,
   noWriteAttribution,
 } from './ports.ts'
-import { ToolServer, toolServerLayer } from './server.ts'
+import { type ArgumentsReader, ToolServer, toolServerLayer } from './server.ts'
 import type { ProjectServices } from '../repositories.ts'
 import type { SetupValues } from '../setup/values.ts'
 import type { Preparations } from '../workspaces.ts'
@@ -90,6 +90,8 @@ export { AgentJudges, HemeraAuto, ToolAccess, ToolGate, ToolServer }
 
 /** What later tickets plug into the gate; the defaults otherwise. */
 export interface ToolsParts {
+  /** How a call's arguments are read off the wire, once (#440); the schema's own otherwise. */
+  readonly readingArguments?: ArgumentsReader
   readonly verdicts?: Layer.Layer<Verdicts>
   readonly permissionRequests?: Layer.Layer<PermissionRequests>
   readonly sensitivePlaces?: Layer.Layer<SensitivePlaces>
@@ -266,7 +268,10 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
   const platform = process.platform
   return hemeraEndpointLayer(log).pipe(
     Layer.provideMerge(
-      Layer.merge(toolServerLayer(log, version), approvalsLayer({ log, home, platform })),
+      Layer.merge(
+        toolServerLayer(log, version, parts.readingArguments),
+        approvalsLayer({ log, home, platform }),
+      ),
     ),
     Layer.provideMerge(toolGateLayer({ log, home: parts.home })),
     Layer.provideMerge(
