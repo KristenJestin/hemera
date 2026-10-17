@@ -1706,13 +1706,46 @@ const TAG = '_tag'
 type NamedBy = 'agent' | 'engine'
 
 /**
+ * The fields of a record the engine fixes, by name: for each, the literals its schema allows
+ * there. A field of the record itself (never one nested in it) that holds exactly one of them is
+ * kept as it is: it names something of Hemera's (a settings section), never a secret, and masked
+ * it would no longer name it (#416). Any other field, or any other value, is masked as text.
+ */
+export type FixedFields = ReadonlyMap<string, ReadonlyArray<string>>
+
+const NOTHING_FIXED: FixedFields = new Map()
+
+/**
+ * Whether a string of a record the engine builds is kept as it is: its tag, or a field of the
+ * record itself that holds a literal its schema fixes. `top` says the string is a field of the
+ * record itself, `inRecord` that it is a field at all, not an item of a list.
+ */
+const keptAsIs = (
+  namedBy: NamedBy,
+  fixed: FixedFields,
+  name: string,
+  item: Schema.Json,
+  inRecord: boolean,
+  top: boolean,
+): boolean =>
+  namedBy === 'engine' &&
+  inRecord &&
+  Predicate.isString(item) &&
+  (name === TAG || (top && fixed.get(name)?.includes(item) === true))
+
+/**
  * A structured value with every string in it masked by `string`, and a field whose name says it
  * is a credential masked whole. The names of its fields and its string tags are masked too when an
  * agent chose them (#404); a value the engine builds keeps both, as the schema that reads it back
  * needs them. The containers open are kept on a stack, not in calls, so no depth of nesting runs
  * out of stack; what lies beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
  */
-const walk = (record: Schema.JsonObject, string: MaskString, namedBy: NamedBy): Walked => {
+const walk = (
+  record: Schema.JsonObject,
+  string: MaskString,
+  namedBy: NamedBy,
+  fixed: FixedFields = NOTHING_FIXED,
+): Walked => {
   let cut = false
   const open: Level[] = []
   const rename = (name: string) => (namedBy === 'agent' ? string(name, '') : name)
@@ -1734,7 +1767,7 @@ const walk = (record: Schema.JsonObject, string: MaskString, namedBy: NamedBy): 
     const item = level.items[at] ?? null
     const name = level.names?.[at] ?? level.into
     const kept = level.keptNames?.[at] ?? level.kept
-    if (namedBy === 'engine' && level.names !== null && name === TAG && Predicate.isString(item)) {
+    if (keptAsIs(namedBy, fixed, name, item, level.names !== null, open.length === 1)) {
       level.masked.push([kept, item])
     } else if (CREDENTIAL_FIELD.test(name)) {
       level.masked.push([kept, MASK])
@@ -1764,16 +1797,144 @@ const maskedWhole = (
   return Object.fromEntries(kept.map((one) => [one, MASK]))
 }
 
+/**
+ * A masked record as its JSON writes it, and the stretches of that text masking may write over,
+ * in order: each string but those kept as they are, and each name when an agent chose the names.
+ * The text is the one `JSON.stringify` writes. A masked record nests no deeper than
+ * `NESTING_LIMIT`, so the calls here stay within the stack.
+ */
+const writtenRecord = (record: Schema.JsonObject, namedBy: NamedBy, fixed: FixedFields) => {
+  const pieces: string[] = []
+  const spans: Span[] = []
+  let length = 0
+  const put = (piece: string, open: boolean) => {
+    if (open) spans.push([length, length + piece.length])
+    pieces.push(piece)
+    length += piece.length
+  }
+  const value = (item: Schema.Json, kept: boolean, top: boolean) => {
+    if (Predicate.isString(item)) put(JSON.stringify(item), !kept)
+    else if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) {
+      put(JSON.stringify(item), false)
+    } else if (isList(item)) {
+      put('[', false)
+      item.forEach((one, at) => {
+        if (at > 0) put(',', false)
+        value(one, false, false)
+      })
+      put(']', false)
+    } else {
+      put('{', false)
+      Object.entries(item).forEach(([name, one], at) => {
+        if (at > 0) put(',', false)
+        put(JSON.stringify(name), namedBy === 'agent')
+        put(':', false)
+        value(one, keptAsIs(namedBy, fixed, name, one, true, top), false)
+      })
+      put('}', false)
+    }
+  }
+  value(record, false, true)
+  return { text: pieces.join(''), spans }
+}
+
+/**
+ * A masked record with the strings `hidden` says masked whole (`hidden` is asked once for each
+ * stretch `writtenRecord` gives, in order), and the names too when an agent chose them; names
+ * masked alike are numbered as the walk numbers them (`keptNames`).
+ */
+const rewritten = (
+  record: Schema.JsonObject,
+  namedBy: NamedBy,
+  fixed: FixedFields,
+  hidden: (index: number) => boolean,
+): Schema.JsonObject => {
+  let index = 0
+  const next = () => {
+    index += 1
+    return hidden(index - 1)
+  }
+  const fields = (item: Schema.JsonObject, top: boolean): Schema.JsonObject => {
+    const entries = Object.entries(item)
+    const names: string[] = []
+    const values: Schema.Json[] = []
+    for (const [name, one] of entries) {
+      names.push(namedBy === 'agent' && next() ? MASK : name)
+      values.push(value(one, keptAsIs(namedBy, fixed, name, one, true, top)))
+    }
+    const kept = keptNames(
+      entries.map(([name]) => name),
+      names,
+    )
+    return Object.fromEntries(kept.map((name, at) => [name, values[at] ?? null]))
+  }
+  const value = (item: Schema.Json, kept: boolean): Schema.Json => {
+    if (Predicate.isString(item)) return !kept && next() ? MASK : item
+    if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) return item
+    if (isList(item)) return item.map((one) => value(one, false))
+    return fields(item, false)
+  }
+  return fields(record, true)
+}
+
+/**
+ * The indexes of the stretches that any of the hits touches; both lists in order, the hits apart,
+ * crossed once.
+ */
+const touchedBy = (spans: ReadonlyArray<Span>, hits: ReadonlyArray<Span>): ReadonlySet<number> => {
+  const touched = new Set<number>()
+  let hit = 0
+  spans.forEach(([start, end], index) => {
+    while ((hits[hit]?.[1] ?? Number.POSITIVE_INFINITY) <= start) hit += 1
+    if ((hits[hit]?.[0] ?? Number.POSITIVE_INFINITY) < end) touched.add(index)
+  })
+  return touched
+}
+
+/**
+ * A masked record whose stored text holds no known value across its strings (#416): masked string
+ * by string, a known value written with JSON's quotes, commas or colons can still stand across a
+ * name and its value (`a":"b` in `{"zz a":"b zz"}`), two items of a list, or what an escape
+ * writes (`a\"b`). Every string such a value touches in the text is masked whole, and every name
+ * an agent chose; the names of a record the engine builds, its tags and its fixed fields stay, as
+ * its schema reads them back. Masks written may make a value that holds `•••` appear: if one then
+ * touches what can still be masked, all of it is. Each pass crosses the text once.
+ */
+const storedSafe = (
+  record: Schema.JsonObject,
+  known: ReadonlyArray<string>,
+  namedBy: NamedBy,
+  fixed: FixedFields,
+): Schema.JsonObject => {
+  if (known.length === 0) return record
+  const first = writtenRecord(record, namedBy, fixed)
+  const hits = done(knownSpans(first.text, known))
+  if (hits.length === 0) return record
+  const touched = touchedBy(first.spans, hits)
+  if (touched.size === 0) return record
+  const once = rewritten(record, namedBy, fixed, (index) => touched.has(index))
+  const second = writtenRecord(once, namedBy, fixed)
+  const left = touchedBy(second.spans, done(knownSpans(second.text, known)))
+  const open = [...left].some((index) => {
+    const [start, end] = second.spans[index] ?? [0, 0]
+    return second.text.slice(start, end) !== QUOTED_MASK
+  })
+  return open ? rewritten(once, namedBy, fixed, () => true) : once
+}
+
 /** `maskRecord` or `maskArguments`, as `namedBy` says. */
 const maskedNamedBy = (
   record: Schema.JsonObject,
   values: ReadonlyArray<string>,
   namedBy: NamedBy,
+  fixed: FixedFields = NOTHING_FIXED,
 ): Masked<Schema.JsonObject> => {
   const known = longestFirst(values)
   const masked = (text: string) => doneOrMask(() => textMasked(text, known))
   try {
-    return maskedRecord(walk(record, masked, namedBy).masked)
+    return maskedRecord(
+      storedSafe(walk(record, masked, namedBy, fixed).masked, known, namedBy, fixed),
+    )
   } catch {
     return maskedRecord(maskedWhole(record, namedBy === 'agent' ? masked : (name) => name))
   }
@@ -1784,14 +1945,17 @@ const maskedNamedBy = (
  * says it is a credential (`password`, `token`, `secret`, `api_key`, `credential`,
  * `authorization`) masked whole. Its names and its string tags are kept as they are: a schema
  * fixed them and reads them back, and a variable that holds `options` must not rename a need's
- * `options`. What lies beyond `NESTING_LIMIT` containers, or whatever cannot be read, is `•••`,
- * and the call it serves never fails.
+ * `options`. A field of the record that `fixed` lists keeps a literal its schema fixes there (#416).
+ * No known value stands across its strings in the JSON it is stored as (`storedSafe`). What lies
+ * beyond `NESTING_LIMIT` containers, or whatever cannot be read, is `•••`, and the call it serves
+ * never fails.
  */
 export function maskRecord(
   record: Schema.JsonObject,
   values: ReadonlyArray<string>,
+  fixed: FixedFields = NOTHING_FIXED,
 ): Masked<Schema.JsonObject> {
-  return maskedNamedBy(record, values, 'engine')
+  return maskedNamedBy(record, values, 'engine', fixed)
 }
 
 /**
