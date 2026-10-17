@@ -130,6 +130,15 @@ describe('A file tool reads a file for an agent through the judged open only (#3
     expect(readRefusalsOf('apps/desktop/src/engine/tools/read.ts', read)).toHaveLength(1)
   })
 
+  test('the capture of a Probe’s files reads through the judged open too (#425)', () => {
+    const probes = 'apps/desktop/src/engine/planning/probes.ts'
+    const source = "import { lstatSync, readFileSync, readlinkSync } from 'node:fs'\n"
+    expect(readRefusalsOf(probes, source)).toMatchObject([{ file: probes, found: 'readFileSync' }])
+    expect(readRefusalsOf(probes, "import { lstatSync, readlinkSync } from 'node:fs'\n")).toEqual(
+      [],
+    )
+  })
+
   test('outside the file tools, a read is not this rule’s', () => {
     const source = "import { readFile } from 'node:fs/promises'\n"
     expect(readRefusalsOf('apps/desktop/src/engine/storage/database.ts', source)).toEqual([])
@@ -174,6 +183,21 @@ describe('A file tool reads a file for an agent through the judged open only (#3
       ])
     },
   )
+
+  test('a raw read planted in the capture of a Probe’s files fails the check (#425)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-boundaries-'))
+    try {
+      const planning = join(root, 'apps', 'desktop', 'src', 'engine', 'planning')
+      mkdirSync(planning, { recursive: true })
+      writeFileSync(join(planning, 'probes.ts'), "import { openSync, readSync } from 'node:fs'\n")
+      expect(analyze(root)).toMatchObject([
+        { file: 'apps/desktop/src/engine/planning/probes.ts', found: 'openSync' },
+        { file: 'apps/desktop/src/engine/planning/probes.ts', found: 'readSync' },
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 
   test('the exception for a judged call’s file planted in a file tool fails the check', () => {
     expect(plantedIn('const withholding = Withholding.asked(judged)\n')).toMatchObject([

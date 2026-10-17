@@ -15,9 +15,11 @@
  *
  * A file tool hands an agent a file's content through the judged open (`judged.ts`), which asks
  * the sensitive places first (#392). So under `apps/desktop/src/engine/tools/`, no other file
- * imports what of `node:fs` reads a file, but for the few listed with their reason; and the one
- * exception to the sensitive places, the file of a call a verdict judged (`Withholding.asked`), is
- * made by the gate alone. What the agents' other tools read is not seen here.
+ * imports what of `node:fs` reads a file, but for the few listed with their reason, nor does the
+ * capture of a Probe's files (`engine/planning/probes.ts`, #425), which keeps what it reads; and
+ * the one exception to the sensitive places, the file of a call a verdict judged
+ * (`Withholding.asked`), is made by the gate alone. What the agents' other tools read is not seen
+ * here.
  *
  *   node tools/boundaries.ts
  */
@@ -96,6 +98,9 @@ export function storageRefusalsOf(file: string, source: string): Refusal[] {
 /** The file tools, which read files for an agent. */
 export const FILE_TOOLS = 'apps/desktop/src/engine/tools/'
 
+/** The capture of a Probe's files, which keeps their content as a file tool hands it (#425). */
+const PROBE_CAPTURE = 'apps/desktop/src/engine/planning/probes.ts'
+
 /** The judged open, the one file tool that reads a file's content with `node:fs`. */
 const JUDGED_OPEN = `${FILE_TOOLS}judged.ts`
 
@@ -160,9 +165,12 @@ function fsTaken(source: string): string[] {
   return taken
 }
 
-/** What a file tool other than the judged open takes of `node:fs` to read a file. */
+/**
+ * What a file tool other than the judged open, or the capture of a Probe's files, takes of
+ * `node:fs` to read a file.
+ */
 export function readRefusalsOf(file: string, source: string): Refusal[] {
-  if (!file.startsWith(FILE_TOOLS) || file === JUDGED_OPEN) return []
+  if ((!file.startsWith(FILE_TOOLS) && file !== PROBE_CAPTURE) || file === JUDGED_OPEN) return []
   return fsTaken(source)
     .filter((name) => name === 'node:fs' || READS.has(name))
     .filter((name) => !READS_ALLOWED.some((one) => one.file === file && one.name === name))
