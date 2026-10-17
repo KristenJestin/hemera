@@ -1033,11 +1033,20 @@ const readingFrom = (text: string, start: number, found: Keyed[]): void => {
   let keyed = false
   /** A key and its colon read from `at`: where its value begins, or -1 when the reading broke. */
   const field = (at: number): number => {
-    if (text.charAt(at) !== '"') return (broke(at), -1)
+    if (text.charAt(at) !== '"') {
+      broke(at)
+      return -1
+    }
     const name = stringRead(text, at)
-    if (!name.closed) return (broke(name.stop), -1)
+    if (!name.closed) {
+      broke(name.stop)
+      return -1
+    }
     const colon = space(name.stop)
-    if (text.charAt(colon) !== ':') return (broke(colon), -1)
+    if (text.charAt(colon) !== ':') {
+      broke(colon)
+      return -1
+    }
     keyed = CREDENTIAL_FIELD.test(JSON.parse(text.slice(at, name.stop)))
     return colon + 1
   }
