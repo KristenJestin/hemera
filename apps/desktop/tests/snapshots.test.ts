@@ -1663,6 +1663,7 @@ describe('A snapshot adds only the paths it listed and checked', () => {
       symlinkSync(join(worktree, 'inner'), join(worktree, 'alias'), 'junction')
       try {
         symlinkSync('tracked.txt', join(worktree, 'tracked-link'), 'file')
+        symlinkSync(join(worktree, 'inner'), join(worktree, 'inner-link'), 'dir')
       } catch {
         context.skip()
       }
@@ -1681,6 +1682,17 @@ describe('A snapshot adds only the paths it listed and checked', () => {
         `120000 blob ${blob}\ttracked-link`,
       )
       expect(entryAt(seen.projectId, main, seen.tree, 'alias')).toMatch(/^120000 blob /)
+      // A folder link to an absolute target, as Git itself stores it (`/` on Windows too).
+      const own = { ...process.env, GIT_INDEX_FILE: join(work, 'own-index') }
+      execFileSync('git', ['add', '--', 'inner-link'], { cwd: worktree, env: own })
+      const stored = execFileSync('git', ['ls-files', '-s', '--', 'inner-link'], {
+        cwd: worktree,
+        env: own,
+        encoding: 'utf8',
+      })
+      expect(entryAt(seen.projectId, main, seen.tree, 'inner-link')).toBe(
+        stored.trim().replace(/^120000 (\w+) 0\t/, '120000 blob $1\t'),
+      )
     })
   })
 })
