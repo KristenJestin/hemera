@@ -37,7 +37,7 @@ import { createMission, moveMission } from '../src/engine/missions.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { memoryEvidence } from '../src/engine/storage/schema.ts'
 import { replaceFile } from '../src/engine/tools/files.ts'
-import { openJudged } from '../src/engine/tools/judged.ts'
+import { CASE_ONLY, REPLACED, openJudged } from '../src/engine/tools/judged.ts'
 import { readPage } from '../src/engine/tools/read.ts'
 import { searchIn } from '../src/engine/tools/search.ts'
 import { commandsEngine } from './commands-engine.ts'
@@ -765,5 +765,50 @@ describe('An evidence is read as a regular file only', () => {
       expect(Result.isFailure(read)).toBe(true)
     },
     20_000,
+  )
+})
+
+describe('A judged open says truly why it refuses a file (#425)', () => {
+  test('a file renamed over between its open and its proof is refused as replaced, not as a link', async () => {
+    const file = join(work, 'notes.txt')
+    writeFileSync(file, 'ours')
+    writeFileSync(join(work, 'other.txt'), 'another file')
+    let renamed = true
+    const opened = await openJudged(file, {
+      withholding: NOTHING_WITHHELD,
+      opened: async () => {
+        // Windows refuses to rename over a file another handle holds open: nothing to replace.
+        try {
+          renameSync(join(work, 'other.txt'), file)
+        } catch {
+          renamed = false
+        }
+      },
+    }).then(
+      async (handle) => {
+        await handle.close()
+        return 'opened'
+      },
+      (cause: Error) => cause.message,
+    )
+    expect(opened).toBe(renamed ? REPLACED : 'opened')
+    if (process.platform !== 'win32') expect(renamed).toBe(true)
+  })
+
+  test.skipIf(process.platform !== 'win32')(
+    'a name that differs from the disk only in case is refused in those words, not as a link',
+    async () => {
+      writeFileSync(join(work, 'importer.ts'), 'ours')
+      const refused = await openJudged(join(work, 'Importer.ts'), {
+        withholding: NOTHING_WITHHELD,
+      }).then(
+        async (handle) => {
+          await handle.close()
+          return 'opened'
+        },
+        (cause: Error) => cause.message,
+      )
+      expect(refused).toBe(CASE_ONLY)
+    },
   )
 })
