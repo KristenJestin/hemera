@@ -913,8 +913,12 @@ describe('The end and Cancel', () => {
       within(
         profile,
         Effect.gen(function* () {
+          // The stops a stop cut run after the start, beside what reads the Building: both waited for.
           yield* until(
-            Effect.map(buildingOf(first.mission.id), (view) => view?.state === 'cancelled'),
+            Effect.map(
+              Effect.all([buildingOf(first.mission.id), getMission(first.mission.id)]),
+              ([view, mission]) => view?.state === 'cancelled' && mission.unstopped.length === 0,
+            ),
           )
           const live = yield* sessionsIn(['starting', 'working', 'idle'], {
             kind: 'mission',
