@@ -8,7 +8,16 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  lstatSync,
+  readFileSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -234,18 +243,47 @@ describe('What a fingerprint costs (#457)', () => {
     expect(shapesOf([main], home).get(hook)?.digest).not.toBe(before?.digest)
   })
 
-  test('a large config trusted on its stat still has its includes followed', async () => {
+  test('a config rewritten with every stat field restored is still seen: only a hooks folder trusts its stat', () => {
     const main = repository(join(work, 'acme'))
-    const included = join(work, 'included')
-    writeFileSync(included, '[core]\n\tname = value\n')
-    const line = '\tname = value\n'
-    writeFileSync(
-      join(main, '.git', 'config'),
-      `[include]\n\tpath = ${included}\n[core]\n${line.repeat(10_000)}`,
-    )
+    const config = join(main, '.git', 'config')
+    const hook = join(main, '.git', 'hooks', 'pre-commit')
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n')
+    // Every file's times pinned long ago, as a tool that sets them back leaves them: Linux cannot
+    // set a ctime back, NTFS can set its ChangeTime.
+    const restored = (path: string) => {
+      const real = lstatSync(path, { bigint: true })
+      return {
+        isSymbolicLink: () => real.isSymbolicLink(),
+        isDirectory: () => real.isDirectory(),
+        isFile: () => real.isFile(),
+        size: real.size,
+        ino: real.ino,
+        dev: real.dev,
+        mode: real.mode,
+        mtimeNs: 1n,
+        ctimeNs: 1n,
+      }
+    }
+    const before = shapesOf([main], home, [], restored)
+    const text = readFileSync(config, 'utf8')
+    // The same size, written in place.
+    writeFileSync(config, text.replace('bare = false', 'bare = fals2'))
+    writeFileSync(hook, '#!/bin/sh\nexit 1\n')
+    const after = shapesOf([main], home, [], restored)
+    expect(after.get(config)?.digest).not.toBe(before.get(config)?.digest)
+    // The hooks folder is trusted on its stat: restored whole, its rewrite goes unseen.
+    expect(after.get(hook)?.digest).toBe(before.get(hook)?.digest)
+  })
+
+  test('a file a config includes from a hooks folder, trusted there on its stat, still has its own includes followed', async () => {
+    const main = repository(join(work, 'acme'))
+    const nested = join(work, 'nested')
+    writeFileSync(nested, '[core]\n\tname = value\n')
+    writeFileSync(join(main, '.git', 'hooks', 'shared.cfg'), `[include]\n\tpath = ${nested}\n`)
+    git(main, 'config', 'include.path', 'hooks/shared.cfg')
     await new Promise((resolved) => setTimeout(resolved, 2_500))
     shapesOf([main], home)
-    expect(paths([main])).toContain(included)
+    expect(paths([main])).toContain(nested)
   }, 30_000)
 
   test('files unchanged for seconds are trusted on their stat: a second fingerprint of 10,000 hooks is at least three times faster', async () => {

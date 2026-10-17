@@ -104,9 +104,11 @@ const SETTLED_NS = 2_000_000_000n
 const REMEMBERED = 100_000
 
 /**
- * The digest and text of files hashed once, by path, with the stat they had. A file whose size,
- * times, inode and mode are the same is not read again, unless it was hashed less than
- * `SETTLED_NS` after its last change: a rewrite in that same tick could keep every one of them.
+ * The shapes of the files of hooks folders hashed once, by path, with the stat they had. One whose
+ * size, times, inode, device and mode are the same is not read again, unless it was hashed less
+ * than `SETTLED_NS` after its last change: a rewrite in that same tick could keep every one of
+ * them. A configuration, an included file or an attributes file is hashed every time, on every
+ * system: a stat can be set back (NTFS's ChangeTime can), and those few files are cheap to read.
  */
 const hashed = new Map<
   string,
@@ -114,7 +116,6 @@ const hashed = new Map<
     readonly stat: string
     readonly settled: boolean
     readonly shape: Shape
-    readonly bytes: Buffer | null
   }
 >()
 
@@ -124,11 +125,37 @@ const configNames = new Map<
   { readonly includes: ReadonlyArray<string>; readonly hooksPaths: ReadonlyArray<string> }
 >()
 
-/** One path as it stands, and its bytes when it is a file read (a link's, where it leads). */
-function entryOf(path: string): { readonly shape: Shape; readonly bytes: Buffer | null } | null {
-  let named: BigIntStats
+/** What a fingerprint reads of a path's stat. */
+export type ShapeStat = Pick<
+  BigIntStats,
+  | 'isSymbolicLink'
+  | 'isDirectory'
+  | 'isFile'
+  | 'size'
+  | 'mtimeNs'
+  | 'ctimeNs'
+  | 'ino'
+  | 'dev'
+  | 'mode'
+>
+
+/** A path's stat, as the fingerprint reads it: the machine's own, but for the tests. */
+export type StatOf = (path: string) => ShapeStat
+
+const lstatOf: StatOf = (path) => lstatSync(path, { bigint: true })
+
+/**
+ * One path as it stands, and its bytes when it is a file read (a link's, where it leads). Only a
+ * `trusted` file, one of a hooks folder, may stand for its bytes by its stat.
+ */
+function entryOf(
+  path: string,
+  trusted = false,
+  statOf: StatOf = lstatOf,
+): { readonly shape: Shape; readonly bytes: Buffer | null } | null {
+  let named: ShapeStat
   try {
-    named = lstatSync(path, { bigint: true })
+    named = statOf(path)
   } catch (cause) {
     if (codeOf(cause) === 'ENOENT' || codeOf(cause) === 'ENOTDIR') return null
     return { shape: shapeOf('other', `unreadable:${codeOf(cause)}`), bytes: null }
@@ -142,7 +169,7 @@ function entryOf(path: string): { readonly shape: Shape; readonly bytes: Buffer 
     } catch (cause) {
       return { shape: shapeOf('link', `link:${says}:${codeOf(cause)}`), bytes: null }
     }
-    const behind = entryOf(real)
+    const behind = entryOf(real, trusted, statOf)
     const digest = `link:${says}:${behind === null ? 'none' : behind.shape.digest}`
     return { shape: shapeOf('link', digest), bytes: behind?.bytes ?? null }
   }
@@ -156,8 +183,10 @@ function entryOf(path: string): { readonly shape: Shape; readonly bytes: Buffer 
   const stat = [named.size, named.mtimeNs, named.ctimeNs, named.ino, named.dev, named.mode].join(
     ':',
   )
-  const known = hashed.get(path)
-  if (known !== undefined && known.settled && known.stat === stat) return known
+  const known = trusted ? hashed.get(path) : undefined
+  if (known !== undefined && known.settled && known.stat === stat) {
+    return { shape: known.shape, bytes: null }
+  }
   const changed = named.mtimeNs > named.ctimeNs ? named.mtimeNs : named.ctimeNs
   const settled = BigInt(Date.now()) * 1_000_000n - changed >= SETTLED_NS
   const read = bytesOf(path)
@@ -168,13 +197,10 @@ function entryOf(path: string): { readonly shape: Shape; readonly bytes: Buffer 
   const mode = (named.mode & 0o777n).toString(8)
   const text = bytes.length <= TEXT_KEPT && isUtf8(bytes) ? bytes.toString('utf8') : null
   const shape = shapeOf('file', `file:${mode}:${sha256(bytes)}`, text)
-  if (hashed.size >= REMEMBERED) hashed.clear()
-  hashed.set(path, {
-    stat,
-    settled,
-    shape,
-    bytes: bytes.length <= TEXT_KEPT ? bytes : null,
-  })
+  if (trusted) {
+    if (hashed.size >= REMEMBERED) hashed.clear()
+    hashed.set(path, { stat, settled, shape })
+  }
   return { shape, bytes }
 }
 
@@ -245,16 +271,17 @@ export function shapesOf(
   checkouts: ReadonlyArray<string>,
   home: ShapeHome,
   repositories: ReadonlyArray<string> = [],
+  statOf: StatOf = lstatOf,
 ): Shapes {
   const shapes = new Map<string, Shape>()
   const bytes = new Map<string, Buffer>()
-  const add = (path: string, everywhere = false): void => {
+  const add = (path: string, everywhere = false, trusted = false): void => {
     const known = shapes.get(path)
     if (known !== undefined) {
       if (everywhere && !known.everywhere) shapes.set(path, { ...known, everywhere })
       return
     }
-    const entry = entryOf(path)
+    const entry = entryOf(path, trusted, statOf)
     if (entry === null) return
     shapes.set(path, { ...entry.shape, everywhere })
     if (entry.bytes !== null) bytes.set(path, entry.bytes)
@@ -268,15 +295,15 @@ export function shapesOf(
     let entries = 0
     const into = (folder: string): void => {
       if (entries > WALKED) return
-      add(folder, everywhere)
+      add(folder, everywhere, true)
       const shape = shapes.get(folder)
       if (shape === undefined) return
       let real = folder
       if (shape.kind === 'link') {
         const leads = realOrNull(folder)
-        if (leads === null || entryOf(leads)?.shape.kind !== 'folder') return
+        if (leads === null || entryOf(leads, true, statOf)?.shape.kind !== 'folder') return
         real = leads
-        add(real, everywhere)
+        add(real, everywhere, true)
       } else if (shape.kind !== 'folder') return
       if (walked.has(real)) return
       walked.add(real)
