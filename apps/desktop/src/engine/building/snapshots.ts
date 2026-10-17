@@ -645,19 +645,35 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           return store
         })
 
-      /** The object folder of a repository, its main one for a linked worktree. */
-      const objectsOf = (folder: string) =>
-        run(folder, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read').pipe(
+      /**
+       * The object folder of a repository, its main one for a linked worktree: found once, it does
+       * not move, and every Git process costs tens of milliseconds on Windows (#444).
+       */
+      const objectFolders = new Map<string, string>()
+      const objectsOf = (folder: string) => {
+        const known = objectFolders.get(folder)
+        if (known !== undefined) return Effect.succeed(known)
+        return run(
+          folder,
+          ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+          'read',
+        ).pipe(
           Effect.map((printed) => join(text(printed).trim(), 'objects')),
+          Effect.tap((objects) => Effect.sync(() => objectFolders.set(folder, objects))),
         )
+      }
 
       /**
        * The Git folders a snapshot of the mission's Project may read, as they really are: the
        * shared one of each of its repositories in the main checkout. They are named by the main
        * checkout, never by a Workspace an agent writes in.
        */
-      /** The shared Git folder of a repository of a main checkout, once found: it does not move. */
-      const sharedOf = new Map<string, string>()
+      /**
+       * The shared Git folder of a repository of a main checkout, once found: it does not move. A
+       * folder that is no repository (the main checkout of a Project that holds several) is
+       * remembered as such, rather than asked again by every snapshot (#444).
+       */
+      const sharedOf = new Map<string, string | null>()
       const ownGitFolders = (missionId: string) =>
         Effect.gen(function* () {
           const rows = yield* database
@@ -674,7 +690,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           )
           const found = yield* Effect.forEach([...folders], (folder) => {
             const known = sharedOf.get(folder)
-            if (known !== undefined) return Effect.succeed(Option.some(known))
+            if (known !== undefined) return Effect.succeed(Option.fromNullishOr(known))
             return run(
               folder,
               ['rev-parse', '--path-format=absolute', '--git-common-dir'],
@@ -685,6 +701,9 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
               ),
               Effect.tap((shared) => Effect.sync(() => sharedOf.set(folder, shared))),
               Effect.option,
+              Effect.tap((seen) =>
+                Option.isNone(seen) ? Effect.sync(() => sharedOf.set(folder, null)) : Effect.void,
+              ),
             )
           })
           return found.flatMap(Option.toArray)

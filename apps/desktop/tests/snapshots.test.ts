@@ -302,6 +302,58 @@ describe('A snapshot costs as few Git processes as it needs', () => {
     )
     expect(seen).toEqual(['rev-parse', 'ls-files', 'add', 'write-tree'])
   })
+
+  test('a Project whose main checkout is a folder of repositories is asked about once, and a repository’s objects once', async () => {
+    // The main checkout holds `api` and is no repository itself: asking it fails every time.
+    const main = join(work, 'acme')
+    const api = mainCheckout(join(main, 'api'))
+    const worktree = join(work, 'workspace', 'api')
+    git(api, 'worktree', 'add', '-q', '-b', 'mission/login', worktree)
+    const sharedFolder = ['rev-parse', '--path-format=absolute', '--git-common-dir']
+    const asked: string[] = []
+    const seen = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (args.join(' ') === sharedFolder.join(' ')) asked.push(folder)
+        return real(folder, args, kind, options)
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Acme',
+            mainCheckout: main,
+            repositories: ['api'],
+          })
+          const mission = yield* createMission({
+            projectId: project.id,
+            idea: { sentence: 'Add the login form', ticket: null },
+          })
+          const place = { name: 'api', folder: worktree }
+          const between = (attemptId: string) =>
+            Effect.gen(function* () {
+              writeFileSync(join(worktree, `${attemptId}.txt`), 'the form\n')
+              const first = yield* Snapshots.use((snapshots) =>
+                snapshots.take(place, attempt(mission.id, 'start', attemptId)),
+              )
+              writeFileSync(join(worktree, `${attemptId}-more.txt`), 'the form\n')
+              const second = yield* Snapshots.use((snapshots) =>
+                snapshots.take(place, attempt(mission.id, 'end', attemptId)),
+              )
+              return yield* Snapshots.use((snapshots) =>
+                snapshots.changed(mission.id, place, first, second),
+              )
+            })
+          // The first attempt looks the folders up; the second is the steady state.
+          yield* between('one')
+          asked.length = 0
+          const files = yield* between('two')
+          return { files: files.map((file) => file.path), asked: [...asked] }
+        }),
+      ),
+    )
+    expect(seen.files).toEqual(['two-more.txt'])
+    expect(seen.asked).toEqual([])
+  })
 })
 
 describe('Two snapshots around a change give exactly its files', () => {
