@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -36,6 +37,7 @@ import {
   SNAPSHOTS_FOLDER,
   type SnapshotOwner,
   Snapshots,
+  sweepQuarantines,
 } from '../src/engine/building/snapshots.ts'
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { NOT_A_FILE, OVER_CAP, THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
@@ -1697,6 +1699,204 @@ describe('A snapshot adds only the paths it listed and checked', () => {
         stored.trim().replace(/^120000 (\w+) 0\t/, '120000 blob $1\t'),
       )
     })
+  })
+})
+
+describe('A quarantine left by a crash is swept when the store opens (#455)', () => {
+  /** The folders of an object folder that are a snapshot's quarantine. */
+  const quarantinesIn = (objects: string) =>
+    readdirSync(objects).filter((name) => name.startsWith('incoming-'))
+
+  /**
+   * A Project whose store a first run made, closed. The suite then plants what a crash left, and
+   * the next opening of the engine is the one that must sweep it.
+   */
+  const closedStore = async () => {
+    const { main, worktree } = workspace()
+    const made = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          yield* Snapshots.use((snapshots) =>
+            snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'start')),
+          )
+          return { projectId, missionId }
+        }),
+      ),
+    )
+    const store = join(data, 'snapshots', `${made.projectId}.git`)
+    return { main, worktree, store, objects: join(store, 'objects'), missionId: made.missionId }
+  }
+
+  /** The engine opened again over the same data: one snapshot of the worktree, nothing held. */
+  const reopened = (missionId: string, worktree: string) =>
+    commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Snapshots.use((snapshots) =>
+          snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'end')),
+        ),
+      ),
+    )
+
+  /** A quarantine as a crash leaves it: a folder of objects, with what Git wrote half done. */
+  const strayIn = (objects: string, name: string) => {
+    const folder = join(objects, name)
+    mkdirSync(join(folder, 'ab'), { recursive: true })
+    writeFileSync(join(folder, 'ab', 'cdef0123'), 'half written object\n')
+    return folder
+  }
+
+  test('a stray objects/incoming-x folder with a file in it is gone after the store opens, and a snapshot works', async () => {
+    const { worktree, store, objects, missionId } = await closedStore()
+    const stray = strayIn(objects, 'incoming-x')
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+    const tree = await reopened(missionId, worktree)
+
+    expect(existsSync(stray)).toBe(false)
+    expect(quarantinesIn(objects)).toEqual([])
+    expect(git(store, 'rev-parse', '--verify', `refs/hemera/${missionId}/attempt-1/end/acme`)).toBe(
+      tree,
+    )
+    expect(git(store, 'cat-file', '-t', tree)).toBe('tree')
+  })
+
+  test('two snapshots in parallel: the quarantine of the one still running is never removed by the other', async () => {
+    const { worktree, objects, missionId } = await closedStore()
+    const stray = strayIn(objects, 'incoming-stray')
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+    const firstHeld = Deferred.makeUnsafe<void>()
+    const firstArrived = Deferred.makeUnsafe<void>()
+    let adds = 0
+    let whileHeld: string[] = []
+    let afterSecond: string[] = []
+
+    const trees = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        const subcommand = args.find((arg) => !arg.startsWith('-') && !arg.includes('=')) ?? ''
+        if (subcommand !== 'add') return real(folder, args, kind, options)
+        adds += 1
+        if (adds > 1) return real(folder, args, kind, options)
+        // The first snapshot stands at its `add` with its quarantine made, until the second ends.
+        return Effect.andThen(
+          Effect.sync(() => {
+            whileHeld = quarantinesIn(objects)
+          }),
+          Effect.andThen(
+            Deferred.succeed(firstArrived, undefined),
+            Effect.andThen(Deferred.await(firstHeld), real(folder, args, kind, options)),
+          ),
+        )
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const place = { name: 'acme', folder: worktree }
+          const first = yield* Effect.forkChild(
+            Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'end'))),
+          )
+          yield* Deferred.await(firstArrived)
+          const second = yield* Snapshots.use((snapshots) =>
+            snapshots.take(place, attempt(missionId, 'start', 'attempt-2')),
+          )
+          afterSecond = quarantinesIn(objects)
+          yield* Deferred.succeed(firstHeld, undefined)
+          return { first: yield* Fiber.join(first), second }
+        }),
+      ),
+    )
+
+    expect(existsSync(stray)).toBe(false)
+    // The first snapshot's own quarantine was there when it stood at `add`, and still there when
+    // the second had been taken.
+    expect(whileHeld).toHaveLength(1)
+    expect(afterSecond).toEqual(whileHeld)
+    expect(trees.first).toBe(trees.second)
+    expect(quarantinesIn(objects)).toEqual([])
+  })
+
+  test('a sweep given the quarantine of a running snapshot leaves it, and removes the others', () => {
+    const objects = join(work, 'objects')
+    const running = strayIn(objects, 'incoming-running')
+    const left = strayIn(objects, 'incoming-left')
+
+    sweepQuarantines(objects, new Set([running]))
+
+    expect(existsSync(running)).toBe(true)
+    expect(existsSync(left)).toBe(false)
+  })
+
+  test('only an incoming-* folder directly under objects is removed: packs, object folders and look-alikes stay', async () => {
+    const { worktree, store, objects, missionId } = await closedStore()
+    mkdirSync(join(objects, 'pack'), { recursive: true })
+    writeFileSync(join(objects, 'pack', 'pack-incoming-1.pack'), 'a pack\n')
+    writeFileSync(join(objects, 'pack', 'pack-incoming-1.idx'), 'its index\n')
+    mkdirSync(join(objects, 'info'), { recursive: true })
+    writeFileSync(join(objects, 'info', 'packs'), 'P pack-incoming-1.pack\n')
+    // A folder of Git's own fan-out holding something named like a quarantine.
+    mkdirSync(join(objects, 'ab', 'incoming-nested'), { recursive: true })
+    writeFileSync(join(objects, 'ab', 'incoming-nested', 'kept'), 'kept\n')
+    // Not a folder: a file with the name.
+    writeFileSync(join(objects, 'incoming-file'), 'a file, not ours\n')
+    // Near misses of the name, and a folder of the store itself beside objects.
+    mkdirSync(join(objects, 'incoming'))
+    writeFileSync(join(objects, 'incoming', 'kept'), 'kept\n')
+    mkdirSync(join(objects, 'Incoming-x'))
+    mkdirSync(join(store, 'incoming-beside'))
+    writeFileSync(join(store, 'incoming-beside', 'kept'), 'kept\n')
+    const stray = strayIn(objects, 'incoming-x')
+    const before = filesUnder(store).filter((file) => !file.startsWith(stray))
+
+    await reopened(missionId, worktree)
+
+    expect(existsSync(stray)).toBe(false)
+    // Every file of the store is still there, but the stray's; the snapshot added its own.
+    expect(filesUnder(store)).toEqual(expect.arrayContaining(before))
+    expect(existsSync(join(objects, 'incoming'))).toBe(true)
+    expect(existsSync(join(objects, 'Incoming-x'))).toBe(true)
+    expect(existsSync(join(objects, 'incoming-file'))).toBe(true)
+    expect(existsSync(join(store, 'incoming-beside', 'kept'))).toBe(true)
+    expect(existsSync(join(objects, 'ab', 'incoming-nested', 'kept'))).toBe(true)
+  })
+
+  test('a link named incoming-x leading outside is removed itself, and what it leads to is never followed', async (context) => {
+    const { worktree, objects, missionId } = await closedStore()
+    const outside = join(work, 'outside-quarantine')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'keep.txt'), 'outside content\n')
+    const link = join(objects, 'incoming-link')
+    try {
+      symlinkSync(outside, link, 'junction')
+    } catch {
+      context.skip()
+    }
+
+    await reopened(missionId, worktree)
+
+    expect(() => lstatSync(link)).toThrow()
+    expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('outside content\n')
+    expect(existsSync(outside)).toBe(true)
+  })
+
+  test('a quarantine that cannot be removed does not stop the store opening, and the others are swept', async (context) => {
+    // Windows holds a file open against its removal; here a folder that refuses it does the same.
+    if (process.platform === 'win32' || process.getuid?.() === 0) context.skip()
+    const { worktree, store, objects, missionId } = await closedStore()
+    const held = strayIn(objects, 'incoming-a-held')
+    const locked = join(held, 'ab')
+    const other = strayIn(objects, 'incoming-b-free')
+    chmodSync(locked, 0o555)
+    try {
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+      const tree = await reopened(missionId, worktree)
+
+      expect(existsSync(join(locked, 'cdef0123'))).toBe(true)
+      expect(existsSync(other)).toBe(false)
+      expect(git(store, 'cat-file', '-t', tree)).toBe('tree')
+    } finally {
+      chmodSync(locked, 0o755)
+    }
   })
 })
 
