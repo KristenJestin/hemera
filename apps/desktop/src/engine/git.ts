@@ -53,6 +53,13 @@ export const LIMITS: Readonly<Record<CallClass, number>> = {
 /** How much of what a command prints is read before it is cut: a long status, not an endless one. */
 export const OUTPUT_LIMIT = 32 * 1024 * 1024
 
+/**
+ * Given to every call before its arguments: the engine's Git never runs the program a
+ * `core.fsmonitor` names, wherever it was configured (#448). A narrow guard beside the sensitive
+ * Git folder: filters and hooks are configured by name and cannot be turned off this way.
+ */
+export const NO_FSMONITOR = ['-c', 'core.fsmonitor=false'] as const
+
 export type GitRefusal = GitFailed | GitMissing | GitCut
 
 /** The program run as Git, and what goes before its arguments. */
@@ -121,17 +128,21 @@ export const spawnGitBytes =
   (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitBytesSpawn =>
   (folder, args, kind, options = {}) => {
     const run = Effect.callback<Buffer, GitRefusal>((resume) => {
-      const child = spawn(program.command, [...program.leading, '-C', folder, ...args], {
-        env: {
-          ...process.env,
-          ...options.env,
-          GIT_TERMINAL_PROMPT: '0',
-          GCM_INTERACTIVE: 'never',
+      const child = spawn(
+        program.command,
+        [...program.leading, '-C', folder, ...NO_FSMONITOR, ...args],
+        {
+          env: {
+            ...process.env,
+            ...options.env,
+            GIT_TERMINAL_PROMPT: '0',
+            GCM_INTERACTIVE: 'never',
+          },
+          stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          detached: process.platform !== 'win32',
         },
-        stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        detached: process.platform !== 'win32',
-      })
+      )
       const out: Buffer[] = []
       const err: Buffer[] = []
       let printed = 0

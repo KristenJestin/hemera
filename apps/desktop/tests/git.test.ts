@@ -223,6 +223,26 @@ describe('A Git read that hangs is cut at its limit and waited for', () => {
   })
 })
 
+describe('The engine’s Git runs no core.fsmonitor (#448)', () => {
+  test('the engine’s status runs no core.fsmonitor, even one the repository’s .git/config holds, written outside the tools', async () => {
+    const api = repository(join(folder, 'api'))
+    const marker = join(folder, 'fsmonitor-ran')
+    const watch = join(folder, 'watch.mjs')
+    writeFileSync(
+      watch,
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'ran')\n`,
+    )
+    const command = [process.execPath, watch].map((word) => `"${word.replaceAll('\\', '/')}"`)
+    git(api, 'config', 'core.fsmonitor', command.join(' '))
+
+    await Effect.runPromise(spawnGit(SYSTEM_GIT)(api, ['status', '--porcelain'], 'read'))
+    expect(existsSync(marker)).toBe(false)
+    // The same status run as the machine's git alone runs the program.
+    git(api, 'status', '--porcelain')
+    expect(existsSync(marker)).toBe(true)
+  })
+})
+
 describe('Git can be handed an environment and an input, and its bytes read as they are', () => {
   test('a binary blob written into another object folder through stdin reads back byte for byte', async () => {
     const api = repository(join(folder, 'api'))

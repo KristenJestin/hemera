@@ -1,5 +1,6 @@
 /**
- * A stand-in for `git`, shipped with the tests only, run as `node git-stub.mjs -C <folder> ...`.
+ * A stand-in for `git`, shipped with the tests only, run as
+ * `node git-stub.mjs -C <folder> [-c <setting>] ...`.
  *
  *   flood          prints more than Hemera reads of one answer
  *   environment    prints the values of GIT_TERMINAL_PROMPT and GCM_INTERACTIVE it was given
@@ -10,8 +11,10 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const [flag, folder, ...args] = process.argv.slice(2)
+const [flag, folder, ...given] = process.argv.slice(2)
 if (flag !== '-C' || folder === undefined) process.exit(2)
+// Hemera's own `-c` settings, given before every call.
+const args = given[0] === '-c' ? given.slice(2) : given
 
 if (args[0] === 'flood') {
   const chunk = 'x'.repeat(1024 * 1024)

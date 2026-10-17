@@ -813,7 +813,8 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
           git(tree, '--git-dir', shadow, 'config', 'core.bare', 'false')
           git(tree, '--git-dir', shadow, 'config', 'core.fsmonitor', marking(marker))
         },
-        // The same .git written by anything but the Probe's tools: the engine's Git runs it.
+        // The same .git written by anything but the Probe's tools: the engine's Git still runs
+        // no core.fsmonitor; the machine's git alone does.
         control: (tree) => pointGitAt(tree, 'gitdir: shadow\n'),
       },
     )
@@ -824,7 +825,7 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
     ])
     expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
     expect(seen.before).toBe(false)
-    expect(seen.afterEngine).toBe(true)
+    expect(seen.afterEngine).toBe(false)
     expect(seen.afterPlain).toBe(true)
   })
 
