@@ -6,7 +6,8 @@
  * repository per Project, `<data folder>/snapshots/<project-id>.git`. The working tree is added
  * whole to a copy of the user's index (`git rev-parse --git-path index`, a linked worktree's own),
  * in a temporary folder removed however the snapshot ends; `GIT_OBJECT_DIRECTORY` sends what Git
- * writes to a folder apart in the store, moved into it once the snapshot is whole, and the user's
+ * writes to a folder apart in the store, moved into it once the snapshot is whole (one a crash
+ * left behind is swept when the store opens), and the user's
  * object folder is lent as an alternate, read only. A link is stored as itself, never followed. The user's
  * repository receives no object, no ref and no index change. Each tree is held by a ref of the
  * store, `refs/hemera/<mission-id>/…/<repository>`, the repository last: a Workspace has several
@@ -35,6 +36,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -611,6 +613,9 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
               }
         })
 
+      /** The stores this engine has opened, and the quarantines its snapshots are using now. */
+      const opened = new Set<string>()
+      const quarantines = new Set<string>()
       /** The store of the mission's Project, made bare on first use. */
       const storeOf = (missionId: string) =>
         Effect.gen(function* () {
@@ -643,6 +648,12 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
               ),
               Effect.ensuring(Effect.sync(() => rmSync(aside, { recursive: true, force: true }))),
             )
+          }
+          // What a crash left in the store is swept the first time this engine opens it, before
+          // any snapshot of the engine makes its own quarantine.
+          if (!opened.has(store)) {
+            opened.add(store)
+            sweepQuarantines(join(store, 'objects'), quarantines)
           }
           return store
         })
@@ -911,6 +922,12 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
             said: Predicate.isString(cause) ? secrets.mask(cause) : cause.message,
           })
 
+      /** A quarantine just made, kept out of any sweep until its snapshot ends. */
+      const live = (folder: string) => {
+        quarantines.add(folder)
+        return folder
+      }
+
       const take = (repository: RepositoryPlace, owner: SnapshotOwner) =>
         Effect.gen(function* () {
           // When it began: a snapshot that ends after a later one never makes its tree current.
@@ -928,7 +945,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                   // What Git writes is held apart in the store's own object folder, as Git's own
                   // quarantine does, and joins the store only once nothing it added was reached
                   // through a link (#449).
-                  incoming: mkdtempSync(join(store, 'objects', 'incoming-')),
+                  incoming: live(mkdtempSync(join(store, 'objects', QUARANTINE))),
                 }),
                 catch: (cause) => String(cause),
               }),
@@ -1114,6 +1131,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                       rmSync(folder, { recursive: true, force: true })
                     } catch {}
                   }
+                  quarantines.delete(incoming)
                 }),
             )
           const tree = (yield* attempt(false)) ?? (yield* attempt(true))
@@ -1475,6 +1493,36 @@ function joinObjects(incoming: string, objects: string): void {
     } catch (failure) {
       if (!existsSync(to)) throw failure
     }
+  }
+}
+
+/** The name every quarantine folder of a snapshot starts with, under the store's objects. */
+const QUARANTINE = 'incoming-'
+
+/**
+ * The quarantines a crash left in a store's object folder removed: the `incoming-*` folders
+ * directly under `objects`, but the ones in `live`, which a snapshot of this engine is using.
+ * A link of that name is removed itself and never followed; a file, a pack, an object folder or a
+ * name that merely resembles it stays. What cannot be removed (a file still held open on Windows)
+ * stays for the next opening, and never fails the one in progress.
+ */
+export function sweepQuarantines(objects: string, live: ReadonlySet<string>): void {
+  let names: string[]
+  try {
+    names = readdirSync(objects)
+      .filter((name) => name.startsWith(QUARANTINE))
+      .sort()
+  } catch {
+    return
+  }
+  for (const name of names) {
+    const path = join(objects, name)
+    if (live.has(path)) continue
+    try {
+      const kind = lstatSync(path)
+      if (kind.isSymbolicLink()) unlinkSync(path)
+      else if (kind.isDirectory()) rmSync(path, { recursive: true, force: true })
+    } catch {}
   }
 }
 
