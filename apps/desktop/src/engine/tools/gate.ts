@@ -872,10 +872,7 @@ export const toolGateLayer = (settings: GateSettings) =>
        */
       const guarded = <A, E, R>(grant: Grant, what: string, write: Effect.Effect<A, E, R>) =>
         Effect.flatMap(
-          actionIn(
-            { projectId: grant.projectId, missionId: grant.missionId, root: grant.place.root },
-            what,
-          ),
+          actionIn({ projectId: grant.projectId, root: grant.place.root }, what),
           (action) =>
             Effect.acquireUseRelease(
               GitGuard.use((guard) => guard.open(action)),

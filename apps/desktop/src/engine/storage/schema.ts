@@ -3258,3 +3258,23 @@ export const reviewFeedbackImages = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.feedbackId, table.position] })],
 )
+
+/**
+ * The holds of the guard on the engine's own Git (#457): a repository (or every one) whose Git
+ * the engine runs no more until the user answers, kept across restarts. What it holds of each
+ * changed file is its kind and digest, before the change and as the question showed it.
+ */
+export const gitHolds = sqliteTable('git_holds', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  /** Its question, once written; null while it waits for one. */
+  needId: text('need_id').references(() => needs.id, { onDelete: 'set null' }),
+  everywhere: integer('everywhere', { mode: 'boolean' }).notNull(),
+  /** JSON: the common Git folders it holds, and the checkouts the agent worked in. */
+  commons: text('commons').notNull(),
+  checkouts: text('checkouts').notNull(),
+  /** JSON: each changed file, its path, as it was and as shown (its kind and digest). */
+  changes: text('changes').notNull(),
+  /** `none`, `allowed` or `denied`. */
+  answer: text('answer').notNull(),
+})

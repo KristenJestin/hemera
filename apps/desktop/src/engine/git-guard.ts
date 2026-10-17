@@ -23,6 +23,10 @@
  * - Deny: the engine's Git stays stopped and nothing is put back: the user decides. Once the files
  *   are as they were before the change, the hold goes on its own; another state is asked about.
  *
+ * The question belongs to the Project, as the repository does: a mission cancelled meanwhile does
+ * not end it. A hold is written with its question (`git_holds`), its answer with the answer, and is
+ * read back at the next start, so a restart leaves the engine's Git stopped where it was.
+ *
  * What the engine's own Git writes (the index, the refs, the logs, `ORIG_HEAD`, `FETCH_HEAD`,
  * `packed-refs`) is not part of the fingerprint. A worktree it adds or removes while a window is
  * open changes the worktrees' administrative files: those its `worktree` call added or removed
@@ -32,14 +36,14 @@
 import { join, sep } from 'node:path'
 
 import {
-  MissionOwner,
-  type NeedOwner,
+  ApplicationOwner,
   PermissionFields,
   ProjectOwner,
   ROOT_REPOSITORY,
   lineDifference,
 } from '@hemera/core/domain'
-import { Context, Effect, Layer, Predicate, Queue } from 'effect'
+import { eq } from 'drizzle-orm'
+import { Context, Effect, Layer, Option, Predicate, Queue, Schema } from 'effect'
 
 import type { Log } from '../main/diagnostic.ts'
 import type { GitSpawnGuard } from './git.ts'
@@ -53,8 +57,17 @@ import {
   shapeChanges,
   shapesOf,
 } from './git-shapes.ts'
-import { type NeedHandler, createNeed, needService, reviseNeedIn, withdrawNeed } from './needs.ts'
+import {
+  type NeedHandler,
+  createNeedIn,
+  getNeed,
+  needService,
+  reviseNeedIn,
+  withdrawNeed,
+} from './needs.ts'
 import { getProject } from './projects.ts'
+import { Database, refusedWhile } from './storage/database.ts'
+import { gitHolds } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 import { shownPath } from './tools/paths.ts'
 
@@ -68,8 +81,8 @@ const SHOWN_CAP = 20_000
 export interface GuardedAction {
   /** The checkouts of its place: its root and each repository folder under it. */
   readonly checkouts: ReadonlyArray<string>
-  /** Whom the question belongs to: the agent's mission, or its Project. */
-  readonly owner: NeedOwner
+  /** The Project whose place it is: the question belongs to it. */
+  readonly projectId: string
   /** What the agent did, in words: `ran …`, `wrote …`. */
   readonly what: string
 }
@@ -85,16 +98,9 @@ export class GitGuard extends Context.Service<
   }
 >()('GitGuard') {}
 
-/**
- * An agent's action in its place: every checkout of the place (its root, and each repository of
- * its Project under it), and whom its question belongs to.
- */
+/** An agent's action in its place: every checkout of the place, its root and each repository. */
 export const actionIn = (
-  place: {
-    readonly projectId: string
-    readonly missionId: string | null
-    readonly root: string
-  },
+  place: { readonly projectId: string; readonly root: string },
   what: string,
 ) =>
   Effect.map(
@@ -111,14 +117,7 @@ export const actionIn = (
             .map((one) => join(place.root, one.path)),
         ]),
       ],
-      owner:
-        place.missionId === null
-          ? ProjectOwner.make({ projectId: place.projectId })
-          : MissionOwner.make({
-              projectId: place.projectId,
-              missionId: place.missionId,
-              taskId: null,
-            }),
+      projectId: place.projectId,
       what,
     }),
   )
@@ -143,22 +142,42 @@ interface Held {
 
 /** A repository, or every one, whose Git the engine does not run until the user answers. */
 interface Hold {
-  readonly id: number
+  readonly id: string
   readonly everywhere: boolean
   readonly commons: ReadonlySet<string>
   readonly checkouts: ReadonlySet<string>
   readonly changes: Map<string, Held>
-  owner: NeedOwner
+  projectId: string
   what: string
   /** Its question, once written. */
   needId: string | null
   answer: 'none' | 'allowed' | 'denied'
 }
 
-/** What the questions' writer is handed: a hold to ask (again) about, or a question to withdraw. */
+/** What the questions' writer is handed: a hold to ask (again) about, or one that ended. */
 type Errand =
   | { readonly kind: 'ask'; readonly hold: Hold }
-  | { readonly kind: 'withdraw'; readonly needId: string }
+  | { readonly kind: 'release'; readonly id: string; readonly withdraw: string | null }
+
+/** What a hold keeps of a file across restarts: its kind and digest, never its text. */
+const Kept = Schema.NullOr(
+  Schema.Struct({
+    kind: Schema.Literals(['file', 'link', 'folder', 'over', 'other']),
+    digest: Schema.String,
+  }),
+)
+const readChanges = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ path: Schema.String, was: Kept, shown: Kept })),
+  ),
+)
+const readFolders = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
+
+const keptOf = (shape: Shape | null) =>
+  shape === null ? null : { kind: shape.kind, digest: shape.digest }
+
+const restored = (shape: typeof Kept.Type): Shape | null =>
+  shape === null ? null : { ...shape, text: null, everywhere: false }
 
 const same = (one: Shape | null, other: Shape | null): boolean => one?.digest === other?.digest
 
@@ -188,8 +207,7 @@ export const engineGitGuard = (home: ShapeHome, log: Log) =>
   Effect.gen(function* () {
     const errands = yield* Queue.unbounded<Errand>()
     const windows = new Set<Window>()
-    const holds = new Map<number, Hold>()
-    let holdsMade = 0
+    const holds = new Map<string, Hold>()
 
     const commonsOf = (checkouts: ReadonlyArray<string>) => [
       ...new Set(checkouts.flatMap((one) => repositoryOf(one) ?? [])),
@@ -197,12 +215,14 @@ export const engineGitGuard = (home: ShapeHome, log: Log) =>
 
     const ask = (hold: Hold) => Queue.offerUnsafe(errands, { kind: 'ask', hold })
 
-    /** The hold ends: its question, still open, is withdrawn. */
+    /** The hold ends: its record goes, and its question, still open, is withdrawn. */
     const release = (hold: Hold) => {
       holds.delete(hold.id)
-      if (hold.needId !== null && hold.answer === 'none') {
-        Queue.offerUnsafe(errands, { kind: 'withdraw', needId: hold.needId })
-      }
+      Queue.offerUnsafe(errands, {
+        kind: 'release',
+        id: hold.id,
+        withdraw: hold.answer === 'none' ? hold.needId : null,
+      })
     }
 
     /** The files moved on from what the question showed: it shows them as they are now. */
@@ -257,14 +277,13 @@ export const engineGitGuard = (home: ShapeHome, log: Log) =>
             : !one.everywhere && [...commons].some((c) => one.commons.has(c)),
         ) ?? null
       if (hold === null) {
-        holdsMade += 1
         const made: Hold = {
-          id: holdsMade,
+          id: crypto.randomUUID(),
           everywhere,
           commons,
           checkouts: new Set(window.action.checkouts),
           changes: new Map(changes.map((one) => [one.path, { was: one.was, shown: one.now }])),
-          owner: window.action.owner,
+          projectId: window.action.projectId,
           what: window.action.what,
           needId: null,
           answer: 'none',
@@ -273,7 +292,7 @@ export const engineGitGuard = (home: ShapeHome, log: Log) =>
         ask(made)
         return
       }
-      hold.owner = window.action.owner
+      hold.projectId = window.action.projectId
       hold.what = window.action.what
       const kept = new Map([...hold.changes].map(([path, held]) => [path, held.shown]))
       for (const one of changes) {
@@ -377,29 +396,71 @@ export const engineGitGuard = (home: ShapeHome, log: Log) =>
       })
     }
 
-    /** Writes, or writes again, the question of a hold still waiting for one. */
+    /** A hold's record, as it now stands, written in the transaction of its question. */
+    const recorded = (hold: Hold, needId: string) => ({
+      id: hold.id,
+      projectId: hold.projectId,
+      needId,
+      everywhere: hold.everywhere,
+      commons: JSON.stringify([...hold.commons]),
+      checkouts: JSON.stringify([...hold.checkouts]),
+      changes: JSON.stringify(
+        [...hold.changes].map(([path, held]) => ({
+          path,
+          was: keptOf(held.was),
+          shown: keptOf(held.shown),
+        })),
+      ),
+      answer: hold.answer,
+    })
+
+    /**
+     * Writes, or writes again, the question of a hold still waiting for one, and the hold with it.
+     * A Project gone meanwhile leaves the question to the application.
+     */
     const asking = (hold: Hold) =>
       Effect.gen(function* () {
         if (!holds.has(hold.id) || hold.answer !== 'none') return
         const fields = fieldsOf(hold)
-        if (hold.needId !== null) {
-          const id = hold.needId
-          const revised = yield* mutate('writing the guard’s question again', (transaction) =>
-            Effect.map(reviseNeedIn(transaction, id, fields), (events) => ({
-              result: events.length > 0,
-              events,
-            })),
-          )
-          if (revised) return
-        }
-        const need = yield* createNeed(GIT_GUARD, hold.owner, fields)
-        hold.needId = need.id
+        const write = (owner: typeof ProjectOwner.Type | typeof ApplicationOwner.Type) =>
+          Effect.gen(function* () {
+            const create = yield* createNeedIn(GIT_GUARD, owner, fields)
+            return yield* mutate('writing the guard’s question', (transaction) =>
+              Effect.gen(function* () {
+                const revised =
+                  hold.needId === null ? [] : yield* reviseNeedIn(transaction, hold.needId, fields)
+                const written = revised.length > 0 ? null : yield* create(transaction)
+                const needId = written?.id ?? hold.needId ?? ''
+                const row = recorded(hold, needId)
+                yield* transaction
+                  .insert(gitHolds)
+                  .values(row)
+                  .onConflictDoUpdate({ target: gitHolds.id, set: row })
+                  .pipe(Effect.mapError(refusedWhile('writing a hold of the Git guard')))
+                return { result: needId, events: [...revised, ...(written?.events ?? [])] }
+              }),
+            )
+          })
+        hold.needId = yield* write(ProjectOwner.make({ projectId: hold.projectId })).pipe(
+          Effect.catchTag('UnknownProject', () => write(ApplicationOwner.make({}))),
+        )
       })
 
     const done = (errand: Errand) =>
       Effect.gen(function* () {
         if (errand.kind === 'ask') return yield* asking(errand.hold)
-        yield* withdrawNeed(errand.needId, 'the files are as they were before the change')
+        yield* mutate('ending a hold of the Git guard', (transaction) =>
+          transaction
+            .delete(gitHolds)
+            .where(eq(gitHolds.id, errand.id))
+            .pipe(
+              Effect.mapError(refusedWhile('ending a hold of the Git guard')),
+              Effect.as({ result: undefined, events: [] }),
+            ),
+        )
+        if (errand.withdraw !== null) {
+          yield* withdrawNeed(errand.withdraw, 'the files are as they were before the change')
+        }
       })
 
     const questions = Effect.forever(
@@ -413,22 +474,73 @@ export const engineGitGuard = (home: ShapeHome, log: Log) =>
     )
 
     const handler: NeedHandler = {
-      deliver: (need) =>
-        Effect.sync(() => {
+      deliver: (need, transaction) =>
+        Effect.gen(function* () {
           const hold = [...holds.values()].find((one) => one.needId === need.id)
           if (hold === undefined || need.answer === null) return []
-          hold.answer =
+          const answer =
             Predicate.isTagged(need.answer, 'Permission') && need.answer.choice !== 'deny'
               ? 'allowed'
               : 'denied'
+          yield* transaction
+            .update(gitHolds)
+            .set({ answer })
+            .where(eq(gitHolds.id, hold.id))
+            .pipe(Effect.mapError(refusedWhile('recording the answer of the Git guard')))
+          hold.answer = answer
           return []
         }),
     }
+
+    /**
+     * At the start, before any Git of the engine runs: the holds a stopped engine left, read back.
+     * One still waiting whose question ended without an answer is asked about again.
+     */
+    const restore = Effect.gen(function* () {
+      const database = yield* Database
+      const rows = yield* database
+        .select()
+        .from(gitHolds)
+        .pipe(Effect.mapError(refusedWhile('reading the holds of the Git guard')))
+      for (const row of rows) {
+        const changes = Option.getOrNull(readChanges(row.changes))
+        const commons = Option.getOrNull(readFolders(row.commons))
+        const checkouts = Option.getOrNull(readFolders(row.checkouts))
+        const answer = row.answer === 'allowed' || row.answer === 'denied' ? row.answer : 'none'
+        // A record that does not read holds everything rather than nothing.
+        const hold: Hold = {
+          id: row.id,
+          everywhere: row.everywhere || changes === null || commons === null || checkouts === null,
+          commons: new Set(commons ?? []),
+          checkouts: new Set(checkouts ?? []),
+          changes: new Map(
+            (changes ?? []).map((one) => [
+              one.path,
+              { was: restored(one.was), shown: restored(one.shown) },
+            ]),
+          ),
+          projectId: row.projectId,
+          what: 'an agent’s action before Hemera last stopped',
+          needId: row.needId,
+          answer,
+        }
+        holds.set(hold.id, hold)
+        if (answer !== 'none') continue
+        const need =
+          row.needId === null
+            ? null
+            : yield* getNeed(row.needId).pipe(Effect.orElseSucceed(() => null))
+        if (need?.state === 'pending') continue
+        hold.needId = null
+        ask(hold)
+      }
+    })
 
     return {
       layer: Layer.succeed(GitGuard, { open }),
       spawn,
       handler,
       questions,
+      restore,
     }
   })

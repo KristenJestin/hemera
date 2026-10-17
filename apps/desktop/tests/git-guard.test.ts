@@ -523,3 +523,61 @@ appendFileSync('.git/config', '[core]\\n\\thooksPath = .husky/_\\n')
     expect(result.needs).toEqual([])
   })
 })
+
+describe('A hold outlives a restart of the engine (#457)', () => {
+  test('the engine’s Git stays stopped at the next opening until the user answers; allowed, it runs', async () => {
+    const first = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('.git/hooks/pre-commit', '#!/bin/sh\\necho gotcha\\n')\n`,
+        )
+        return yield* until(guardNeeds, (needs) => needs.length > 0)
+      }),
+    )
+    const main = join(work, 'acme')
+    const reopened = await commandsEngine(data, { tools: { home: work, judge: ALLOWS } })(
+      (started) =>
+        started.profile.use(
+          Effect.gen(function* () {
+            const held = yield* engineStatus(main)
+            const [need] = yield* guardNeeds
+            if (need !== undefined) yield* allow(need)
+            return { held, need, after: yield* engineStatus(main) }
+          }),
+        ),
+    )
+    expect(first).toHaveLength(1)
+    expect(reopened.held).toContain('Hemera stopped its Git')
+    expect(reopened.need?.id).toBe(first[0]?.id)
+    expect(reopened.after).toBe('ran')
+  })
+
+  test('denied before the restart, the engine’s Git stays stopped after it, and nothing is asked again', async () => {
+    await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('.git/hooks/pre-commit', '#!/bin/sh\\necho gotcha\\n')\n`,
+        )
+        const [need] = yield* asked
+        if (need !== undefined) yield* deny(need)
+      }),
+    )
+    const main = join(work, 'acme')
+    const reopened = await commandsEngine(data, { tools: { home: work, judge: ALLOWS } })(
+      (started) =>
+        started.profile.use(
+          Effect.gen(function* () {
+            const held = yield* engineStatus(main)
+            const needs = yield* until(guardNeeds, (found) => found.length > 0, 1_000)
+            return { held, needs }
+          }),
+        ),
+    )
+    expect(reopened.held).toContain('Hemera stopped its Git')
+    expect(reopened.needs).toEqual([])
+  })
+})
