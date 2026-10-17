@@ -183,7 +183,7 @@ import {
   probeDeskLayer,
 } from './planning/probe-desk.ts'
 import { type ProbeSteps, probeStepsLayer } from './planning/probe-steps.ts'
-import { PROBE_MAPPERS } from './planning/probe-store.ts'
+import { PROBES_FOLDER, PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
 import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
 import { coldReadsLayer } from './planning/cold-reads.ts'
@@ -518,12 +518,13 @@ export const startProfile = (
         : { home: guardHome, configHome: join(guardHome, '.config') },
       log,
       secrets.mask,
-      // The engine's own repositories, never a scope of the guard: its data, its scratch folders.
+      // The engine's scratch repositories, never a scope of the guard. Its snapshot stores are
+      // watched as any repository; of its data, only the Probes' worktrees' bookkeeping is its own.
       [
-        realpathSync.native(dataFolder),
         join(realpathSync.native(tmpdir()), 'hemera-scratch-'),
         join(realpathSync.native(tmpdir()), 'hemera-patch-'),
       ],
+      join(realpathSync.native(dataFolder), PROBES_FOLDER),
     )
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)

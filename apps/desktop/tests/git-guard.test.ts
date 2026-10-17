@@ -11,6 +11,7 @@
  */
 
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -29,6 +30,7 @@ import { Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { eq } from 'drizzle-orm'
 
+import { SNAPSHOTS_FOLDER, Snapshots } from '../src/engine/building/snapshots.ts'
 import { Git } from '../src/engine/git.ts'
 import { SHOWN_CAP, questionText } from '../src/engine/git-guard.ts'
 import { answerNeed, listNeeds, withdrawNeed } from '../src/engine/needs.ts'
@@ -1011,5 +1013,72 @@ describe('A worktree the engine adds takes in only its own administrative files 
     expect(result.status).toContain('Hemera stopped its Git')
     expect(shown(result.needs[0])).toContain('~/acme/.git/worktrees/acme-wt/config.worktree')
     expect(shown(result.needs[0])).not.toContain('acme-other')
+  })
+})
+
+describe('A snapshot store is watched like any repository (#457, round 4)', () => {
+  /** A snapshot of Acme's repository by the engine, for the mission's attempt. */
+  const snapshotIn = (main: string, missionId: string) => (side: 'start' | 'end') =>
+    Effect.gen(function* () {
+      const snapshots = yield* Snapshots
+      yield* snapshots.take(
+        { name: 'acme', folder: main },
+        { kind: 'attempt', missionId, attemptId: 'attempt-1', side },
+      )
+      return 'ran'
+    })
+
+  /** One engine with Acme's mission over a repository, and the folder of Acme's snapshot store. */
+  const withStore = <A, E>(
+    body: (world: {
+      readonly snapshot: ReturnType<typeof snapshotIn>
+      readonly store: string
+      readonly main: string
+    }) => Effect.Effect<A, E, EngineServices>,
+  ) =>
+    commandsEngine(data, {
+      tools: { home: work, judge: ALLOWS, permissionRequests: questionsKept().layer },
+    })((started) =>
+      started.profile.use(
+        Effect.gen(function* () {
+          const { project, mission, main } = yield* acmeWithMission(work)
+          repository(main)
+          const snapshot = snapshotIn(main, mission.id)
+          const store = join(realpathSync.native(data), SNAPSHOTS_FOLDER, `${project.id}.git`)
+          return yield* body({ snapshot, store, main })
+        }),
+      ),
+    )
+
+  test('the engine’s own snapshots, the refs and objects they write and a gc of the store ask nothing', async () => {
+    const result = await withStore(({ snapshot, store, main }) =>
+      Effect.gen(function* () {
+        const first = yield* snapshot('start')
+        writeFileSync(join(main, 'a.txt'), 'a change\n')
+        const second = yield* snapshot('end')
+        git(store, 'gc', '-q')
+        writeFileSync(join(main, 'a.txt'), 'another change\n')
+        const third = yield* snapshot('end')
+        return { ran: [first, second, third], needs: yield* until(guardNeeds, () => false, 500) }
+      }),
+    )
+    expect(result.ran).toEqual(['ran', 'ran', 'ran'])
+    expect(result.needs).toEqual([])
+  })
+
+  test('a smudge filter written into a snapshot store’s config stops the engine’s next snapshot, and is asked', async () => {
+    const result = await withStore(({ snapshot, store }) =>
+      Effect.gen(function* () {
+        yield* snapshot('start')
+        appendFileSync(join(store, 'config'), '[filter "x"]\n\tsmudge = ./smudge.sh\n')
+        const next = yield* snapshot('end').pipe(
+          Effect.catch((refused) => Effect.succeed(String(refused))),
+        )
+        return { next, needs: yield* asked }
+      }),
+    )
+    expect(result.next).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('smudge = ./smudge.sh')
+    expect(reasonOf(result.needs[0])).toBe(NEUTRAL)
   })
 })

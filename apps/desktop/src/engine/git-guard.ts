@@ -327,6 +327,7 @@ export const engineGitGuard = (
   log: Log,
   mask: (text: string) => string,
   own: ReadonlyArray<string>,
+  probes: string,
 ) =>
   Effect.gen(function* () {
     const errands = yield* Queue.unbounded<Errand>()
@@ -368,17 +369,19 @@ export const engineGitGuard = (
       })
     }
 
-    /** Whether a path is in the engine's own folders (its data, its scratch folders). */
+    /** Whether a path is in the engine's scratch folders: never a scope of the guard. */
     const owned = (path: string) => own.some((prefix) => path.startsWith(prefix))
+    /** Whether a path is in the folder of the Probes' worktrees. */
+    const probed = (path: string) => inside(probes, path)
 
     /**
-     * Whether a change is the engine's own bookkeeping of a worktree it keeps in its own folders (a
-     * Probe's): that worktree's `.git`, which the engine never trusts and reads past with the Git
+     * Whether a change is the engine's own bookkeeping of a Probe's worktree, in the Probes' folder:
+     * that worktree's `.git`, which the engine never trusts and reads past with the Git
      * folder it made (#439), and the `commondir` and `gitdir` of its administrative folder added or
      * removed whole. Its `config.worktree` is guarded as any.
      */
     const theEngines = (scope: Scope, change: ShapeChange, now: Shapes): boolean => {
-      if (change.path.endsWith(`${sep}.git`) && owned(change.path)) return true
+      if (change.path.endsWith(`${sep}.git`) && probed(change.path)) return true
       if (change.was !== null && change.now !== null) return false
       const worktrees = join(scope.key, 'worktrees')
       if (!inside(worktrees, change.path)) return false
@@ -387,7 +390,7 @@ export const engineGitGuard = (
       const admin = change.path.slice(0, -(name.length + 1))
       const gitdir = join(admin, 'gitdir')
       const text = (now.get(gitdir) ?? scope.baseline.get(gitdir))?.text ?? null
-      return text !== null && owned(resolve(admin, text.trim()))
+      return text !== null && probed(resolve(admin, text.trim()))
     }
 
     /** Whether a change is the repository format a `worktree add` writes into its `config`. */

@@ -239,6 +239,12 @@ function gitDirOf(checkout: string): string | null {
   return resolve(checkout, line.slice('gitdir:'.length).trim())
 }
 
+/** Whether a folder is a Git folder itself, as Git finds a bare one: a HEAD, objects and refs. */
+function isGitFolder(folder: string): boolean {
+  const kind = (name: string) => entryOf(join(folder, name))?.shape.kind
+  return kind('HEAD') === 'file' && kind('objects') === 'folder' && kind('refs') === 'folder'
+}
+
 /** The common folder of a Git folder: the one its `commondir` names, or itself. */
 function commonDirOf(gitDir: string): string {
   const line = lineOf(join(gitDir, 'commondir'))
@@ -445,13 +451,14 @@ export function shapeAt(path: string): Shape | null {
 
 /**
  * The common Git folder of the repository a folder is in, read from the `.git` of the folder or
- * of the nearest one above it, as its real path; null outside any. Git is not asked: it is what
+ * of the nearest one above it, or the folder itself when it is a bare repository, as its real
+ * path; null outside any. Git is not asked: it is what
  * is guarded.
  */
 export function repositoryOf(folder: string): string | null {
   let at = realOf(resolve(folder))
   for (;;) {
-    const gitDir = gitDirOf(at)
+    const gitDir = gitDirOf(at) ?? (isGitFolder(at) ? at : null)
     if (gitDir !== null) return realOf(commonDirOf(gitDir))
     const up = dirname(at)
     if (up === at) return null
