@@ -6,7 +6,8 @@
  * repository per Project, `<data folder>/snapshots/<project-id>.git`. The working tree is added
  * whole to a copy of the user's index (`git rev-parse --git-path index`, a linked worktree's own),
  * in a temporary folder removed however the snapshot ends; `GIT_OBJECT_DIRECTORY` sends what Git
- * writes to the store, and the user's object folder is lent as an alternate, read only. The user's
+ * writes to a folder apart in the store, moved into it once the snapshot is whole, and the user's
+ * object folder is lent as an alternate, read only. A link is stored as itself, never followed. The user's
  * repository receives no object, no ref and no index change. Each tree is held by a ref of the
  * store, `refs/hemera/<mission-id>/…/<repository>`, the repository last: a Workspace has several
  * repositories, and a ref is never a folder of another.
@@ -29,15 +30,16 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, join, relative } from 'node:path'
 
 import { sensitivePlace } from '@hemera/core/domain'
 import { and, asc, count, countDistinct, eq, or } from 'drizzle-orm'
@@ -916,138 +918,210 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           const store = yield* storeOf(owner.missionId)
           const { index, objects } = yield* gitFoldersOf(repository, owner.missionId)
           const alternate = { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateOf(objects) }
-          const tree = yield* Effect.acquireUseRelease(
-            Effect.try({
-              try: () => mkdtempSync(join(tmpdir(), 'hemera-snapshot-')),
-              catch: (cause) => String(cause),
-            }),
-            (scratch) =>
-              Effect.gen(function* () {
-                const copy = join(scratch, 'index')
-                yield* Effect.try({
-                  try: () => copyIndex(index, copy),
-                  catch: (cause) =>
-                    `the index ${index} is not read: ${cause instanceof Error ? cause.message : String(cause)}`,
-                })
-                const env = {
-                  ...alternate,
-                  GIT_INDEX_FILE: copy,
-                  GIT_OBJECT_DIRECTORY: join(store, 'objects'),
-                }
-                // What Git would add (untracked, or changed), listed once: only those paths are
-                // added, never the folder, so a file or a link made there since is left to the
-                // next snapshot. A sensitive one is left out of `add`, and a stand-in holding only
-                // its fingerprint takes its place in the copied index.
-                const pending = fields(
-                  text(
+          // One go at the tree, or null when a link stood in the way of what it added: a go that
+          // fails on that is made again once from the listing, and the second failure is final.
+          const attempt = (last: boolean) =>
+            Effect.acquireUseRelease(
+              Effect.try({
+                try: () => ({
+                  scratch: mkdtempSync(join(tmpdir(), 'hemera-snapshot-')),
+                  // What Git writes is held apart in the store's own object folder, as Git's own
+                  // quarantine does, and joins the store only once nothing it added was reached
+                  // through a link (#449).
+                  incoming: mkdtempSync(join(store, 'objects', 'incoming-')),
+                }),
+                catch: (cause) => String(cause),
+              }),
+              ({ scratch, incoming }) =>
+                Effect.gen(function* () {
+                  const copy = join(scratch, 'index')
+                  yield* Effect.try({
+                    try: () => copyIndex(index, copy),
+                    catch: (cause) =>
+                      `the index ${index} is not read: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  })
+                  const env = {
+                    GIT_ALTERNATE_OBJECT_DIRECTORIES: [join(store, 'objects'), objects]
+                      .map(alternateOf)
+                      .join(delimiter),
+                    GIT_INDEX_FILE: copy,
+                    GIT_OBJECT_DIRECTORY: incoming,
+                  }
+                  // What Git would add (untracked, or changed), listed once: only those paths are
+                  // added, never the folder, so a file or a link made there since is left to the
+                  // next snapshot. A sensitive one is left out of `add`, and a stand-in holding only
+                  // its fingerprint takes its place in the copied index.
+                  const pending = fields(
+                    text(
+                      yield* run(
+                        repository.folder,
+                        [
+                          '--no-optional-locks',
+                          'ls-files',
+                          '-z',
+                          '-t',
+                          '--others',
+                          '--modified',
+                          '--exclude-standard',
+                        ],
+                        'read',
+                        { env },
+                      ),
+                    ),
+                  ).map((line) => line.slice(2))
+                  const paths = [...new Set(pending)]
+                  const touched = paths.filter(sensitive)
+                  const withheld = touched.flatMap((path) => {
+                    const real = regularFileIn(repository.folder, path)
+                    return real === null ? [] : [{ path, real }]
+                  })
+                  // A sensitive path that is not a regular file of the repository (a link, or a file
+                  // a folder link leads to) is left out of the tree, as it is out of `add`, which
+                  // would copy what it leads to.
+                  const dropped = touched.filter(
+                    (path) => !withheld.some((one) => one.path === path),
+                  )
+                  // A path with a link on its way (itself, or a folder above it) is never handed to
+                  // `add`: Git for Windows walks a junction as a folder, and would store what it
+                  // leads to. The link is kept as itself, its target and nothing more, unless its
+                  // own name is sensitive; Git never reads it.
+                  const onTheWay = new Map(
+                    paths.map((path) => [path, linkOnTheWay(repository.folder, path)]),
+                  )
+                  const links = [
+                    ...new Set(
+                      [...onTheWay.values()].filter(
+                        (link): link is string => link !== null && !sensitive(link),
+                      ),
+                    ),
+                  ].flatMap((link) => {
+                    const target = targetOf(repository.folder, link)
+                    return target === null ? [] : [{ link, target }]
+                  })
+                  const free = paths.filter(
+                    (path) => !sensitive(path) && onTheWay.get(path) === null,
+                  )
+                  // A changed path that is now a folder (a tracked file replaced by one) is never
+                  // handed to `add` either: what it holds is listed on its own, and the path leaves
+                  // the tree.
+                  const folders = free.filter((path) => walkedInto(repository.folder, path))
+                  const ordinary = free.filter((path) => !folders.includes(path))
+                  const added =
+                    ordinary.length === 0
+                      ? Effect.succeed(true)
+                      : run(
+                          repository.folder,
+                          [
+                            ...WHOLE_INDEX,
+                            'add',
+                            '--all',
+                            '--pathspec-from-file=-',
+                            '--pathspec-file-nul',
+                          ],
+                          'work',
+                          {
+                            env,
+                            input: Buffer.from(ordinary.map(pathspecOf).join('')),
+                          },
+                        ).pipe(Effect.as(true))
+                  // Git refuses a listed path that matches nothing (an untracked file removed since
+                  // it was listed) or that a link now stands on the way of: the go is made again.
+                  if (
+                    !(yield* last
+                      ? added
+                      : added.pipe(Effect.catchTag('GitFailed', () => Effect.succeed(false))))
+                  ) {
+                    return null
+                  }
+                  const removed = [...dropped, ...folders]
+                  if (removed.length > 0) {
+                    yield* run(
+                      repository.folder,
+                      [...WHOLE_INDEX, 'update-index', '--force-remove', '--', ...removed],
+                      'work',
+                      { env },
+                    )
+                  }
+                  const kept: string[] = []
+                  for (const { link, target } of links) {
+                    const blob = text(
+                      yield* run(repository.folder, ['hash-object', '-w', '--stdin'], 'work', {
+                        env,
+                        input: target,
+                      }),
+                    ).trim()
+                    kept.push('--cacheinfo', `120000,${blob},${link}`)
+                  }
+                  if (kept.length > 0) {
+                    // `--replace` drops what the index held under it: a tracked folder replaced by
+                    // a link.
+                    yield* run(
+                      repository.folder,
+                      [...WHOLE_INDEX, 'update-index', '--add', '--replace', ...kept],
+                      'work',
+                      { env },
+                    )
+                  }
+                  for (const { path, real } of withheld) {
+                    // Read at its real path, never waited on (#434): a pipe put there since is
+                    // refused.
+                    const bytes = yield* Effect.try({
+                      try: () => readOwnSync(real, READ_CAP, real).bytes,
+                      catch: (cause) =>
+                        `${path} is not read: ${cause instanceof Error ? cause.message : String(cause)}`,
+                    })
+                    const blob = text(
+                      yield* run(repository.folder, ['hash-object', '-w', '--stdin'], 'work', {
+                        env,
+                        input: Buffer.from(withheldBlob(bytes)),
+                      }),
+                    ).trim()
                     yield* run(
                       repository.folder,
                       [
-                        '--no-optional-locks',
-                        'ls-files',
-                        '-z',
-                        '-t',
-                        '--others',
-                        '--modified',
-                        '--exclude-standard',
+                        ...WHOLE_INDEX,
+                        'update-index',
+                        '--add',
+                        '--cacheinfo',
+                        '100644',
+                        blob,
+                        path,
                       ],
-                      'read',
+                      'work',
                       { env },
-                    ),
-                  ),
-                ).map((line) => ({ untracked: line.startsWith('? '), path: line.slice(2) }))
-                const touched = [...new Set(pending.map(({ path }) => path))].filter(sensitive)
-                const withheld = touched.flatMap((path) => {
-                  const real = regularFileIn(repository.folder, path)
-                  return real === null ? [] : [{ path, real }]
-                })
-                // A sensitive path that is not a regular file of the repository (a link, or a file a
-                // folder link leads to, which Git for Windows follows through a junction) is left
-                // out of the tree, as it is out of `add`, which would copy what it leads to.
-                const dropped = touched.filter((path) => !withheld.some((one) => one.path === path))
-                const addOnly = (paths: ReadonlyArray<string>) =>
-                  paths.length === 0
-                    ? Effect.void
-                    : run(
-                        repository.folder,
-                        [
-                          ...WHOLE_INDEX,
-                          'add',
-                          '--all',
-                          '--pathspec-from-file=-',
-                          '--pathspec-file-nul',
-                        ],
-                        'work',
-                        {
-                          env,
-                          input: Buffer.from(
-                            paths.map((path) => pathspecOf(repository.folder, path)).join(''),
-                          ),
-                        },
-                      ).pipe(Effect.asVoid)
-                // A changed path that is now a folder Git would walk into (a tracked file replaced
-                // by one, or by a junction) is never handed to `add`: what it holds is listed on its
-                // own, and the path leaves the tree.
-                const folders = pending.filter(
-                  ({ path }) => !sensitive(path) && walkedInto(repository.folder, path),
-                )
-                const ordinary = pending.filter(
-                  ({ path }) => !sensitive(path) && !folders.some((one) => one.path === path),
-                )
-                // Git refuses a listed path that matches nothing: an untracked file removed since
-                // it was listed. The add is asked once more without those.
-                yield* addOnly(ordinary.map(({ path }) => path)).pipe(
-                  Effect.catchTag('GitFailed', () =>
-                    addOnly(
-                      ordinary
-                        .filter(
-                          ({ untracked, path }) => !untracked || present(repository.folder, path),
-                        )
-                        .map(({ path }) => path),
-                    ),
-                  ),
-                )
-                const removed = [...dropped, ...folders.map(({ path }) => path)]
-                if (removed.length > 0) {
-                  yield* run(
-                    repository.folder,
-                    [...WHOLE_INDEX, 'update-index', '--force-remove', '--', ...removed],
-                    'work',
-                    { env },
-                  )
-                }
-                for (const { path, real } of withheld) {
-                  // Read at its real path, never waited on (#434): a pipe put there since is refused.
-                  const bytes = yield* Effect.try({
-                    try: () => readOwnSync(real, READ_CAP, real).bytes,
-                    catch: (cause) =>
-                      `${path} is not read: ${cause instanceof Error ? cause.message : String(cause)}`,
-                  })
-                  const blob = text(
-                    yield* run(repository.folder, ['hash-object', '-w', '--stdin'], 'work', {
-                      env,
-                      input: Buffer.from(withheldBlob(bytes)),
-                    }),
+                    )
+                  }
+                  const tree = text(
+                    yield* run(repository.folder, [...WHOLE_INDEX, 'write-tree'], 'work', { env }),
                   ).trim()
-                  yield* run(
-                    repository.folder,
-                    [...WHOLE_INDEX, 'update-index', '--add', '--cacheinfo', '100644', blob, path],
-                    'work',
-                    { env },
-                  )
-                }
-                return text(
-                  yield* run(repository.folder, [...WHOLE_INDEX, 'write-tree'], 'work', { env }),
-                ).trim()
-              }),
-            // A folder left behind is litter in the temporary directory, not a failed snapshot.
-            (scratch) =>
-              Effect.sync(() => {
-                try {
-                  rmSync(scratch, { recursive: true, force: true })
-                } catch {}
-              }),
-          )
+                  // A link made on the way of an added path while Git ran: what Git read there may
+                  // be what the link leads to, and none of it joins the store.
+                  if (ordinary.some((path) => linkOnTheWay(repository.folder, path) !== null)) {
+                    return null
+                  }
+                  yield* Effect.try({
+                    try: () => joinObjects(incoming, join(store, 'objects')),
+                    catch: (cause) =>
+                      `the snapshot's objects are not stored: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  })
+                  return tree
+                }),
+              // A folder left behind is litter, not a failed snapshot.
+              ({ scratch, incoming }) =>
+                Effect.sync(() => {
+                  for (const folder of [scratch, incoming]) {
+                    try {
+                      rmSync(folder, { recursive: true, force: true })
+                    } catch {}
+                  }
+                }),
+            )
+          const tree = (yield* attempt(false)) ?? (yield* attempt(true))
+          if (tree === null) {
+            return yield* Effect.fail(
+              'a link was made on the way of a file while it was added, twice',
+            )
+          }
           yield* run(store, ['update-ref', refOf(owner, repository.name), tree], 'read', {
             env: alternate,
           })
@@ -1330,43 +1404,77 @@ function regularFileIn(folder: string, path: string): string | null {
 /**
  * A listed path as `add` reads it: that path and nothing under it, so a file replaced by a folder
  * since it was listed adds nothing it holds. A nested repository (listed `sub/`) is added as its
- * commit, and a link as itself: Git walks into neither, and refuses a pathspec beyond a link.
+ * commit: Git never walks into one.
  */
-function pathspecOf(folder: string, path: string): string {
+function pathspecOf(path: string): string {
   const only = `:(literal)${path}\0`
   if (path.endsWith('/')) return only
-  try {
-    if (lstatSync(join(folder, path)).isSymbolicLink()) return only
-  } catch {}
   return `${only}:(exclude,glob)${path.replace(/[\\*?[\]]/g, '\\$&')}/**\0`
 }
 
 /**
- * Whether Git would walk into a repository's path: a folder, or on Windows a link to one (Git for
- * Windows walks a junction as a folder). A nested repository, listed `sub/`, is never walked.
+ * Whether Git would walk into a repository's path that has no link on its way: a folder. A nested
+ * repository, listed `sub/`, is never walked.
  */
 function walkedInto(folder: string, path: string): boolean {
   if (path.endsWith('/')) return false
   try {
-    const found = lstatSync(join(folder, path))
-    return (
-      found.isDirectory() ||
-      (process.platform === 'win32' &&
-        found.isSymbolicLink() &&
-        statSync(join(folder, path)).isDirectory())
-    )
+    return lstatSync(join(folder, path)).isDirectory()
   } catch {
     return false
   }
 }
 
-/** Whether something, a link included, stands at a repository's path. */
-function present(folder: string, path: string): boolean {
+/**
+ * The first link on a repository's path, the path itself included, null when there is none: a
+ * junction too, which Node reads as a link and Git for Windows walks as a folder.
+ */
+function linkOnTheWay(folder: string, path: string): string | null {
+  const names = path.split('/').filter((name) => name !== '')
+  for (let at = 1; at <= names.length; at++) {
+    const prefix = names.slice(0, at).join('/')
+    try {
+      if (lstatSync(join(folder, prefix)).isSymbolicLink()) return prefix
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * What Git stores for a link: its target as written, with `/` on Windows as Git for Windows writes
+ * it; null when the path is no link any more.
+ */
+function targetOf(folder: string, link: string): Buffer | null {
   try {
-    lstatSync(join(folder, path))
-    return true
+    const target = readlinkSync(join(folder, link), { encoding: 'buffer' })
+    return process.platform === 'win32'
+      ? Buffer.from(target.toString('utf8').replaceAll('\\', '/'), 'utf8')
+      : target
   } catch {
-    return false
+    return null
+  }
+}
+
+/**
+ * The objects a snapshot wrote apart moved into the store, each to the same place; one the store
+ * already holds (written by another snapshot meanwhile) is the same bytes and stays as it is.
+ */
+function joinObjects(incoming: string, objects: string): void {
+  const files = readdirSync(incoming, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(incoming, join(entry.parentPath, entry.name)))
+  // A pack's index is moved after its pack, so a reader never finds the index alone.
+  files.sort((one, other) => Number(one.endsWith('.idx')) - Number(other.endsWith('.idx')))
+  for (const file of files) {
+    const to = join(objects, file)
+    mkdirSync(dirname(to), { recursive: true })
+    try {
+      renameSync(join(incoming, file), to)
+    } catch (failure) {
+      if (!existsSync(to)) throw failure
+    }
   }
 }
 
