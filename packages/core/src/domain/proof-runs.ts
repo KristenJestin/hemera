@@ -95,6 +95,8 @@ export interface ProofRunClass {
    * failure's title in its list, never its tree's line.
    */
   readonly printedFailures: ReadonlyArray<PrintedFailure>
+  /** The Go packages whose result line (`ok`, `FAIL`, `?`) closes a block of the output. */
+  readonly goPackages: ReadonlyArray<string>
   /**
    * The test file's tests as the runner's report names them, each with how it ended and whether
    * the runner's own listing on the console shows it so: read whole, the same tests, path for path,
@@ -183,7 +185,9 @@ const UNITTEST_HEADING = /^(?<kind>FAIL|ERROR): (?<name>test\w*) \((?<id>\w+(?:\
 const GO_FAIL = /^\s*--- FAIL: /
 const GO_PATH = /^\s*--- FAIL: (?<name>\S+)(?=\s+\(|\s*$)/
 /** gotestsum's `=== FAIL: pkg TestX (0.00s)`, never one without its duration. */
-const GOTESTSUM_FAIL = /^=== FAIL: \S+ (?<name>Test\S*) \(\d+(?:\.\d+)?s\)\s*$/
+const GOTESTSUM_FAIL = /^=== FAIL: (?<package>\S+) (?<name>Test\S*) \(\d+(?:\.\d+)?s\)\s*$/
+/** go test's result line of a package, below its tests: `ok  \tpkg\t0.01s`, `FAIL\tpkg\t…`, `?   \tpkg\t…`. */
+const GO_PACKAGE = /^(?:ok {2}|FAIL|\? {3})\t(?<package>\S+)(?:\t|\s\[|\s*$)/
 /** go test -v's `=== RUN   TestX/sub`, above what that test logs. */
 const GO_RUN_LINE = /^=== (?:RUN|CONT|NAME)\s+(?<name>\S+)\s*$/
 /**
@@ -196,7 +200,17 @@ const GO_ERROR = /^\s*panic: /m
 /** libtest's `test x ... FAILED` (`test x - should panic ... FAILED`). */
 const LIBTEST_FAILED = /^test (?<name>\S+)(?: - should panic)? \.\.\. FAILED\s*$/
 /** cargo-nextest's `FAIL [ 0.004s] (1/2) crate x`. */
-const NEXTEST_FAIL = /^\s*FAIL \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?\S+ (?<name>\S+)\s*$/
+const NEXTEST_FAIL =
+  /^\s*FAIL \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?(?<binary>\S+) (?<name>\S+)\s*$/
+/** A cargo-nextest status line (`PASS`, `FAIL`, `SIGSEGV`…): its binary's id. */
+const NEXTEST_STATUS =
+  /^\s*[A-Z]+(?:-[A-Z]+)? \[\s*\d+(?:\.\d+)?s\] (?:\(\s*\d+\/\d+\) )?(?<binary>\S+) \S+\s*$/
+/** cargo-nextest's count of the test binaries it runs. */
+const NEXTEST_STARTING = /^\s*Starting \d+ tests? across (?<binaries>\d+) binar(?:y|ies)\b/
+/** cargo's line naming the test binary it runs next, by its source: `unittests src/lib.rs`, `tests/c.rs`. */
+const CARGO_RUNNING = /^\s+Running (?<source>(?:unittests )?\S+) \(/
+/** cargo's rerun hint naming a package: it ran the tests of more than one package of a workspace. */
+const CARGO_PACKAGE_HINT = /^error: .*\bto rerun pass `-p |^\s+`-p \S/
 /** libtest's heading of a failure's output, below its `failures:` line. */
 const RUST_STDOUT = /^---- (?<name>\S+) stdout ----\s*$/
 const RUST_FAILURES = /^failures:\s*$/
@@ -389,6 +403,12 @@ export interface Printed {
   readonly paths: ReadonlyArray<ReadonlyArray<string>>
   /** The test's file, when the runner prints it (vitest's title, jest's file line, a node id). */
   readonly file: string | null
+  /**
+   * Where a Go or Rust test ran, as the output says for certain: its Go package (its import path,
+   * or gotestsum's path from the module's root, `.` or `./pkg/b`), or its Rust test binary
+   * (`lib`, `main`, `bin:x`, `test:x`); null when the output does not say for certain.
+   */
+  readonly unit: string | null
 }
 
 /** The files a JavaScript runner prints apart from a failing test's line: jest's, node:test's. */
@@ -419,7 +439,8 @@ const printed = (
   titles: ReadonlyArray<string>,
   paths: ReadonlyArray<ReadonlyArray<string>> = [],
   file: string | null = null,
-): Printed => ({ runner, name, titles, paths, file })
+  unit: string | null = null,
+): Printed => ({ runner, name, titles, paths, file, unit })
 
 /**
  * A vitest or jest title's tests: the title, then what follows each ` > ` or ` › ` in it, each
@@ -564,9 +585,17 @@ const goVerdict = (lines: ReadonlyArray<string>): Verdict => {
  * what it logged below; a parent takes its subtests' verdicts too (see `goVerdicts`).
  */
 const goFailure = (line: string): Read | null => {
-  const name = (GO_PATH.exec(line) ?? GOTESTSUM_FAIL.exec(line))?.groups?.['name']
+  const found = (GO_PATH.exec(line) ?? GOTESTSUM_FAIL.exec(line))?.groups
+  const name = found?.['name']
   if (name !== undefined) {
-    return { printed: printed('go', name, [name]), marked: true, verdict: goVerdict }
+    // gotestsum names the package from the module's root; go test's line, by the line below it.
+    const from = found?.['package']
+    const unit = from === undefined ? null : from === '.' ? '.' : `./${from}`
+    return {
+      printed: printed('go', name, [name], [], null, unit),
+      marked: true,
+      verdict: goVerdict,
+    }
   }
   return GO_FAIL.test(line) ? { printed: null, marked: true, verdict: () => 'silent' } : null
 }
@@ -601,10 +630,13 @@ const rustFailure = (line: string, afterFailures: boolean, listed: boolean): Rea
       verdict: () => 'silent',
     }
   }
-  const nextest = NEXTEST_FAIL.exec(line)?.groups?.['name']
+  const nextestFound = NEXTEST_FAIL.exec(line)?.groups
+  const nextest = nextestFound?.['name']
   if (nextest !== undefined) {
+    // Its binary's id, read as the binary once the whole output says it is certain.
+    const binary = nextestFound?.['binary'] ?? null
     return {
-      printed: printed('rust', nextest, [rustTest(nextest)]),
+      printed: printed('rust', nextest, [rustTest(nextest)], [], null, binary),
       marked: true,
       verdict: rustVerdict,
     }
@@ -650,8 +682,9 @@ const failureAt = (
  */
 const failingLinesOf = (
   output: string,
-): Pick<ProofRunClass, 'failingLines' | 'printedFailures'> => {
+): Pick<ProofRunClass, 'failingLines' | 'printedFailures' | 'goPackages'> => {
   const lines = output.split(/\r?\n/).map((line) => uncoloured(line).slice(0, LINE_CAP))
+  const places = placesOf(lines)
   let failing = 0
   let listAt = -1
   for (const [at, line] of lines.entries()) {
@@ -700,6 +733,12 @@ const failingLinesOf = (
     }
   }
   const kept = entries.slice(0, FAILING_LINES)
+  // A go test failure's package is its block's; a Rust failure's binary, the one above it.
+  const unitOf = (name: Printed, at: number): string | null => {
+    if (name.runner === 'go') return name.unit ?? places.goBelow[at] ?? null
+    if (name.runner === 'rust') return places.rustUnit(name.unit, at)
+    return name.unit
+  }
   const read = kept.flatMap((entry, index) => {
     const below = lines.slice(entry.at + 1, kept[index + 1]?.at ?? lines.length)
     const name = entry.read.printed
@@ -710,18 +749,96 @@ const failingLinesOf = (
       titles: name.titles,
       paths: name.paths,
       file: name.file,
+      unit: unitOf(name, entry.at),
       verdict: entry.read.verdict(below),
     }
-    return [failure]
+    return [{ at: entry.at, failure }]
   })
   return {
     failingLines: kept.filter((entry) => entry.read.marked).map((entry) => lines[entry.at] ?? ''),
     printedFailures: [
-      ...read.filter((one) => one.runner !== 'go' && one.runner !== 'rust'),
-      ...goVerdicts(read, lines),
-      ...rustVerdicts(read, lines),
+      ...read
+        .map((one) => one.failure)
+        .filter((one) => one.runner !== 'go' && one.runner !== 'rust'),
+      ...goVerdicts(read, lines, places.goBelow),
+      ...rustVerdicts(read, lines, places.rustAt),
     ],
+    goPackages: places.goPackages,
   }
+}
+
+/**
+ * Where the lines of an output are, for Go and Rust. Go: the package of the first result line of
+ * go test at or below each line, which closes the block its tests print in, and every package a
+ * result line names. Rust: the test binary cargo or cargo-nextest last named at or above each line
+ * (cargo's `Running` line, nextest's status line), and that binary as a failure's unit when the
+ * whole output tells it apart for certain: for cargo, a run of one package (no rerun hint naming
+ * one with `-p`, which cargo prints when it runs several); for nextest, binaries of one crate,
+ * every binary it counted shown.
+ */
+const placesOf = (lines: ReadonlyArray<string>) => {
+  const goBelow: Array<string | null> = []
+  const goPackages: Array<string> = []
+  let below: string | null = null
+  for (let at = lines.length - 1; at >= 0; at -= 1) {
+    const found = GO_PACKAGE.exec(lines[at] ?? '')?.groups?.['package']
+    if (found !== undefined) {
+      below = found
+      goPackages.push(found)
+    }
+    goBelow.push(below)
+  }
+  goBelow.reverse()
+  goPackages.reverse()
+  const rustAt: Array<string | null> = []
+  const binaries = new Set<string>()
+  let counted: number | null = null
+  let packages = false
+  let current: string | null = null
+  for (const line of lines) {
+    const source = CARGO_RUNNING.exec(line)?.groups?.['source']
+    const binary = NEXTEST_STATUS.exec(line)?.groups?.['binary']
+    if (source !== undefined) current = `cargo ${posix(source)}`
+    else if (binary !== undefined) {
+      current = `nextest ${binary}`
+      binaries.add(binary)
+    }
+    if (CARGO_PACKAGE_HINT.test(line)) packages = true
+    const starting = NEXTEST_STARTING.exec(line)?.groups?.['binaries']
+    if (starting !== undefined) counted = Number(starting)
+    rustAt.push(current)
+  }
+  const crates = new Set(Array.from(binaries, (binary) => binary.split('::')[0]))
+  const nextestCertain = counted === binaries.size && crates.size === 1
+  /** A Rust failure's binary: nextest's id its line names, otherwise cargo's binary above it. */
+  const rustUnit = (nextest: string | null, at: number): string | null => {
+    if (nextest !== null) return nextestCertain ? nextestUnit(nextest) : null
+    const key = rustAt[at] ?? null
+    if (key === null || !key.startsWith('cargo ') || packages) return null
+    return cargoUnit(key.slice('cargo '.length))
+  }
+  return { goBelow, goPackages, rustAt, rustUnit }
+}
+
+/** cargo's test binary as a unit, from its source: `lib`, `main`, `bin:x`, `test:x`. */
+const cargoUnit = (source: string): string | null => {
+  const unit =
+    /^unittests src\/(?:(?<root>lib|main)\.rs|bin\/(?<bin>[\w-]+)(?:\.rs|\/main\.rs))$/.exec(
+      source,
+    )?.groups
+  if (unit !== undefined) return unit['root'] ?? `bin:${unit['bin'] ?? ''}`
+  const test = /^tests\/(?<test>[\w-]+)(?:\.rs|\/main\.rs)$/.exec(source)?.groups?.['test']
+  return test === undefined ? null : `test:${test}`
+}
+
+/** cargo-nextest's binary id as a unit: `acme` its lib, `acme::bin/x`, `acme::c` a tests/c.rs. */
+const nextestUnit = (id: string): string | null => {
+  const [crate, target, ...more] = id.split('::')
+  if (crate === undefined || more.length > 0) return null
+  if (target === undefined) return 'lib'
+  const bin = /^bin\/(?<bin>[\w-]+)$/.exec(target)?.groups?.['bin']
+  if (bin !== undefined) return bin === crate ? 'main' : `bin:${bin}`
+  return /^[\w-]+$/.test(target) ? `test:${target}` : null
 }
 
 /**
@@ -730,15 +847,17 @@ const failingLinesOf = (
  * panicked vetoes it. A test that logged nothing failed on `t.Fail`: an assertion.
  */
 const goVerdicts = (
-  read: ReadonlyArray<PrintedFailure>,
+  read: ReadonlyArray<{ readonly at: number; readonly failure: PrintedFailure }>,
   lines: ReadonlyArray<string>,
+  goBelow: ReadonlyArray<string | null>,
 ): ReadonlyArray<PrintedFailure> => {
-  const go = read.filter((one) => one.runner === 'go')
+  const go = read.map((one) => one.failure).filter((one) => one.runner === 'go')
+  // What each test logged under its `=== RUN` line, by its package's block and its path.
   const logged = new Map<string, Array<string>>()
   let current: string | null = null
-  for (const line of lines) {
+  for (const [at, line] of lines.entries()) {
     const run = GO_RUN_LINE.exec(line)?.groups?.['name']
-    if (run !== undefined) current = run
+    if (run !== undefined) current = `${goBelow[at] ?? ''}\n${run}`
     else if (GO_END.test(line)) current = null
     else if (current !== null) {
       const log = logged.get(current) ?? []
@@ -747,12 +866,14 @@ const goVerdicts = (
     }
   }
   return go.map((one) => {
-    const within = (path: string) => path === one.name || path.startsWith(`${one.name}/`)
+    // Its subtests are those of its own package only: another package's test of that name is not.
+    const within = (other: PrintedFailure) =>
+      other.unit === one.unit && (other.name === one.name || other.name.startsWith(`${one.name}/`))
     const verdict = combined([
-      ...go.filter((other) => within(other.name)).map((other) => other.verdict),
-      ...[...new Set(go.map((other) => other.name))]
-        .filter(within)
-        .map((path) => goVerdict(logged.get(path) ?? [])),
+      ...go.filter(within).map((other) => other.verdict),
+      ...[...new Set(go.filter(within).map((other) => other.name))].map((path) =>
+        goVerdict(logged.get(`${one.unit ?? ''}\n${path}`) ?? []),
+      ),
     ])
     const failure: PrintedFailure = {
       runner: one.runner,
@@ -760,6 +881,7 @@ const goVerdicts = (
       titles: one.titles,
       paths: one.paths,
       file: one.file,
+      unit: one.unit,
       verdict: verdict === 'silent' ? 'assertion' : verdict,
     }
     return failure
@@ -774,9 +896,11 @@ const goVerdicts = (
  * `assert!(c, "message")`, which prints only its message).
  */
 const rustVerdicts = (
-  read: ReadonlyArray<PrintedFailure>,
+  read: ReadonlyArray<{ readonly at: number; readonly failure: PrintedFailure }>,
   lines: ReadonlyArray<string>,
+  rustAt: ReadonlyArray<string | null>,
 ): ReadonlyArray<PrintedFailure> => {
+  // A panic is its binary's: another binary's test of the same path is another thread.
   const panics = lines.flatMap((line, at) => {
     const found = RUST_PANIC.exec(line)?.groups
     if (found === undefined) return []
@@ -786,7 +910,7 @@ const rustVerdicts = (
       : RUST_PANIC_ERROR.test(said)
         ? 'error'
         : 'silent'
-    return [{ thread: found['thread'] ?? '', verdict }]
+    return [{ thread: `${rustAt[at] ?? ''}\n${found['thread'] ?? ''}`, verdict }]
   })
   const byThread = new Map<string, Array<Verdict>>()
   for (const panic of panics) {
@@ -795,15 +919,19 @@ const rustVerdicts = (
     byThread.set(panic.thread, verdicts)
   }
   return read
-    .filter((one) => one.runner === 'rust')
-    .map((one) => {
+    .filter((one) => one.failure.runner === 'rust')
+    .map(({ at, failure: one }) => {
       const failure: PrintedFailure = {
         runner: one.runner,
         name: one.name,
         titles: one.titles,
         paths: one.paths,
         file: one.file,
-        verdict: combined([one.verdict, ...(byThread.get(one.name) ?? [])]),
+        unit: one.unit,
+        verdict: combined([
+          one.verdict,
+          ...(byThread.get(`${rustAt[at] ?? ''}\n${one.name}`) ?? []),
+        ]),
       }
       return failure
     })
@@ -1167,11 +1295,20 @@ export interface GoSubtest {
   readonly whole: boolean
 }
 /**
+ * A Rust test (`#[test]`, `#[tokio::test]`): its function's name, and the inline modules of its
+ * file it is declared in, outermost first (null when the file was not read for certain).
+ */
+export interface RustTest {
+  readonly rust: string
+  readonly modules: ReadonlyArray<string> | null
+}
+/**
  * A Rust test with cases (`#[rstest]`, `#[test_case(…)]`): its function's name, which libtest
- * prints alone or with each case under it (`tests::exports::case_1`).
+ * prints alone or with each case under it (`tests::exports::case_1`), and its inline modules.
  */
 export interface RustCasedTest {
   readonly function: string
+  readonly modules: ReadonlyArray<string> | null
 }
 /**
  * A test whose name a template makes: a `test.each` format (`%s`, `$name`), or a template literal
@@ -1196,7 +1333,7 @@ export interface DeclaredTest {
  * A test a proof adds: its declared name, matched as written, a name a template makes, a test
  * with its path in its file, a Go subtest under its parent, or a Rust cased test.
  */
-export type TestName = string | TemplateTest | DeclaredTest | GoSubtest | RustCasedTest
+export type TestName = string | TemplateTest | DeclaredTest | GoSubtest | RustTest | RustCasedTest
 
 /** A path with forward slashes: a TAP report on Windows escapes its backslashes, doubled. */
 const posix = (path: string): string => path.replace(/\\+/g, '/')
@@ -1337,6 +1474,9 @@ const subtestPattern = (test: GoSubtest): RegExp | null => {
   )
 }
 
+/** A case of a Rust cased test, as libtest prints it: rstest's `case_1`, test_case's `test_case_1_…`. */
+const RUST_CASE = /^(?:test_)?case_\d+\w*$/
+
 /**
  * A Rust cased test as libtest prints its cases: its function, then rstest's `::case_1` or
  * test_case's `::test_case_1_…` or none, never another test of a module named the same.
@@ -1344,10 +1484,112 @@ const subtestPattern = (test: GoSubtest): RegExp | null => {
 const casedAnswers = (path: string, function_: string): boolean => {
   const parts = path.split('::')
   return parts.some(
-    (part, at) =>
-      part === function_ &&
-      parts.slice(at + 1).every((after) => /^(?:test_)?case_\d+\w*$/.test(after)),
+    (part, at) => part === function_ && parts.slice(at + 1).every((after) => RUST_CASE.test(after)),
   )
+}
+
+/** A path with forward slashes and without a leading `./`, cut into its folders and file. */
+const pathParts = (path: string): ReadonlyArray<string> =>
+  posix(path).replace(/^\.\//, '').split('/')
+
+/**
+ * Whether a Go or Rust failure is the test's (`own`), another package's or binary's (`other`), or
+ * either, for all the output says (`unknown`).
+ */
+type Placed = 'own' | 'other' | 'unknown'
+
+/**
+ * Where a Go test file's tests run: its folder, which only a package whose path is that folder, or
+ * ends with it, holds, or gotestsum's path from the module's root (`./pkg/b`). A package whose
+ * folder another printed package also ends with is told apart from none. The module's root is
+ * gotestsum's `.`, or the printed package every other printed package is under.
+ */
+const goPlaced = (
+  unit: string | null,
+  folder: string,
+  claimed: number,
+  root: string | null,
+): Placed => {
+  if (unit === null) return 'unknown'
+  if (unit.startsWith('.')) return unit === (folder === '' ? '.' : `./${folder}`) ? 'own' : 'other'
+  if (folder === '') return root === null ? 'unknown' : unit === root ? 'own' : 'other'
+  if (!goClaims(unit, folder)) return 'other'
+  return claimed <= 1 ? 'own' : 'unknown'
+}
+
+/** The Go package every other printed package is under, null when there is none. */
+const goRoot = (packages: ReadonlyArray<string>): string | null => {
+  const shortest = packages.reduce<string | null>(
+    (best, unit) => (best === null || unit.length < best.length ? unit : best),
+    null,
+  )
+  if (shortest === null) return null
+  const under = packages.every((unit) => unit === shortest || unit.startsWith(`${shortest}/`))
+  return under ? shortest : null
+}
+
+/** Whether a Go package's import path is a folder's, or ends with it. */
+const goClaims = (unit: string, folder: string): boolean =>
+  folder !== '' && (unit === folder || unit.endsWith(`/${folder}`))
+
+/** A Rust module's name as a path part, `mod.rs` aside. */
+const RUST_MODULE = /^[A-Za-z_]\w*$/
+
+/**
+ * Where a Rust test file's tests run, as its path says when its crate is at the repository's root
+ * (one `src` or `tests` folder, first): the test binaries that may hold it, and the modules its
+ * file is (`src/a/b.rs` is `a::b`, `src/a/mod.rs` is `a`). Null for another file: a crate in a
+ * folder, which no output tells apart from another crate, a benchmark, an example.
+ */
+const rustPlace = (
+  testPath: string,
+): { readonly units: ReadonlyArray<string>; readonly modules: ReadonlyArray<string> } | null => {
+  const parts = pathParts(testPath)
+  const [top, ...rest] = parts
+  const roots = parts.slice(0, -1).filter((part) => part === 'src' || part === 'tests')
+  const file = rest.at(-1) ?? ''
+  if (roots.length !== 1 || (top !== 'src' && top !== 'tests') || !file.endsWith('.rs')) {
+    return null
+  }
+  const path = [...rest.slice(0, -1), file.slice(0, -3)]
+  const modulesOf = (inner: ReadonlyArray<string>) => {
+    const named = inner.at(-1) === 'mod' ? inner.slice(0, -1) : inner
+    const modules = inner.length === 1 && inner[0] === 'main' ? [] : named
+    return modules.every((module) => RUST_MODULE.test(module)) ? modules : null
+  }
+  const [first = '', second = ''] = path
+  const binary =
+    top === 'tests'
+      ? { units: [`test:${first}`], inner: path.slice(1) }
+      : first === 'bin'
+        ? { units: [`bin:${second}`], inner: path.slice(2) }
+        : path.length === 1 && (first === 'lib' || first === 'main')
+          ? { units: [first], inner: [] }
+          : { units: ['lib', 'main'], inner: path }
+  const modules = modulesOf(binary.inner)
+  return modules === null ? null : { units: binary.units, modules }
+}
+
+/**
+ * Whether a Rust failure is the declared test's own: printed in a binary that may hold its file,
+ * under the path its file and its inline modules make, its function last, or its cases after it.
+ * Unknown when its binary, its file's place or its modules were not read for certain.
+ */
+const rustPlaced = (
+  failure: Printed,
+  test: TestName,
+  place: ReturnType<typeof rustPlace>,
+): Placed => {
+  if (place === null || failure.unit === null) return 'unknown'
+  if (!place.units.includes(failure.unit)) return 'other'
+  if (!Predicate.hasProperty(test, 'modules') || test.modules === null) return 'unknown'
+  const prefix = [...place.modules, ...test.modules]
+  const parts = failure.name.split('::')
+  const own = parts.slice(prefix.length)
+  const named = Predicate.hasProperty(test, 'rust')
+    ? own.length === 1 && own[0] === test.rust
+    : own[0] === test.function && own.slice(1).every((after) => RUST_CASE.test(after))
+  return prefix.every((module, at) => parts[at] === module) && named ? 'own' : 'other'
 }
 
 /**
@@ -1401,11 +1643,12 @@ const declaredAnswers = (failure: Printed, test: DeclaredTest): boolean => {
 
 /**
  * Whether a failing test is one the proof adds: a declared name equal to one of its titles, cut on
- * its runner's separators; a template's; a declared test's path; a Go subtest's path; a Rust cased
- * test's.
+ * its runner's separators; a template's; a declared test's path; a Go subtest's path; a Rust
+ * test's or cased test's (its modules read apart, see `rustPlaced`).
  */
 const answers = (failure: Printed, test: TestName): boolean => {
   if (Predicate.isString(test)) return failure.titles.includes(test)
+  if (Predicate.hasProperty(test, 'rust')) return failure.titles.includes(test.rust)
   if (Predicate.hasProperty(test, 'template')) {
     return failure.titles.some((title) => templateAnswers(test.template, title))
   }
@@ -1434,9 +1677,25 @@ const named = (
   failures: ReadonlyArray<PrintedFailure>,
   names: ReadonlyArray<TestName>,
   testPath: string,
+  goPackages: ReadonlyArray<string>,
 ): Verdict => {
+  // A Go or Rust failure is the test's only within its package or binary, read for certain; one
+  // that may be another's is never its red, and may still refuse it.
+  const folder = pathParts(testPath).slice(0, -1).join('/')
+  const claimed = new Set(goPackages.filter((unit) => goClaims(unit, folder))).size
+  const root = folder === '' ? goRoot(goPackages) : null
+  const place = rustPlace(testPath)
+  const placed = (failure: PrintedFailure, name: TestName): Placed => {
+    if (failure.runner === 'go') return goPlaced(failure.unit, folder, claimed, root)
+    if (failure.runner === 'rust') return rustPlaced(failure, name, place)
+    return 'own'
+  }
   const verdicts = names.map((name) => {
-    const matched = failures.filter((failure) => answers(failure, name))
+    const matched = failures.filter((failure) => {
+      if (!answers(failure, name)) return false
+      const where = placed(failure, name)
+      return where === 'own' || (where === 'unknown' && failure.verdict === 'error')
+    })
     const elsewhere = matched.some(
       (failure) => failure.file !== null && !sameFile(failure.file, testPath),
     )
@@ -1510,7 +1769,7 @@ const scriptedRed = (
   const own =
     located.length > 0 ? located.filter((one) => sameFile(one.file ?? '', testPath)) : run.failures
   const shown = run.failures.length > 0 ? own.map(reportFailure) : run.printedFailures
-  if (names.length > 0 && named(shown, names, testPath) === 'error') return false
+  if (names.length > 0 && named(shown, names, testPath, run.goPackages) === 'error') return false
   const report = reportedVerdict(run, testPath, names)
   if (report !== null) return report === 'assertion'
   const asserted =
@@ -1554,7 +1813,12 @@ export const validRed = (
     return asserted && (located.length === 0 || own.some((one) => one.assertion))
   }
   const reported = run.failures.length > 0
-  const said = named(reported ? own.map(reportFailure) : run.printedFailures, names, testPath)
+  const said = named(
+    reported ? own.map(reportFailure) : run.printedFailures,
+    names,
+    testPath,
+    run.goPackages,
+  )
   if (said !== 'silent') return said === 'assertion'
   return keyLineMatched === true && (reported ? own.some((one) => one.assertion) : asserted)
 }
@@ -1731,22 +1995,33 @@ const readAdded = (test: {
     title: found.groups?.['name'] ?? '',
   }))
   const functions = count(rust.map((one) => one.title))
+  const cased = Array.from(added.matchAll(RUST_CASED_NAME), (found) => ({
+    at: found.index,
+    function: found.groups?.['name'] ?? '',
+  }))
+  // The inline modules each Rust test is declared in, read only in the whole file.
+  const modules = whole
+    ? rustModulesAt(
+        added,
+        [...rust, ...cased].map((one) => one.at),
+      )
+    : []
   const others: ReadonlyArray<{ readonly at: number; readonly name: TestName }> = [
     ...Array.from(added.matchAll(GO_NAME), (found) => ({
       at: found.index,
       name: found.groups?.['name'] ?? '',
     })),
     // A Rust test the file declares twice, in two modules, is told apart by no name.
-    ...rust.map((one) => ({
+    ...rust.map((one, index) => ({
       at: one.at,
       name:
         whole && (functions.get(one.title) ?? 0) > 1
           ? { title: one.title, scope: null, twin: true, clash: false }
-          : one.title,
+          : { rust: one.title, modules: modules[index] ?? null },
     })),
-    ...Array.from(added.matchAll(RUST_CASED_NAME), (found) => ({
-      at: found.index,
-      name: { function: found.groups?.['name'] ?? '' },
+    ...cased.map((one, index) => ({
+      at: one.at,
+      name: { function: one.function, modules: modules[rust.length + index] ?? null },
     })),
   ]
   const inOrder = [...declared, ...others]
@@ -1754,6 +2029,120 @@ const readAdded = (test: {
     .toSorted((a, b) => a.at - b.at)
     .map((one) => one.name)
   return [...inOrder, ...subtestsOf(test)]
+}
+
+/** A Rust `mod name` right before a brace, as a block's header ends. */
+const RUST_MOD_HEADER = /(?:^|[^\w])mod\s+(?:r#)?(?<name>[A-Za-z_]\w*)\s*$/
+/** A Rust raw string's start, its prefix read as a word: `r"`, `r#"`, `br##"`, `cr"`. */
+const RUST_RAW = /[bc]?r(?<hashes>#*)"/y
+/** A Rust word: an identifier, a keyword, a number, a literal's prefix. */
+const RUST_WORD = /\w+/y
+
+/**
+ * The inline modules each place of a Rust file is in, outermost first, read once left to right,
+ * its comments (nested ones too), strings, raw strings, chars and lifetimes aside. A place inside
+ * another block (a function, an `impl`, a macro) or inside a comment or a string is in none for
+ * certain (null); every place is, in a file not read whole: a comment or a string never closed, a
+ * brace never matched.
+ */
+const rustModulesAt = (
+  code: string,
+  places: ReadonlyArray<number>,
+): ReadonlyArray<ReadonlyArray<string> | null> => {
+  const none = places.map(() => null)
+  const order = places.map((at, index) => ({ at, index })).toSorted((a, b) => a.at - b.at)
+  const found: Array<ReadonlyArray<string> | null> = places.map(() => null)
+  // The blocks open, a module by its name, any other block null; and the code since the last
+  // `;`, `{` or `}`, its comments and literals blanked: the header of the next block.
+  const open: Array<string | null> = []
+  let header = ''
+  let next = 0
+  let at = 0
+  while (at < code.length) {
+    // A place passed over was inside a comment or a literal.
+    while ((order[next]?.at ?? Infinity) < at) next += 1
+    while (order[next]?.at === at) {
+      const modules = open.flatMap((name) => (name === null ? [] : [name]))
+      found[order[next]?.index ?? 0] = modules.length === open.length ? modules : null
+      next += 1
+    }
+    const char = code[at] ?? ''
+    if (code.startsWith('//', at)) {
+      const end = code.indexOf('\n', at)
+      at = end < 0 ? code.length : end
+      header += ' '
+    } else if (code.startsWith('/*', at)) {
+      let depth = 1
+      let end = at + 2
+      let opening = code.indexOf('/*', end)
+      let closing = code.indexOf('*/', end)
+      while (depth > 0) {
+        if (closing < 0) return none
+        if (opening >= 0 && opening < closing) {
+          depth += 1
+          end = opening + 2
+          opening = code.indexOf('/*', end)
+        } else {
+          depth -= 1
+          end = closing + 2
+          closing = code.indexOf('*/', end)
+          if (opening >= 0 && opening < end) opening = code.indexOf('/*', end)
+        }
+      }
+      at = end
+      header += ' '
+    } else if (char === '"') {
+      let end = at + 1
+      while (end < code.length && code[end] !== '"') end += code[end] === '\\' ? 2 : 1
+      if (end >= code.length) return none
+      at = end + 1
+      header += ' '
+    } else if (char === "'") {
+      // A char (`'{'`, `'\''`, `'\u{7d}'`), or else a lifetime or a label (`'a`).
+      const point = code.codePointAt(at + 1) ?? 0
+      const width = point > 0xffff ? 2 : 1
+      if (code[at + 1] === '\\') {
+        const end = code.indexOf("'", at + 3)
+        if (end < 0 || end > at + 12) return none
+        at = end + 1
+        header += ' '
+      } else if (code[at + 1 + width] === "'") {
+        at += 2 + width
+        header += ' '
+      } else {
+        at += 1
+        header += char
+      }
+    } else if (/\w/.test(char) && !/\w/.test(code[at - 1] ?? '')) {
+      RUST_RAW.lastIndex = at
+      const raw = RUST_RAW.exec(code)
+      if (raw !== null) {
+        const close = `"${raw.groups?.['hashes'] ?? ''}`
+        const end = code.indexOf(close, at + raw[0].length)
+        if (end < 0) return none
+        at = end + close.length
+        header += ' '
+      } else {
+        RUST_WORD.lastIndex = at
+        const word = RUST_WORD.exec(code)?.[0] ?? char
+        at += word.length
+        header += word
+      }
+    } else if (char === '{') {
+      open.push(RUST_MOD_HEADER.exec(header.slice(-256))?.groups?.['name'] ?? null)
+      header = ''
+      at += 1
+    } else if (char === '}') {
+      if (open.length === 0) return none
+      open.pop()
+      header = ''
+      at += 1
+    } else {
+      header = char === ';' ? '' : header + char
+      at += 1
+    }
+  }
+  return open.length === 0 ? found : none
 }
 
 /**
@@ -1877,6 +2266,7 @@ export const addedTestNames = (test: {
     if (Predicate.hasProperty(name, 'scope')) {
       return Predicate.isString(name.title) ? name.title : name.title.template
     }
+    if (Predicate.hasProperty(name, 'rust')) return name.rust
     return Predicate.hasProperty(name, 'function') ? name.function : name.subtest
   })
 
