@@ -114,6 +114,10 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
   { listed: '~/Library/Keychains', segments: named('Library', 'Keychains') },
   { listed: '~/.hemera', segments: named('.hemera') },
   { listed: '~/.hemera-dev', segments: named('.hemera-dev') },
+  // A repository's Git folder, a worktree's `.git` file and what they lead to: Git reads its
+  // configuration, hooks and attributes there, and runs the programs they name (`core.fsmonitor`,
+  // a filter, a hook) at the engine's next Git call, with its rights (#448). Read freely.
+  { listed: '.git', segments: named('.git'), readFreely: () => true, anyCase: true },
   { listed: '/etc/shadow', segments: named('etc', 'shadow'), anchored: true },
   { listed: '/etc/sudoers', segments: named('etc', 'sudoers'), anchored: true },
   { listed: '/etc/sudoers.d', segments: named('etc', 'sudoers.d'), anchored: true },
@@ -143,6 +147,15 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
 /** Whether names differ only by case on this system. */
 const foldsCase = (platform: string) => platform === 'win32' || platform === 'darwin'
 
+/**
+ * A name as Windows opens it: without a stream (`.git::$INDEX_ALLOCATION` is the folder `.git`)
+ * and without the dots and spaces it drops at the end (`.git.` is `.git`).
+ */
+const windowsName = (name: string): string => {
+  const kept = name.replace(/:.*$/, '').replace(/[. ]+$/, '')
+  return kept === '' ? name : kept
+}
+
 /** A segment that holds a glob, as the expression of the names it matches. */
 function globOf(segment: string): RegExp | null {
   if (!/[*?[]/.test(segment)) return null
@@ -167,7 +180,8 @@ function globOf(segment: string): RegExp | null {
  */
 function segmentIs(written: string, segment: Segment, platform: string, anyCase: boolean): boolean {
   const fold = anyCase || foldsCase(platform)
-  const name = fold ? written.toLowerCase() : written
+  const said = platform === 'win32' ? windowsName(written) : written
+  const name = fold ? said.toLowerCase() : said
   const glob = globOf(written)
   if ('suffix' in segment) return name.endsWith(segment.suffix)
   if ('name' in segment) {

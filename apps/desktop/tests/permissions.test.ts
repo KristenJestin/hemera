@@ -246,6 +246,37 @@ describe('Sensitive places always ask, for file tools and commands', () => {
   })
 })
 
+describe('A Git folder is a sensitive place to write, never to read (#448)', () => {
+  test('a write into .git, by a file tool of the Builder or the Chat or by a command, asks; a read does not', async () => {
+    const { answer, questions } = await withBuilder(({ builder, chat, main }) =>
+      Effect.gen(function* () {
+        mkdirSync(join(main, '.git', 'hooks'), { recursive: true })
+        writeFileSync(join(main, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+        const written = [
+          yield* callTool(builder, 'fs_write', {
+            path: '.git/config',
+            content: '[core]\n\tfsmonitor = x\n',
+          }),
+          yield* callTool(chat, 'fs_write', { path: '.GIT/hooks/pre-commit', content: 'x\n' }),
+          yield* run(builder, `sh -c 'echo x > .git/info/attributes'`),
+        ]
+        return { written, head: yield* read(builder, '.git/HEAD') }
+      }),
+    )
+    expect(questions).toEqual([
+      'sensitive place: ~/acme/.git',
+      'sensitive place: ~/acme/.GIT',
+      'sensitive place: ~/acme/.git',
+    ])
+    expect(answer.written.map((one) => one.text)).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(answer.head.text).toContain('ref: refs/heads/main')
+  })
+})
+
 describe('What cannot be read with certainty counts as outside', () => {
   test.each([
     ['an unknown variable', `sh -c 'cat $SECRET_FILE'`],
