@@ -348,6 +348,16 @@ const keptContents = Effect.gen(function* () {
   return rows.map((row) => row.content)
 })
 
+/**
+ * Rewrites a worktree's `.git` file to say `said`. It is removed first: Git for Windows makes it a
+ * hidden file (`core.hideDotFiles`), and Windows refuses to write over a hidden file in place
+ * (EPERM), where a new one is written on every system.
+ */
+const pointGitAt = (tree: string, said: string) => {
+  rmSync(join(tree, '.git'))
+  writeFileSync(join(tree, '.git'), said)
+}
+
 /** The key of a capture's keyed hashes, in the suite's reads of one file. */
 const SUITE_KEY = randomBytes(32)
 
@@ -1218,7 +1228,7 @@ utimesSync('.env', 1000000000, 1000000000)
       writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
       // Even leading back to the worktree, as an administrative folder of Git's does.
       writeFileSync(join(other, 'gitdir'), `${join(tree, '.git')}\n`)
-      writeFileSync(join(tree, '.git'), `gitdir: ${other}\n`)
+      pointGitAt(tree, `gitdir: ${other}\n`)
     })
     expect(seen.answer.text).toBe(
       'refused: your worktree of api no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again',
@@ -1238,7 +1248,7 @@ utimesSync('.env', 1000000000, 1000000000)
       git(tree, 'worktree', 'add', '-q', '--detach', other, 'HEAD')
       const admin = git(other, 'rev-parse', '--path-format=absolute', '--git-dir')
       writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
-      writeFileSync(join(tree, '.git'), `gitdir: ${admin}\n`)
+      pointGitAt(tree, `gitdir: ${admin}\n`)
     })
     expect(seen.answer.text).toBe(NOT_ITS_OWN)
     expect(seen.detail.state).toBe('running')
@@ -1271,7 +1281,7 @@ utimesSync('.env', 1000000000, 1000000000)
                   git(work, 'init', '-q', '--bare', other)
                   git(work, '--git-dir', other, 'config', 'core.bare', 'false')
                   git(work, '--git-dir', other, 'config', 'core.worktree', elsewhere)
-                  writeFileSync(join(worktree, '.git'), `gitdir: ${other}\n`)
+                  pointGitAt(worktree, `gitdir: ${other}\n`)
                 })
               : Effect.void,
         },
