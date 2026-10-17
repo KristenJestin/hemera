@@ -22,7 +22,14 @@
 
 import { isUtf8 } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { type Stats, lstatSync, readdirSync, readlinkSync, realpathSync } from 'node:fs'
+import {
+  type BigIntStats,
+  type Stats,
+  lstatSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+} from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 import { Result } from 'effect'
@@ -91,11 +98,37 @@ const shapeOf = (kind: Shape['kind'], digest: string, text: string | null = null
   everywhere: false,
 })
 
+/** How long a file must have stood unchanged before its stat stands for its bytes. */
+const SETTLED_NS = 2_000_000_000n
+/** At most this many files are remembered; past it, the memory starts again. */
+const REMEMBERED = 100_000
+
+/**
+ * The digest and text of files hashed once, by path, with the stat they had. A file whose size,
+ * times, inode and mode are the same is not read again, unless it was hashed less than
+ * `SETTLED_NS` after its last change: a rewrite in that same tick could keep every one of them.
+ */
+const hashed = new Map<
+  string,
+  {
+    readonly stat: string
+    readonly settled: boolean
+    readonly shape: Shape
+    readonly bytes: Buffer | null
+  }
+>()
+
+/** What a configuration file of this digest includes and where it sets the hooks, parsed once. */
+const configNames = new Map<
+  string,
+  { readonly includes: ReadonlyArray<string>; readonly hooksPaths: ReadonlyArray<string> }
+>()
+
 /** One path as it stands, and its bytes when it is a file read (a link's, where it leads). */
 function entryOf(path: string): { readonly shape: Shape; readonly bytes: Buffer | null } | null {
-  let named: Stats
+  let named: BigIntStats
   try {
-    named = lstatSync(path)
+    named = lstatSync(path, { bigint: true })
   } catch (cause) {
     if (codeOf(cause) === 'ENOENT' || codeOf(cause) === 'ENOTDIR') return null
     return { shape: shapeOf('other', `unreadable:${codeOf(cause)}`), bytes: null }
@@ -116,18 +149,39 @@ function entryOf(path: string): { readonly shape: Shape; readonly bytes: Buffer 
   if (named.isDirectory()) return { shape: shapeOf('folder', 'folder'), bytes: null }
   if (!named.isFile())
     return { shape: shapeOf('other', `other:${String(named.mode)}`), bytes: null }
-  if (named.size > SHAPE_CAP) {
-    const digest = `over:${String(named.size)}:${String(named.mtimeMs)}:${String(named.ctimeMs)}`
+  if (named.size > BigInt(SHAPE_CAP)) {
+    const digest = `over:${String(named.size)}:${String(named.mtimeNs)}:${String(named.ctimeNs)}`
     return { shape: shapeOf('over', digest), bytes: null }
   }
+  const stat = [named.size, named.mtimeNs, named.ctimeNs, named.ino, named.dev, named.mode].join(
+    ':',
+  )
+  const known = hashed.get(path)
+  if (known !== undefined && known.settled && known.stat === stat) return known
+  const changed = named.mtimeNs > named.ctimeNs ? named.mtimeNs : named.ctimeNs
+  const settled = BigInt(Date.now()) * 1_000_000n - changed >= SETTLED_NS
   const read = bytesOf(path)
   if (Result.isFailure(read)) {
     return { shape: shapeOf('other', `unread:${read.failure}`), bytes: null }
   }
   const bytes = read.success
-  const mode = (named.mode & 0o777).toString(8)
+  const mode = (named.mode & 0o777n).toString(8)
   const text = bytes.length <= TEXT_KEPT && isUtf8(bytes) ? bytes.toString('utf8') : null
-  return { shape: shapeOf('file', `file:${mode}:${sha256(bytes)}`, text), bytes }
+  const shape = shapeOf('file', `file:${mode}:${sha256(bytes)}`, text)
+  if (hashed.size >= REMEMBERED) hashed.clear()
+  hashed.set(path, {
+    stat,
+    settled,
+    shape,
+    bytes: bytes.length <= TEXT_KEPT ? bytes : null,
+  })
+  return { shape, bytes }
+}
+
+/** A file's bytes as read now, or null. */
+function textOf(path: string): Buffer | null {
+  const read = bytesOf(path)
+  return Result.isSuccess(read) ? read.success : null
 }
 
 /** The first line of a small file, trimmed, or null. */
@@ -283,15 +337,27 @@ export function shapesOf(
     ...configs.map((path) => ({ path, depth: 0, everywhere: false })),
   ]
   const followed = new Set<string>()
-  const read: Array<{ readonly text: string; readonly everywhere: boolean }> = []
+  const read: Array<{ readonly hooksPaths: ReadonlyArray<string>; readonly everywhere: boolean }> =
+    []
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
     const seen = `${String(next.everywhere)}\0${next.path}`
     if (followed.has(seen)) continue
     followed.add(seen)
-    const text = bytes.get(next.path)?.toString('utf8')
-    if (text === undefined) continue
-    read.push({ text, everywhere: next.everywhere })
-    for (const named of includesOf(text)) {
+    const shape = shapes.get(next.path)
+    if (shape === undefined || (shape.kind !== 'file' && shape.kind !== 'link')) continue
+    let names = configNames.get(shape.digest)
+    if (names === undefined) {
+      // A large file trusted on its stat comes without its bytes: read again here.
+      const text = (bytes.get(next.path) ?? textOf(realOrNull(next.path) ?? next.path))?.toString(
+        'utf8',
+      )
+      if (text === undefined) continue
+      names = { includes: includesOf(text), hooksPaths: hooksPathsOf(text) }
+      if (configNames.size >= REMEMBERED) configNames.clear()
+      configNames.set(shape.digest, names)
+    }
+    read.push({ hooksPaths: names.hooksPaths, everywhere: next.everywhere })
+    for (const named of names.includes) {
       const path = named.startsWith('~/')
         ? join(home.home, named.slice(2))
         : isAbsolute(named)
@@ -305,8 +371,8 @@ export function shapesOf(
   }
   // Every folder a `core.hooksPath` names, whichever configuration set it: one named from the
   // home's shapes every repository; one relative to where the hooks run, each checkout.
-  for (const { text, everywhere } of read) {
-    for (const named of hooksPathsOf(text)) {
+  for (const { hooksPaths, everywhere } of read) {
+    for (const named of hooksPaths) {
       if (named.startsWith('~/')) walk(join(home.home, named.slice(2)), everywhere)
       else if (isAbsolute(named)) walk(resolve(named), everywhere)
       else for (const top of tops) walk(resolve(top, named), false)

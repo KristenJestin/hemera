@@ -224,4 +224,44 @@ describe('What a fingerprint costs (#457)', () => {
     // Ten times as much to read: linear is about ten times as long. A margin for a loaded machine.
     expect(large / small).toBeLessThan(30)
   }, 120_000)
+
+  test('a file rewritten in the same second at the same size is hashed again, not trusted on its stat', () => {
+    const main = repository(join(work, 'acme'))
+    const hook = join(main, '.git', 'hooks', 'pre-commit')
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n')
+    const before = shapesOf([main], home).get(hook)
+    writeFileSync(hook, '#!/bin/sh\nexit 1\n')
+    expect(shapesOf([main], home).get(hook)?.digest).not.toBe(before?.digest)
+  })
+
+  test('a large config trusted on its stat still has its includes followed', async () => {
+    const main = repository(join(work, 'acme'))
+    const included = join(work, 'included')
+    writeFileSync(included, '[core]\n\tname = value\n')
+    const line = '\tname = value\n'
+    writeFileSync(
+      join(main, '.git', 'config'),
+      `[include]\n\tpath = ${included}\n[core]\n${line.repeat(10_000)}`,
+    )
+    await new Promise((resolved) => setTimeout(resolved, 2_500))
+    shapesOf([main], home)
+    expect(paths([main])).toContain(included)
+  }, 30_000)
+
+  test('files unchanged for seconds are trusted on their stat: a second fingerprint of 10,000 hooks is at least three times faster', async () => {
+    const main = repository(join(work, 'acme'))
+    const folder = join(main, '.git', 'hooks')
+    for (let at = 0; at < 10_000; at += 1) {
+      writeFileSync(join(folder, `hook-${String(at)}`), `#!/bin/sh\necho ${String(at)}\n`)
+    }
+    await new Promise((resolved) => setTimeout(resolved, 2_500))
+    const timed = () => {
+      const began = performance.now()
+      shapesOf([main], home)
+      return performance.now() - began
+    }
+    const hashed = timed()
+    const trusted = Math.min(timed(), timed())
+    expect(hashed / trusted).toBeGreaterThanOrEqual(3)
+  }, 120_000)
 })
