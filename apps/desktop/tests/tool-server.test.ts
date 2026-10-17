@@ -20,6 +20,7 @@ import {
 } from '@hemera/core/domain'
 import { toToolInputSchema } from '@hemera/core/schema'
 import { UserAuthor } from '@hemera/ipc'
+import { eq } from 'drizzle-orm'
 import { Effect, Layer, Option, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -37,6 +38,9 @@ import {
 } from '../src/engine/agents/runtime.ts'
 import { openAgentSession } from '../src/engine/agents/sessions.ts'
 import { acpTracesLayer } from '../src/engine/agents/trace.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { toolCalls } from '../src/engine/storage/schema.ts'
+import { type ArgumentsReader, readArguments } from '../src/engine/tools/server.ts'
 import { putEvidence } from '../src/engine/memory/evidence.ts'
 import { missionFolder, missionKeyOf } from '../src/engine/memory/files.ts'
 import { commandsEngine } from './commands-engine.ts'
@@ -306,5 +310,46 @@ describe('An agent started bare reaches Hemera’s tools over real MCP', () => {
       text: 'refused: Hemera has no tool named git_push',
     })
     expect(readFileSync(join(work, 'acme', 'hello.txt'), 'utf8')).toBe('hello, Acme\n')
+  })
+})
+
+describe('A call’s arguments are decoded once, from the wire to the record (#440)', () => {
+  test('a call of 3,000,000 empty lists is decoded once, and its record keeps what it kept before', async () => {
+    const verdicts = verdictsSaying(() => ALLOW)
+    let decodes = 0
+    const counting: ArgumentsReader = (given) => {
+      decodes += 1
+      return readArguments(given)
+    }
+    const calls = await commandsEngine(data, {
+      tools: { verdicts: verdicts.layer, readingArguments: counting },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          const session = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          const url = yield* HemeraEndpoint.use((endpoint) => endpoint.url)
+          yield* Effect.promise(() =>
+            callOverMcp(bearer(url, session.token), 'tools/call', {
+              name: 'fs_write',
+              arguments: {
+                path: 'a.txt',
+                content: 'x',
+                extra: Array.from({ length: 3_000_000 }, () => []),
+              },
+            }),
+          )
+          return yield* Database.use((database) =>
+            database.select().from(toolCalls).where(eq(toolCalls.sessionId, session.sessionId)),
+          )
+        }),
+      ),
+    )
+    expect(decodes).toBe(1)
+    // What the record kept before: the head of its text, cut at 2,000 characters, then `…`.
+    const head = '{"path":"a.txt","content":"x","extra":['
+    expect(calls.map((call) => call.arguments)).toEqual([
+      `${(head + '[],'.repeat(1000)).slice(0, 2000)}…`,
+    ])
   })
 })
