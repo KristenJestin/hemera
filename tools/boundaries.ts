@@ -135,6 +135,7 @@ export const OWN_READERS: ReadonlyArray<string> = [
   'building/proof-runner.ts',
   'building/snapshots.ts',
   'building/documenter.ts',
+  'building/go-module.ts',
   'review/diffs.ts',
   'permissions/order.ts',
   'sessions/instructions.ts',

@@ -1351,6 +1351,85 @@ describe('The red phase (CT-35)', () => {
   })
 })
 
+/**
+ * `api` as a Go module `example.com/m`, its `go.mod` and a script that prints what `go test
+ * ./internal/...` prints when `TestSaves` fails in package `example.com/m/internal/pkg`, committed
+ * and pushed; answers the proof that adds `TestSaves` in a new file at `path`, run by that script.
+ */
+const goModuleProof = (api: string, path: string): Schema.JsonObject => {
+  writeFileSync(join(api, 'go.mod'), 'module example.com/m\n\ngo 1.22\n')
+  const output = [
+    '--- FAIL: TestSaves (0.00s)',
+    '    saves_test.go:6: got 1, want 2',
+    'FAIL',
+    'FAIL\texample.com/m/internal/pkg\t0.002s',
+    'FAIL',
+    '',
+  ].join('\n')
+  writeFileSync(
+    join(api, 'go-red.mjs'),
+    `process.stdout.write(${JSON.stringify(output)})\nprocess.exitCode = 1\n`,
+  )
+  git(api, 'add', '.')
+  git(api, 'commit', '-q', '-m', 'go module')
+  git(api, 'push', '-q', 'origin', 'HEAD')
+  git(api, 'fetch', '-q', 'origin')
+  const code =
+    'package pkg\n\nimport "testing"\n\nfunc TestSaves(t *testing.T) {\n\tt.Errorf("got 1, want 2")\n}\n'
+  return automated(path, code, {
+    test: {
+      repository: 'api',
+      path,
+      code,
+      insertion: 'new_file',
+      command: `"${process.execPath}" go-red.mjs`,
+    },
+  })
+}
+
+describe('A Go red read against the module its go.mod names (#462)', () => {
+  test('a red of package example.com/m/internal/pkg is not the red of a test file at pkg/', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith((api) => ({
+            'R1.S2': goModuleProof(api, 'pkg/saves_test.go'),
+          }))
+          yield* deliveredTo(mission.id, 'Fix the setup')
+          return {
+            proof: yield* proofsOf(mission.id),
+            events: yield* payloadsOf(mission.id, 'building.red_invalid'),
+          }
+        }),
+      ),
+    )
+    const s2 = seen.proof.scenarios.find((one) => one.scenario === 'R1.S2')
+    expect(s2?.state).toBe('waiting_red')
+    expect(s2?.runs.map((one) => one.classification)).toEqual(['assertion_failed'])
+    expect(seen.events).toEqual([{ scenario: 'R1.S2', classification: 'assertion_failed' }])
+  })
+
+  test('the same red is the red of a test file at internal/pkg', async () => {
+    const seen = await proofsEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith((api) => ({
+            'R1.S2': goModuleProof(api, 'internal/pkg/saves_test.go'),
+          }))
+          yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
+          return yield* proofOf(mission.id, 'R1.S2')
+        }),
+      ),
+    )
+    expect(seen.red).toMatchObject({
+      classification: 'assertion_failed',
+      testPath: 'api/internal/pkg/saves_test.go',
+    })
+  })
+})
+
 describe('The green runs', () => {
   test('once the tasks are done, the green run makes the scenario then the requirement proven; a later write in that repository makes it to_rerun', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
