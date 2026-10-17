@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "61ca79d8-479c-4468-bc7c-a7680c8cdd28",
+  "id": "d485b8dc-7074-495f-9589-89376a46d413",
   "prevIds": ["76a28b68-693b-452d-b449-bef35465cc96"],
   "ddl": [
     {
@@ -158,6 +158,10 @@
     },
     {
       "name": "freezes",
+      "entityType": "tables"
+    },
+    {
+      "name": "git_baselines",
       "entityType": "tables"
     },
     {
@@ -4346,6 +4350,46 @@
       "generated": null,
       "name": "id",
       "entityType": "columns",
+      "table": "git_baselines"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "git_baselines"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "checkouts",
+      "entityType": "columns",
+      "table": "git_baselines"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shapes",
+      "entityType": "columns",
+      "table": "git_baselines"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
       "table": "git_holds"
     },
     {
@@ -4375,16 +4419,6 @@
       "default": null,
       "generated": null,
       "name": "everywhere",
-      "entityType": "columns",
-      "table": "git_holds"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "commons",
       "entityType": "columns",
       "table": "git_holds"
     },
@@ -15500,6 +15534,13 @@
       "nameExplicit": false,
       "name": "freezes_pk",
       "table": "freezes",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "git_baselines_pk",
+      "table": "git_baselines",
       "entityType": "pks"
     },
     {

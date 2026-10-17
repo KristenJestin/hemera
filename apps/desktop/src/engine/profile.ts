@@ -506,6 +506,7 @@ export const startProfile = (
           }
         : { home: guardHome, configHome: join(guardHome, '.config') },
       log,
+      secrets.mask,
     )
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)
@@ -876,11 +877,7 @@ export const startProfile = (
     yield* Context.get(context, Memory).start.pipe(Effect.forkScoped)
     // The Git guard's holds a stopped engine left are read back, before any Git of the engine
     // runs; its questions are written as its holds need them (#457).
-    yield* run(guard.restore).pipe(
-      Effect.catch((refusal) =>
-        Effect.sync(() => log(`the holds of the Git guard were not read: ${said(refusal)}`)),
-      ),
-    )
+    yield* run(guard.restore)
     yield* run(guard.questions).pipe(Effect.forkScoped)
 
     let reconciliation: Reconciliation = 'none'

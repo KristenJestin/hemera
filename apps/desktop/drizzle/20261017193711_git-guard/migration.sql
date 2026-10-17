@@ -1,9 +1,15 @@
+CREATE TABLE `git_baselines` (
+	`id` text PRIMARY KEY,
+	`project_id` text NOT NULL,
+	`checkouts` text NOT NULL,
+	`shapes` text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `git_holds` (
 	`id` text PRIMARY KEY,
 	`project_id` text NOT NULL,
 	`need_id` text,
 	`everywhere` integer NOT NULL,
-	`commons` text NOT NULL,
 	`checkouts` text NOT NULL,
 	`changes` text NOT NULL,
 	`answer` text NOT NULL,

@@ -116,9 +116,11 @@ export interface GitCallOptions {
  * Git there changed since the user last allowed it), or null; and what is done once it has run.
  */
 export interface GitSpawnGuard {
+  /** Before a call in `folder`, with its arguments and the variables Git is handed beyond ours. */
   readonly before: (
     folder: string,
     args: ReadonlyArray<string>,
+    env: Readonly<Record<string, string>>,
   ) => { readonly refused: string | null; readonly after: () => void }
 }
 
@@ -232,7 +234,7 @@ export const spawnGitBytes =
     )
     if (guard === undefined) return spawned
     return Effect.suspend(() => {
-      const checked = guard.before(folder, args)
+      const checked = guard.before(folder, args, options.env ?? {})
       if (checked.refused !== null) {
         return Effect.fail(
           new GitFailed({ args: [...args], folder, stderr: mask(checked.refused) }),

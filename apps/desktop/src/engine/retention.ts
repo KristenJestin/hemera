@@ -100,6 +100,8 @@ export const TABLE_CLASSES = {
   freeze_files: 'permanent',
   // A hold lasts as long as its repository's Git stays stopped, and is gone once released.
   git_holds: 'state',
+  // What the guard last accepted of a repository's Git, kept as long as the repository is known.
+  git_baselines: 'state',
   mission_dependencies: 'permanent',
   spec_relies_on: 'permanent',
   effectful_actions: 'permanent',

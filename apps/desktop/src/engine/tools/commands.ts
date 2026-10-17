@@ -21,8 +21,10 @@ import type { Command, Run } from '@hemera/ipc'
 import { Duration, Effect, Exit, Option, Predicate, Result, type Scope } from 'effect'
 
 import { listCommands } from '../catalogue.ts'
+import type { DomainEvents } from '../domain-events.ts'
 import { GitGuard, actionIn } from '../git-guard.ts'
 import { type RunServices, awaitRun, getRun, runOutput, startRun, stopRun } from '../runs.ts'
+import type { Database } from '../storage/database.ts'
 import type { Grant } from './access.ts'
 import { type ActionOwner, EffectfulActions } from './actions.ts'
 import { type ToolAnswer, answered, failure, refusal } from './files.ts'
@@ -132,8 +134,9 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       { projectId: grant.projectId, root: grant.place.root },
       command === null ? `ran ${line}` : `ran ${command.name}: ${line}`,
     )
+    const stores = yield* Effect.context<Database | DomainEvents>()
     let closeGuard: Effect.Effect<void> = Effect.void
-    const openGuard = Effect.flatMap(guard.open(action), (close) =>
+    const openGuard = Effect.flatMap(Effect.provide(guard.open(action), stores), (close) =>
       Effect.sync(() => {
         closeGuard = close
       }),

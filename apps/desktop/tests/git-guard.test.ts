@@ -10,8 +10,18 @@
  * is a temporary folder too, never the user's.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { PermissionAnswer } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
@@ -19,9 +29,13 @@ import { Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Git } from '../src/engine/git.ts'
-import { answerNeed, listNeeds } from '../src/engine/needs.ts'
+import { SHOWN_CAP, questionText } from '../src/engine/git-guard.ts'
+import { answerNeed, listNeeds, withdrawNeed } from '../src/engine/needs.ts'
 import { Judge } from '../src/engine/permissions/ports.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
+import { DATABASE_FILE } from '../src/engine/migrate.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import { gitHolds } from '../src/engine/storage/schema.ts'
 import { commandsEngine, until } from './commands-engine.ts'
 import { git, remote, repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -584,5 +598,285 @@ describe('A hold outlives a restart of the engine (#457)', () => {
     )
     expect(reopened.held).toContain('Hemera stopped its Git')
     expect(reopened.needs).toEqual([])
+  })
+})
+
+/** The engine over the same data folder again, its home the work folder: a restart. */
+const reopen = <A, E>(body: Effect.Effect<A, E, EngineServices>) =>
+  commandsEngine(data, { tools: { home: work, judge: ALLOWS } })((started) =>
+    started.profile.use(body),
+  )
+
+describe('The guard keeps a baseline per repository that lasts (#457, round 2)', () => {
+  test('a change a detached child makes after its command returned stops the engine’s next Git call', async () => {
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        const release = join(work, 'release')
+        const done = join(work, 'done')
+        const child = `const { appendFileSync, existsSync, writeFileSync } = require('node:fs')
+const wait = () => {
+  if (!existsSync(${JSON.stringify(release)})) return setTimeout(wait, 25)
+  appendFileSync('.git/config', '[core]\\n\\thooksPath = h\\n')
+  writeFileSync(${JSON.stringify(done)}, '')
+}
+wait()`
+        const ran = yield* runScript(
+          builder,
+          main,
+          `import { spawn } from 'node:child_process'
+spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { detached: true, stdio: 'ignore' }).unref()
+`,
+        )
+        const quiet = yield* until(guardNeeds, (needs) => needs.length > 0, 500)
+        writeFileSync(release, '')
+        yield* until(
+          Effect.sync(() => existsSync(done)),
+          (there) => there,
+        )
+        const status = yield* engineStatus(main)
+        return { ran, quiet, status, needs: yield* asked }
+      }),
+    )
+    expect(result.ran.ok).toBe(true)
+    expect(result.quiet).toEqual([])
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('hooksPath = h')
+  })
+
+  test('a change made while the engine was stopped is asked at the next start, and its Git stays stopped', async () => {
+    await withBuilder(({ builder, main }) =>
+      runScript(
+        builder,
+        main,
+        `import { writeFileSync } from 'node:fs'\nwriteFileSync('a.txt', 'a')\n`,
+      ),
+    )
+    const main = join(work, 'acme')
+    writeFileSync(join(main, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho while stopped\n')
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        const status = yield* engineStatus(main)
+        return { status, needs: yield* asked }
+      }),
+    )
+    expect(reopened.status).toContain('Hemera stopped its Git')
+    expect(reopened.needs).toHaveLength(1)
+    expect(shown(reopened.needs[0])).toContain('~/acme/.git/hooks/pre-commit')
+  })
+
+  test('a repository seen for the first time takes what it has as its baseline: its hooks and its hooksPath ask nothing', async () => {
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        // What the repository had before Hemera first looked, as after an upgrade.
+        writeFileSync(join(main, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho mine\n')
+        git(main, 'config', 'core.hooksPath', '.githooks')
+        mkdirSync(join(main, '.githooks'))
+        writeFileSync(join(main, '.githooks', 'pre-push'), '#!/bin/sh\n')
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('a.txt', 'a')\n`,
+        )
+        const needs = yield* until(guardNeeds, (found) => found.length > 0, 1_000)
+        return { needs, status: yield* engineStatus(main) }
+      }),
+    )
+    expect(result.needs).toEqual([])
+    expect(result.status).toBe('ran')
+  })
+
+  test('a checkout whose .git is pointed at another repository is held', async () => {
+    const other = repository(join(work, 'elsewhere'))
+    writeFileSync(join(other, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho elsewhere\n')
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { renameSync, writeFileSync } from 'node:fs'
+renameSync('.git', '.git-aside')
+writeFileSync('.git', ${JSON.stringify(`gitdir: ${join(other, '.git')}\n`)})
+`,
+        )
+        return { needs: yield* asked, status: yield* engineStatus(main) }
+      }),
+    )
+    expect(result.needs).toHaveLength(1)
+    expect(result.status).toContain('Hemera stopped its Git')
+  })
+})
+
+describe('A call that names its Git folder is held with its repository (#457, round 2)', () => {
+  test('a diff the engine runs from a scratch folder with --git-dir is refused on a held repository', async () => {
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('.git/hooks/pre-commit', '#!/bin/sh\\n')\n`,
+        )
+        yield* asked
+        return yield* Git.use((service) =>
+          service.patchOf({ gitDir: join(main, '.git'), workTree: main }, 'HEAD', 'notes.txt', {
+            bytes: Buffer.from('one\n'),
+            executable: false,
+          }),
+        ).pipe(
+          Effect.map(() => 'ran'),
+          Effect.catchTag('GitFailed', (refused) => Effect.succeed(String(refused.stderr))),
+        )
+      }),
+    )
+    expect(result).toContain('Hemera stopped its Git')
+  })
+})
+
+describe('Hooks under core.hooksPath are part of what shapes Git (#457, round 2)', () => {
+  test('with core.hooksPath set to .husky, a hook a file tool writes there asks', async () => {
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        git(main, 'config', 'core.hooksPath', '.husky')
+        mkdirSync(join(main, '.husky'))
+        const wrote = yield* callTool(builder, 'fs_write', {
+          path: '.husky/pre-commit',
+          content: '#!/bin/sh\necho gotcha\n',
+        })
+        return { wrote, needs: yield* asked, status: yield* engineStatus(main) }
+      }),
+    )
+    expect(result.wrote.ok).toBe(true)
+    expect(shown(result.needs[0])).toContain('~/acme/.husky/pre-commit')
+    expect(result.status).toContain('Hemera stopped its Git')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a hooksPath that is a link is judged where it leads: a hook written there asks',
+    async () => {
+      const shared = join(work, 'shared-hooks')
+      mkdirSync(shared)
+      const result = await withBuilder(({ builder, main }) =>
+        Effect.gen(function* () {
+          symlinkSync(shared, join(main, 'hooks-link'))
+          git(main, 'config', 'core.hooksPath', 'hooks-link')
+          yield* runScript(
+            builder,
+            main,
+            `import { writeFileSync } from 'node:fs'
+writeFileSync(${JSON.stringify(join(shared, 'pre-commit'))}, '#!/bin/sh\\necho gotcha\\n')
+`,
+          )
+          return { needs: yield* asked, status: yield* engineStatus(main) }
+        }),
+      )
+      expect(shown(result.needs[0])).toContain('pre-commit')
+      expect(result.status).toContain('Hemera stopped its Git')
+    },
+  )
+
+  test('a hook manager writing the same hooks again on an install asks nothing', async () => {
+    const result = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        mkdirSync(join(main, '.husky', '_'), { recursive: true })
+        writeFileSync(join(main, '.husky', '_', 'pre-commit'), '#!/bin/sh\n. "$(dirname "$0")/h"\n')
+        writeFileSync(join(main, '.husky', '_', 'h'), '#!/bin/sh\nexit 0\n')
+        git(main, 'config', 'core.hooksPath', '.husky/_')
+        // The install again: every hook written anew, the same, and the same setting.
+        yield* runScript(
+          builder,
+          main,
+          `import { execFileSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
+mkdirSync('.husky/_', { recursive: true })
+writeFileSync('.husky/_/pre-commit', '#!/bin/sh\\n. "$(dirname "$0")/h"\\n')
+writeFileSync('.husky/_/h', '#!/bin/sh\\nexit 0\\n')
+execFileSync('git', ['config', 'core.hooksPath', '.husky/_'])
+`,
+        )
+        const needs = yield* until(guardNeeds, (found) => found.length > 0, 1_000)
+        return { needs, status: yield* engineStatus(main) }
+      }),
+    )
+    expect(result.needs).toEqual([])
+    expect(result.status).toBe('ran')
+  })
+})
+
+describe('The holds’ records (#457, round 2)', () => {
+  test('a hold recorded without its question is asked at the next start', async () => {
+    await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('.git/hooks/pre-commit', '#!/bin/sh\\n')\n`,
+        )
+        const [need] = yield* asked
+        // As if its question had never been written: the record alone is left.
+        const database = yield* Database
+        yield* database.update(gitHolds).set({ needId: null })
+        if (need !== undefined) yield* withdrawNeed(need.id, 'a test')
+      }),
+    )
+    const main = join(work, 'acme')
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(reopened.status).toContain('Hemera stopped its Git')
+    expect(shown(reopened.needs[0])).toContain('~/acme/.git/hooks/pre-commit')
+  })
+
+  test('holds that cannot be read at the start keep the engine’s Git stopped, and a need says why', async () => {
+    await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('a.txt', 'a')\n`,
+        )
+      }),
+    )
+    // The records made unreadable while the engine is stopped.
+    const database = new DatabaseSync(join(data, DATABASE_FILE))
+    database.exec('DROP TABLE git_holds')
+    database.close()
+    const main = join(work, 'acme')
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(reopened.status).toContain('Hemera stopped its Git')
+    expect(reopened.needs).toHaveLength(1)
+    expect(shown(reopened.needs[0])).toContain('could not be read')
+  })
+
+  test('a hold whose repository is gone is kept at the next start and still shown', async () => {
+    const first = await withBuilder(({ builder, main }) =>
+      Effect.gen(function* () {
+        yield* runScript(
+          builder,
+          main,
+          `import { writeFileSync } from 'node:fs'\nwriteFileSync('.git/hooks/pre-commit', '#!/bin/sh\\n')\n`,
+        )
+        return yield* asked
+      }),
+    )
+    const main = join(work, 'acme')
+    renameSync(main, join(work, 'acme-moved'))
+    const reopened = await reopen(until(guardNeeds, (needs) => needs.length > 0))
+    expect(reopened.map((one) => one.id)).toEqual(first.map((one) => one.id))
+    expect(shown(reopened[0])).toContain('~/acme/.git/hooks/pre-commit')
+  })
+})
+
+describe('The question is masked before it is cut (#457, round 2)', () => {
+  test('a secret across the cut is never shown in part', () => {
+    const secret = 'sk-live-0123456789abcdef'
+    const text = `${'a'.repeat(SHOWN_CAP - 8)}${secret}${'b'.repeat(100)}`
+    const shownText = questionText(text, (said) => said.replaceAll(secret, '[secret]'))
+    expect(shownText).not.toContain('sk-live')
+    expect(shownText).toContain('… (cut)')
   })
 })
