@@ -255,6 +255,12 @@ export type GitSettingsWrite =
   | { readonly kind: 'alias'; readonly setting: string }
   /** A subcommand that is none of Git's own: an alias, or a program of that name. */
   | { readonly kind: 'command'; readonly name: string }
+  /** Git's configuration set through the line's environment (`GIT_CONFIG_COUNT`…). */
+  | { readonly kind: 'environment'; readonly name: string }
+  /** A configuration file included on the line (`-c include.path=…`): what it sets is not read. */
+  | { readonly kind: 'include'; readonly setting: string }
+  /** A setting `git clone -c` saves into the clone's configuration. */
+  | { readonly kind: 'clone'; readonly setting: string }
 
 /**
  * The read actions of `git config`, by how many words after them they take at most: a name, and a
@@ -504,6 +510,10 @@ export const GIT_COMMANDS: ReadonlySet<string> = new Set([
   'write-tree',
 ])
 
+/** The include a setting Git is handed (`-c`, `--config-env`) adds, or null. */
+const includeOf = (setting: string): string | null =>
+  /^include(?:if)?\./i.test(setting) ? (setting.split('=')[0] ?? setting) : null
+
 /** The alias a setting Git is handed (`-c`, `--config-env`) defines, or null. */
 const aliasOf = (setting: string): string | null =>
   /^alias\./i.test(setting) ? (setting.split('=')[0] ?? setting) : null
@@ -592,9 +602,12 @@ function gitSettingsWrite(
   return read ? null : file
 }
 
-/** The aliases a Git command's own options set, before its subcommand. */
-function aliasesSet(args: ReadonlyArray<string>): string[] {
-  const set: string[] = []
+/**
+ * What a Git command's own options set before its subcommand that is not read: an alias, or an
+ * included configuration file, whose settings may be any.
+ */
+function settingsSet(args: ReadonlyArray<string>): GitSettingsWrite[] {
+  const set: GitSettingsWrite[] = []
   for (let at = 0; at < args.length; at += 1) {
     const word = args[at] ?? ''
     const setting =
@@ -604,11 +617,34 @@ function aliasesSet(args: ReadonlyArray<string>): string[] {
           ? word.slice('--config-env='.length)
           : undefined
     const alias = setting === undefined ? null : aliasOf(setting)
-    if (alias !== null) set.push(alias)
+    if (alias !== null) set.push({ kind: 'alias', setting: alias })
+    const included = setting === undefined ? null : includeOf(setting)
+    if (included !== null) set.push({ kind: 'include', setting: included })
     if (GIT_VALUES.has(word)) at += 1
     else if (!word.startsWith('-')) break
   }
   return set
+}
+
+/**
+ * The variables through which Git's configuration reaches a command from its environment: the
+ * settings themselves, and another file to read as the user's or the system's.
+ */
+const CONFIG_ENVIRONMENT = /GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS|GLOBAL|SYSTEM)\b/gi
+
+/** What `git clone -c` saves into the clone's own configuration. */
+function cloneSettings(rest: ReadonlyArray<string>): GitSettingsWrite[] {
+  const saved: GitSettingsWrite[] = []
+  for (let at = 0; at < rest.length; at += 1) {
+    const word = rest[at] ?? ''
+    if (word === '-c' || word === '--config') {
+      saved.push({ kind: 'clone', setting: rest[at + 1] ?? '' })
+      at += 1
+    } else if (word.startsWith('--config=')) {
+      saved.push({ kind: 'clone', setting: word.slice('--config='.length) })
+    }
+  }
+  return saved
 }
 
 /**
@@ -624,10 +660,19 @@ export function gitSettingsWrites(action: EffectiveAction): ReadonlyArray<GitSet
     for (const [at, word] of words.entries()) {
       if (programName(word) !== 'git') continue
       const args = words.slice(at + 1)
-      for (const setting of aliasesSet(args)) writes.push({ kind: 'alias', setting })
+      writes.push(...settingsSet(args))
+      const { sub, at: subAt } = gitSubcommandAt(args)
+      if (sub === 'clone') writes.push(...cloneSettings(args.slice(subAt + 1)))
       const write = gitSettingsWrite(words.slice(0, at), args)
       if (write !== null) writes.push(write)
     }
+  }
+  // Git's configuration set through the environment, anywhere on a line that runs git.
+  if (action.sequences.some((words) => words.some((word) => programName(word) === 'git'))) {
+    const named = action.sequences.flatMap((words) =>
+      words.flatMap((word) => [...word.matchAll(CONFIG_ENVIRONMENT)].map((found) => found[0])),
+    )
+    for (const name of new Set(named)) writes.push({ kind: 'environment', name })
   }
   for (const [program = '', ...args] of action.programs) {
     if (programName(program) !== 'git') continue

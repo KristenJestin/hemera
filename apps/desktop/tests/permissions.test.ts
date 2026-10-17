@@ -417,6 +417,45 @@ describe('A git config that writes always asks, whatever the judge says (#448)',
       usual.map(() => expect.stringMatching(/^run /)),
     )
   })
+  test('Git configuration set through the line’s environment, an include on the line, or a clone’s -c asks; the usual lines ask nothing (round 5)', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const shaping = [
+      'env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.templateDir GIT_CONFIG_VALUE_0=template git init',
+      `env GIT_CONFIG_PARAMETERS="'init.templatedir'='template'" git init`,
+      'git -c include.path=included.cfg init',
+      'git clone -c core.fsmonitor=./watch.sh . copy',
+    ]
+    const usual = ['git status', 'git log -1', 'git init', 'git -c color.ui=never diff']
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          // A template whose hook a later commit would run, and a file that names it.
+          mkdirSync(join(main, 'template', 'hooks'), { recursive: true })
+          writeFileSync(join(main, 'template', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')
+          writeFileSync(join(main, 'included.cfg'), '[init]\n\ttemplateDir = template\n')
+          const asked = []
+          for (const line of shaping) asked.push(yield* run(builder, line))
+          const ran = []
+          for (const line of usual) ran.push(yield* run(builder, line))
+          return { asked, ran }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.asked.map((one) => one.ok)).toEqual(shaping.map(() => false))
+    expect(questions).toEqual([
+      'sensitive place: a git configuration set through its environment (GIT_CONFIG_COUNT); sensitive place: a git configuration set through its environment (GIT_CONFIG_KEY_0); sensitive place: a git configuration set through its environment (GIT_CONFIG_VALUE_0)',
+      'sensitive place: a git configuration set through its environment (GIT_CONFIG_PARAMETERS)',
+      'sensitive place: a git configuration included on its line (include.path)',
+      'sensitive place: a setting saved into the clone (core.fsmonitor=./watch.sh)',
+    ])
+    expect(existsSync(join(work, 'acme', '.git', 'hooks', 'pre-commit'))).toBe(false)
+    expect(answer.ran.map((one) => one.text)).toEqual(
+      usual.map(() => expect.stringMatching(/^run /)),
+    )
+  })
 })
 
 describe('What cannot be read with certainty counts as outside', () => {

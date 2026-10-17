@@ -174,6 +174,12 @@ const configWritten = (write: GitSettingsWrite, folder: string, home: string): s
       return `a git alias set on its line (${write.setting})`
     case 'command':
       return `a git command that does not read (git ${write.name})`
+    case 'environment':
+      return `a git configuration set through its environment (${write.name})`
+    case 'include':
+      return `a git configuration included on its line (${write.setting})`
+    case 'clone':
+      return `a setting saved into the clone (${write.setting})`
     case 'named':
       return shownPath(resolve(folder, ...write.folders, write.path), home)
     case 'repository':

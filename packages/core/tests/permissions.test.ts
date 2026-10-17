@@ -382,6 +382,89 @@ describe('A git alias does not read, wherever it comes from (#448, round 4)', ()
   })
 })
 
+describe('Git configuration that reaches a git line through its environment or an include asks (#448, round 5)', () => {
+  const writesOf = (words: ReadonlyArray<string>, context = LINUX) =>
+    gitSettingsWrites(effectiveAction(words, context))
+
+  test.each([
+    [
+      [
+        'GIT_CONFIG_COUNT=1',
+        'GIT_CONFIG_KEY_0=init.templateDir',
+        'GIT_CONFIG_VALUE_0=tpl',
+        'git',
+        'init',
+      ],
+      'GIT_CONFIG_COUNT',
+    ],
+    [
+      [
+        'env',
+        'GIT_CONFIG_COUNT=1',
+        'GIT_CONFIG_KEY_0=init.templateDir',
+        'GIT_CONFIG_VALUE_0=tpl',
+        'git',
+        'init',
+      ],
+      'GIT_CONFIG_COUNT',
+    ],
+    [["GIT_CONFIG_PARAMETERS='init.templatedir'='tpl'", 'git', 'init'], 'GIT_CONFIG_PARAMETERS'],
+    [['sh', '-c', 'export GIT_CONFIG_KEY_0=core.hooksPath && git status'], 'GIT_CONFIG_KEY_0'],
+    [['GIT_CONFIG_GLOBAL=./evil.cfg', 'git', 'init'], 'GIT_CONFIG_GLOBAL'],
+    [['git_config_system=./evil.cfg', 'git', 'status'], 'git_config_system'],
+  ] as const)(
+    '%j sets Git’s configuration through its environment (%s), and asks',
+    (words, name) => {
+      expect(writesOf(words)).toContainEqual({ kind: 'environment', name })
+    },
+  )
+
+  test.each([
+    [['git', '-c', 'include.path=inc', 'init'], 'include.path'],
+    [['git', '--config-env=include.path=INC', 'init'], 'include.path'],
+    [
+      ['git', '--config-env', 'INCLUDEIF.onbranch:main.path=INC', 'status'],
+      'INCLUDEIF.onbranch:main.path',
+    ],
+    [['git', '-c', 'Include.Path=inc', 'log'], 'Include.Path'],
+  ] as const)('%j includes a configuration on its line (%s), and asks', (words, setting) => {
+    expect(writesOf(words)).toContainEqual({ kind: 'include', setting })
+  })
+
+  test.each([
+    [['git', 'clone', '-c', 'core.fsmonitor=x', 'https://example.test/r.git'], 'core.fsmonitor=x'],
+    [
+      ['git', 'clone', '--config', 'color.ui=never', 'https://example.test/r.git'],
+      'color.ui=never',
+    ],
+    [
+      ['git', 'clone', '--config=core.hooksPath=h', 'https://example.test/r.git'],
+      'core.hooksPath=h',
+    ],
+  ] as const)('%j saves a setting into the clone (%s), and asks', (words, setting) => {
+    expect(writesOf(words)).toContainEqual({ kind: 'clone', setting })
+  })
+
+  test.each([
+    ['git', 'status'],
+    ['git', 'diff'],
+    ['git', 'log', '-1'],
+    ['git', 'add', '.'],
+    ['git', 'lfs', 'pull'],
+    ['git', 'rev-parse', 'HEAD'],
+    ['git', 'init'],
+    ['git', 'clone', 'https://example.test/r.git'],
+    ['git', 'clone', '--depth', '1', 'https://example.test/r.git'],
+    ['git', '-c', 'color.ui=never', 'diff'],
+    ['GIT_PAGER=cat', 'git', 'log'],
+    ['env', 'GIT_TERMINAL_PROMPT=0', 'git', 'fetch'],
+    ['GIT_CONFIG_NOSYSTEM=1', 'git', 'status'],
+    ['echo', 'GIT_CONFIG_COUNT'],
+  ])('%j asks nothing', (...words) => {
+    expect(writesOf(words)).toEqual([])
+  })
+})
+
 describe('No agent of a mission writes to a remote or to the history', () => {
   const refused = [
     ['git', 'push'],
