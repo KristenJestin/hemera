@@ -73,6 +73,7 @@ import { Cap } from '../src/engine/sessions/cap.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
 import { REPORTED_TURN_BOUND, RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
 import { THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
+import { Git } from '../src/engine/git.ts'
 import { Withholding } from '../src/engine/tools/withholding.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
@@ -704,6 +705,211 @@ describe('The Probe’s place (#36)', () => {
       expect.stringMatching(/outside/),
       expect.stringMatching(/sensitive place: .*probes/),
     ])
+  })
+})
+
+describe('A Probe never shapes the engine’s Git through a Git folder (#448)', () => {
+  /**
+   * The command a Git configuration names, as Git runs it through its shell: a Node script that
+   * writes `marker` when it runs. Forward slashes, so Git for Windows' shell reads it too.
+   */
+  const marking = (marker: string) => {
+    const path = script(
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'ran')\n`,
+    )
+    return [process.execPath, path].map((word) => `"${word.replaceAll('\\', '/')}"`).join(' ')
+  }
+
+  /** Where the first Probe of Acme's first mission has its worktree of `api`, and `api` itself. */
+  const places = () => ({
+    tree: join(data, 'probes', 'ACME-1', '1', 'api'),
+    api: join(work, 'acme', 'api'),
+  })
+
+  /**
+   * A Probe of Acme, its recipe running `steps`, whose agent makes the writes `calls` names through
+   * the gate, then `prepare` and the engine's next Git calls on its worktree and on `api`. Then
+   * `control` writes as anything but the Probe's tools could, and the engine's Git runs on the
+   * worktree again, then the machine's git alone. Answers what the gate said to each write and
+   * run, the worktree's `.git`, and whether `marker` was written before the control, after the
+   * engine's Git, and after the machine's git alone.
+   */
+  const probeWrites = (
+    marker: string,
+    calls: ReadonlyArray<Schema.JsonObject>,
+    options: {
+      /** The files the Probe reads first, as a write over an existing file requires. */
+      readonly reads?: ReadonlyArray<Schema.JsonObject>
+      readonly prepare?: (tree: string) => void
+      readonly control?: (tree: string) => void
+      readonly steps?: ReadonlyArray<{ readonly line: string }>
+      /** The command lines the Probe runs after its writes. */
+      readonly runs?: ReadonlyArray<Schema.JsonObject>
+    } = {},
+  ) => {
+    const { reads = [], prepare = () => {}, control = () => {}, steps = [], runs = [] } = options
+    const made = reads.length + calls.length + runs.length
+    const hold = held()
+    // The Planner's grant is the suite's own: the first agent started is the Probe.
+    let taken = 0
+    const { world, run } = probing(() => ({
+      turns: [
+        [
+          ...reads.map((args, at) => uses(`toolu_read_${String(at)}`, 'fs_read', args)),
+          ...calls.map((args, at) => uses(`toolu_git_${String(at)}`, 'fs_write', args)),
+          ...runs.map((args, at) => uses(`toolu_run_${String(at)}`, 'commands_run', args)),
+        ],
+      ],
+      steps: [says('Waiting.')],
+      // Its writes go at once; what follows them waits for the test.
+      between: () => {
+        taken += 1
+        return taken > made ? hold.promise : Promise.resolve()
+      },
+    }))
+    return run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme(steps)
+          const { tree, api } = places()
+          const { mission, grantId } = yield* planningMission(project.id, main)
+          yield* launch(grantId, 'does the importer keep accents?')
+          yield* probeIn(mission.id, 1, ['running'])
+          yield* until(
+            Effect.sync(() => (world.agents[0]?.answers.toolAnswers.length ?? 0) === made),
+          )
+          prepare(tree)
+          const engineStatus = (folder: string) =>
+            Git.use((engineGit) => engineGit.status(folder)).pipe(Effect.ignore)
+          yield* engineStatus(tree)
+          yield* engineStatus(api)
+          const before = existsSync(marker)
+          const gitFile = readFileSync(join(tree, '.git'), 'utf8')
+          control(tree)
+          yield* engineStatus(tree)
+          const afterEngine = existsSync(marker)
+          // The same status run by the machine's git alone, as an agent's own command would.
+          execFileSync('git', ['-C', tree, 'status', '--porcelain'], { stdio: 'ignore' })
+          hold.release()
+          const answers = answersOf(world.agents[0]).slice(reads.length)
+          return { answers, gitFile, before, afterEngine, afterPlain: existsSync(marker) }
+        }),
+      ),
+    )
+  }
+
+  test('a Probe that points its worktree’s .git at a Git folder of its own, with a core.fsmonitor, gets no command run by the engine’s next Git call', async () => {
+    const marker = join(work, 'fsmonitor-ran')
+    const seen = await probeWrites(
+      marker,
+      [{ repository: 'api', path: '.git', content: 'gitdir: shadow\n' }],
+      {
+        reads: [{ repository: 'api', path: '.git' }],
+        prepare: (tree) => {
+          // What the Probe may write in its own folder: a Git folder that is not named `.git`.
+          const shadow = join(tree, 'shadow')
+          git(tree, 'init', '-q', '--bare', shadow)
+          git(tree, '--git-dir', shadow, 'config', 'core.bare', 'false')
+          git(tree, '--git-dir', shadow, 'config', 'core.fsmonitor', marking(marker))
+        },
+        // The same .git written by anything but the Probe's tools: the engine's Git still runs
+        // no core.fsmonitor; the machine's git alone does.
+        control: (tree) => pointGitAt(tree, 'gitdir: shadow\n'),
+      },
+    )
+    expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
+    // The path as written is read from the Probe's folder, as it leads from its repository.
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/sensitive place: .*[\\/]ACME-1[\\/]1[\\/](?:api[\\/])?\.git$/),
+    ])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
+    expect(seen.before).toBe(false)
+    expect(seen.afterEngine).toBe(false)
+    expect(seen.afterPlain).toBe(true)
+  })
+
+  test('a Probe that writes a core.fsmonitor or a filter into the repository’s Git folder, or its worktree’s, is asked as a sensitive place, never written', async () => {
+    const marker = join(work, 'git-folder-ran')
+    const { api } = places()
+    const config = `[core]\n\tfsmonitor = ${marking(marker)}\n[filter "x"]\n\tclean = ${marking(marker)}\n`
+    const seen = await probeWrites(
+      marker,
+      [
+        { path: join(api, '.git', 'config'), content: config },
+        { path: join(api, '.git', 'info', 'attributes'), content: '* filter=x\n' },
+        { path: join(api, '.git', 'hooks', 'post-checkout'), content: '#!/bin/sh\n' },
+        { path: join(api, '.git', 'worktrees', 'api', 'config.worktree'), content: config },
+      ],
+      {
+        // The last one is the worktree's own administrative folder.
+        prepare: (tree) =>
+          expect(
+            realpathSync.native(git(tree, 'rev-parse', '--path-format=absolute', '--git-dir')),
+          ).toBe(realpathSync.native(join(api, '.git', 'worktrees', 'api'))),
+      },
+    )
+    expect(seen.answers).toEqual(Array.from({ length: 4 }, () => expect.stringMatching(/^refused/)))
+    for (const reason of asked.map((one) => one.reason)) {
+      expect(reason).toMatch(/sensitive place: .*[\\/]api[\\/]\.git/)
+    }
+    expect(readFileSync(join(api, '.git', 'config'), 'utf8')).not.toContain('fsmonitor')
+    expect(existsSync(join(api, '.git', 'info', 'attributes'))).toBe(false)
+    expect(existsSync(join(api, '.git', 'worktrees', 'api', 'config.worktree'))).toBe(false)
+    expect(seen.before).toBe(false)
+  })
+
+  test('a Probe whose command runs git config to set a core.fsmonitor is asked as the repository’s configuration, never written, whatever the judge says', async () => {
+    const { api } = places()
+    const marker = join(work, 'never-written')
+    const seen = await probeWrites(marker, [], {
+      runs: [
+        { line: 'git config core.fsmonitor ./tools/watch.sh', repository: 'api' },
+        { line: 'git config --worktree core.fsmonitor ./tools/watch.sh', repository: 'api' },
+      ],
+    })
+    expect(seen.answers).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/^sensitive place: .*[\\/]api[\\/]\.git[\\/]config$/),
+      expect.stringMatching(/^sensitive place: .*[\\/]api[\\/]\.git[\\/]config$/),
+    ])
+    expect(readFileSync(join(api, '.git', 'config'), 'utf8')).not.toContain('fsmonitor')
+    expect(existsSync(join(api, '.git', 'worktrees', 'api', 'config.worktree'))).toBe(false)
+  })
+
+  test('a .git spelled in another case, or reached through a link, is the same sensitive place', async () => {
+    const seen = await probeWrites(
+      join(work, 'never-written'),
+      [
+        { repository: 'api', path: '.GIT', content: 'gitdir: shadow\n' },
+        { repository: 'api', path: 'gitlink', content: 'gitdir: shadow\n' },
+      ],
+      {
+        reads: [{ repository: 'api', path: 'gitlink' }],
+        // The recipe leaves a link to the worktree's .git, as a command of the Probe's could.
+        steps: [
+          {
+            line: nodeLine(
+              script(
+                `import { symlinkSync } from 'node:fs'\nsymlinkSync('.git', 'gitlink', 'file')\n`,
+              ),
+            ),
+          },
+        ],
+      },
+    )
+    expect(seen.answers).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/sensitive place: .*[\\/]1[\\/](?:api[\\/])?\.GIT$/),
+      expect.stringMatching(/sensitive place: .*[\\/]api[\\/]\.git$/),
+    ])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
   })
 })
 

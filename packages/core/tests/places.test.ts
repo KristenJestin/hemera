@@ -169,6 +169,30 @@ describe('Sensitive places always ask', () => {
     [WINDOWS, 'C:\\Users\\me\\.ssh\\config', '~\\.ssh'],
     [WINDOWS, 'c:\\users\\ME\\.Aws\\credentials', '~\\.Aws'],
     [WINDOWS, 'C:\\work\\app\\.env.local', 'C:\\work\\app\\.env.local'],
+    // A repository's Git folder, or a worktree's `.git` file, in every spelling Git reads (#448).
+    [LINUX, '/home/me/work/app/.git/config', '~/work/app/.git'],
+    [LINUX, '/home/me/work/app/.git', '~/work/app/.git'],
+    [LINUX, '/home/me/work/app/.git/worktrees/w1/config.worktree', '~/work/app/.git'],
+    [LINUX, '/home/me/work/app/.GIT/hooks/post-checkout', '~/work/app/.GIT'],
+    [LINUX, '/home/me/work/app/vendor/lib/.git/info/attributes', '~/work/app/vendor/lib/.git'],
+    [MAC, '/Users/me/work/app/.Git/config', '~/work/app/.Git'],
+    [WINDOWS, 'C:\\work\\app\\.GIT\\config', 'C:\\work\\app\\.GIT'],
+    [WINDOWS, 'C:\\work\\app\\.git.\\config', 'C:\\work\\app\\.git.'],
+    [WINDOWS, 'C:\\work\\app\\.git .\\config', 'C:\\work\\app\\.git .'],
+    [
+      WINDOWS,
+      'C:\\work\\app\\.git::$INDEX_ALLOCATION\\config',
+      'C:\\work\\app\\.git::$INDEX_ALLOCATION',
+    ],
+    [WINDOWS, 'C:\\work\\app\\.env.', 'C:\\work\\app\\.env.'],
+    // A glob that names a Git folder without its dot, as `find -path` reads it (#448).
+    [LINUX, '/home/me/work/app/*git/config', '~/work/app/*git'],
+    [LINUX, '/home/me/work/app/*GIT*/hooks', '~/work/app/*GIT*'],
+    // The user's own Git configuration, which every Git command reads.
+    [LINUX, '/home/me/.gitconfig', '~/.gitconfig'],
+    [LINUX, '/home/me/.config/git/config', '~/.config/git/config'],
+    [LINUX, '/home/me/.config/git/attributes', '~/.config/git/attributes'],
+    [WINDOWS, 'C:\\Users\\me\\.gitconfig', '~\\.gitconfig'],
   ] as const)('%# %s is the sensitive place %s', (context, path, shown) => {
     expect(sensitivePlace(path, context)).toBe(shown)
   })
@@ -193,6 +217,16 @@ describe('Sensitive places always ask', () => {
     [LINUX, '/home/me/work/app/deploy.env/README.md'],
     [LINUX, '/home/me/work/app/.venv/bin/python'],
     [WINDOWS, 'C:\\work\\app\\src\\env.ts'],
+    [LINUX, '/home/me/work/app/.github/workflows/ci.yml'],
+    [LINUX, '/home/me/work/app/.gitignore'],
+    [LINUX, '/home/me/work/app/.gitattributes'],
+    [LINUX, '/home/me/work/app/*'],
+    [LINUX, '/home/me/work/app/*/config'],
+    [LINUX, '/home/me/work/app/*it/config'],
+    [LINUX, '/home/me/.config/git/ignore'],
+    [LINUX, '/home/me/work/app/.git.'],
+    [LINUX, '/home/me/work/app/git/config'],
+    [WINDOWS, 'C:\\work\\app\\.gitmodules'],
   ] as const)('%# %s is not a sensitive place', (context, path) => {
     expect(sensitivePlace(path, context)).toBeNull()
   })
@@ -200,6 +234,12 @@ describe('Sensitive places always ask', () => {
   test('dist.env, which may be a build’s real environment, is no template', () => {
     const path = '/home/me/work/app/deploy/dist.env'
     expect(sensitivePlace(path, LINUX, { reading: true })).toBe('~/work/app/deploy/dist.env')
+  })
+
+  test('a Git folder is read freely, and still asks to be written (#448)', () => {
+    const path = '/home/me/work/app/.git/config'
+    expect(sensitivePlace(path, LINUX, { reading: true })).toBeNull()
+    expect(sensitivePlace(path, LINUX)).toBe('~/work/app/.git')
   })
 
   test.each(['example.env', 'app.sample.env', '.env.example'])(
@@ -210,6 +250,24 @@ describe('Sensitive places always ask', () => {
       expect(sensitivePlace(path, LINUX)).toBe(`~/work/app/deploy/${name}`)
     },
   )
+})
+
+describe('The command git submodule foreach hands to its shell is read as one (#448)', () => {
+  test('its paths are named, and one with no command does not read', () => {
+    expect(named(['git', 'submodule', 'foreach', 'cat ~/.ssh/config'], LINUX).paths).toContain(
+      '/home/me/.ssh/config',
+    )
+    expect(
+      named(
+        ['git', '-C', 'api', 'submodule', '--quiet', 'foreach', '--recursive', 'cat .env'],
+        LINUX,
+      ).paths,
+    ).toContain('.env')
+    expect(named(['git', 'submodule', 'foreach'], LINUX).unreadable).toBe(
+      'a git submodule foreach with no command',
+    )
+    expect(named(['git', 'submodule', 'update', '--init'], LINUX).unreadable).toBeNull()
+  })
 })
 
 describe('A concern says why the call asked', () => {

@@ -7,7 +7,15 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { NeverProgram } from '@hemera/core/domain'
@@ -243,6 +251,210 @@ describe('Sensitive places always ask, for file tools and commands', () => {
       'sensitive place: ~/acme/.env.local',
       'sensitive place: ~/acme/.env.local',
     ])
+  })
+})
+
+describe('A Git folder is a sensitive place to write, never to read (#448)', () => {
+  test('a write into .git, by a file tool of the Builder or the Chat or by a command, asks; a read does not', async () => {
+    const { answer, questions } = await withBuilder(({ builder, chat, main }) =>
+      Effect.gen(function* () {
+        mkdirSync(join(main, '.git', 'hooks'), { recursive: true })
+        writeFileSync(join(main, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+        const written = [
+          yield* callTool(builder, 'fs_write', {
+            path: '.git/config',
+            content: '[core]\n\tfsmonitor = x\n',
+          }),
+          yield* callTool(chat, 'fs_write', { path: '.GIT/hooks/pre-commit', content: 'x\n' }),
+          yield* run(builder, `sh -c 'echo x > .git/info/attributes'`),
+        ]
+        return { written, head: yield* read(builder, '.git/HEAD') }
+      }),
+    )
+    expect(questions).toEqual([
+      'sensitive place: ~/acme/.git',
+      'sensitive place: ~/acme/.GIT',
+      'sensitive place: ~/acme/.git',
+    ])
+    expect(answer.written.map((one) => one.text)).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(answer.head.text).toContain('ref: refs/heads/main')
+  })
+})
+
+describe('A git config that writes always asks, whatever the judge says (#448)', () => {
+  test('a Builder’s git config that writes asks as the configuration it writes, and nothing is written; one that reads does not ask', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          const lines = [
+            'git config core.fsmonitor ./tools/watch.sh',
+            'git -C . config --file .git/config core.fsmonitor ./tools/watch.sh',
+            `sh -c 'git --git-dir=.git config core.fsmonitor ./tools/watch.sh'`,
+            'git -c color.ui=never config core.fsmonitor ./tools/watch.sh',
+            'git config --global core.hooksPath ./hooks',
+            `find . -path '*git/config' -exec tee -a {} +`,
+          ]
+          const answers = []
+          for (const line of lines) answers.push(yield* run(builder, line))
+          return {
+            answers,
+            config: readFileSync(join(main, '.git', 'config'), 'utf8'),
+            read: yield* run(builder, 'git config --get core.bare'),
+          }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.answers.map((one) => one.ok)).toEqual([false, false, false, false, false, false])
+    expect(questions).toEqual([
+      'sensitive place: ~/acme/.git/config',
+      expect.stringContaining('sensitive place: ~/acme/.git/config'),
+      expect.stringContaining('sensitive place: ~/acme/.git/config'),
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/.gitconfig',
+      'sensitive place: ~/acme/*git',
+    ])
+    expect(answer.config).not.toContain('fsmonitor')
+    expect(answer.read.ok).toBe(true)
+  })
+  test('a git config with --show-scope that writes, a template’s hooks and a submodule foreach’s command ask; the usual reads ask nothing (round 3)', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const writes = [
+      'git config --show-scope filter.x.clean ./evil.sh',
+      'git config --show-scope core.hooksPath ./hooks',
+      'git config --show-origin core.fsmonitor ./watch.sh',
+      'git init --template=./template',
+      `git submodule foreach 'git config core.fsmonitor ./watch.sh'`,
+    ]
+    const reads = [
+      'git config user.name',
+      'git config --get user.email',
+      'git config --list',
+      'git config -l --show-origin',
+      'git config --get-regexp ^core',
+      'git config get core.bare',
+      'git config --show-origin core.bare',
+    ]
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          // A template whose hook a later commit would run.
+          mkdirSync(join(main, 'template', 'hooks'), { recursive: true })
+          writeFileSync(join(main, 'template', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')
+          const asked = []
+          for (const line of writes) asked.push(yield* run(builder, line))
+          const config = readFileSync(join(main, '.git', 'config'), 'utf8')
+          const quiet = []
+          for (const line of reads) quiet.push(yield* run(builder, line))
+          return { asked, config, quiet }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.asked.map((one) => one.ok)).toEqual(writes.map(() => false))
+    expect(questions).toEqual([
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/acme/.git/hooks',
+      'sensitive place: ~/acme/.git/config',
+    ])
+    expect(answer.config).not.toMatch(/filter|hooksPath|fsmonitor/)
+    expect(existsSync(join(work, 'acme', '.git', 'hooks', 'pre-commit'))).toBe(false)
+    expect(answer.quiet.map((one) => one.text)).toEqual(
+      reads.map(() => expect.stringMatching(/^run /)),
+    )
+  })
+  test('a git alias set on the line, or a subcommand that is none of Git’s own, asks; Git’s own commands and lfs ask nothing (round 4)', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const aliased = [
+      'git -c alias.x=config x core.fsmonitor ./watch.sh',
+      `git -c alias.x='!git config core.hooksPath h' x`,
+      'git --config-env=alias.x=AL x core.pager less',
+      'git co main',
+    ]
+    const usual = [
+      'git status',
+      'git diff',
+      'git log -1',
+      'git add .',
+      'git lfs pull',
+      'git rev-parse --is-inside-work-tree',
+    ]
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          const asked = []
+          for (const line of aliased) asked.push(yield* run(builder, line))
+          const config = readFileSync(join(main, '.git', 'config'), 'utf8')
+          const ran = []
+          for (const line of usual) ran.push(yield* run(builder, line))
+          return { asked, config, ran }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.asked.map((one) => one.ok)).toEqual(aliased.map(() => false))
+    expect(questions).toEqual([
+      'sensitive place: a git alias set on its line (alias.x); sensitive place: a git command that does not read (git x)',
+      'sensitive place: a git alias set on its line (alias.x); sensitive place: a git command that does not read (git x)',
+      'sensitive place: a git alias set on its line (alias.x); sensitive place: a git command that does not read (git x)',
+      'sensitive place: a git command that does not read (git co)',
+    ])
+    expect(answer.config).not.toMatch(/fsmonitor|hooksPath|pager/)
+    expect(answer.ran.map((one) => one.text)).toEqual(
+      usual.map(() => expect.stringMatching(/^run /)),
+    )
+  })
+  test('Git configuration set through the line’s environment, an include on the line, or a clone’s -c asks; the usual lines ask nothing (round 5)', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const shaping = [
+      'env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.templateDir GIT_CONFIG_VALUE_0=template git init',
+      `env GIT_CONFIG_PARAMETERS="'init.templatedir'='template'" git init`,
+      'git -c include.path=included.cfg init',
+      'git clone -c core.fsmonitor=./watch.sh . copy',
+    ]
+    const usual = ['git status', 'git log -1', 'git init', 'git -c color.ui=never diff']
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          // A template whose hook a later commit would run, and a file that names it.
+          mkdirSync(join(main, 'template', 'hooks'), { recursive: true })
+          writeFileSync(join(main, 'template', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')
+          writeFileSync(join(main, 'included.cfg'), '[init]\n\ttemplateDir = template\n')
+          const asked = []
+          for (const line of shaping) asked.push(yield* run(builder, line))
+          const ran = []
+          for (const line of usual) ran.push(yield* run(builder, line))
+          return { asked, ran }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.asked.map((one) => one.ok)).toEqual(shaping.map(() => false))
+    expect(questions).toEqual([
+      'sensitive place: a git configuration set through its environment (GIT_CONFIG_COUNT); sensitive place: a git configuration set through its environment (GIT_CONFIG_KEY_0); sensitive place: a git configuration set through its environment (GIT_CONFIG_VALUE_0)',
+      'sensitive place: a git configuration set through its environment (GIT_CONFIG_PARAMETERS)',
+      'sensitive place: a git configuration included on its line (include.path)',
+      'sensitive place: a setting saved into the clone (core.fsmonitor=./watch.sh)',
+    ])
+    expect(existsSync(join(work, 'acme', '.git', 'hooks', 'pre-commit'))).toBe(false)
+    expect(answer.ran.map((one) => one.text)).toEqual(
+      usual.map(() => expect.stringMatching(/^run /)),
+    )
   })
 })
 
