@@ -36,6 +36,7 @@ import {
   closeSync,
   constants,
   fstatSync,
+  lstatSync,
   openSync,
   readSync,
   readlinkSync,
@@ -297,12 +298,17 @@ export interface OwnRead {
 
 /**
  * A whole file the engine reads on its own behalf where it cannot wait (a synchronous step: a
- * snapshot's copy of the index, a digest, a manifest): opened without following a link as its last
- * name and without waiting on a pipe, then read through its descriptor only when it is a regular
- * file of at most `cap` bytes; with `real`, only when the descriptor is proven at that real path,
- * so no link stood on the way either. Anything else is refused with why (`NotJudged`), at once.
+ * snapshot's copy of the index, a digest, a manifest): never through a link as its last name and
+ * never waiting on a pipe, then read through its descriptor only when it is a regular file of at
+ * most `cap` bytes; with `real`, only when the descriptor is proven at that real path, so no link
+ * stood on the way either. Anything else is refused with why (`NotJudged`), at once.
+ *
+ * Where the open has no flag for it (Windows), the descriptor must be the very file the last name
+ * was before the open (`lstat`): a link there, or put there in between, is refused rather than
+ * read.
  */
 export function readOwnSync(path: string, cap: number, real?: string): OwnRead {
+  const named = lstatSync(path, { bigint: true })
   let file: number
   try {
     file = openSync(path, constants.O_RDONLY | NEVER_WAITING)
@@ -313,6 +319,7 @@ export function readOwnSync(path: string, cap: number, real?: string): OwnRead {
   }
   try {
     const stats = fstatSync(file, { bigint: true })
+    if (stats.dev !== named.dev || stats.ino !== named.ino) throw new NotJudged(THROUGH_A_LINK)
     if (!stats.isFile()) throw new NotJudged(NOT_A_FILE)
     if (stats.size > BigInt(cap)) throw new NotJudged(OVER_CAP)
     if (real !== undefined) provenSync(file, path, real, stats)
