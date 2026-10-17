@@ -333,6 +333,11 @@ rmSync('.git/hooks/pre-push')
   test('9. what the engine’s own Git writes (index, refs, ORIG_HEAD, FETCH_HEAD, logs, packed-refs, a worktree it adds) while an agent’s command runs is never a question', async () => {
     const result = await withBuilder(({ builder, main }) =>
       Effect.gen(function* () {
+        // The engine commits here: an identity of the test repository's own, never the machine's,
+        // and no line-ending conversion to warn about on Windows.
+        git(main, 'config', 'user.name', 'Test')
+        git(main, 'config', 'user.email', 'test@example.invalid')
+        git(main, 'config', 'core.autocrlf', 'false')
         const origin = remote(main, join(work, 'origin.git'))
         const release = join(work, 'release')
         // The agent's own Git work in the index and the refs, then it waits to be released.
