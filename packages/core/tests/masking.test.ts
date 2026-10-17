@@ -2191,10 +2191,14 @@ describe('A key that names a credential in any reading of the quotes hides its v
   })
 
   test("a credential's value is hidden, and what follows it is not", async () => {
-    const text =
-      'Said: [{"token": 1}, "seen1", {"password": "x"}, "seen2", {"secret": {"a": 1}}, "seen3"] tail'
-    expect(await printedForms([text], [])).toEqual([
+    const texts = [
+      'Said: [{"token": 1}, "seen1", {"password": "x"}, "seen2", {"secret": {"a": 1}}, "seen3"] tail',
+      // An empty container is read at once: what follows it is read with the key behind it.
+      'Said: [{"tokens": []}, "seen4", {"secrets": {}}, 12345] tail',
+    ]
+    expect(await printedForms(texts, [])).toEqual([
       `Said: [{"token": "${MASK}"}, "seen1", {"password": "${MASK}"}, "seen2", {"secret": "${MASK}"}, "seen3"] tail`,
+      `Said: [{"tokens": "${MASK}"}, "seen4", {"secrets": "${MASK}"}, 12345] tail`,
     ])
   })
 
