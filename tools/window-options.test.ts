@@ -1,4 +1,6 @@
-import { resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -13,6 +15,20 @@ const application = resolve(import.meta.dirname, '..', 'apps', 'desktop')
 describe('Options de plateforme refusées', () => {
   test('the application asks the platform for nothing AGENTS.md refuses', () => {
     expect(analyze(application)).toEqual([])
+  })
+
+  // A symbolic link to nothing is listed and then cannot be read, as a source file another test
+  // writes and removes while the tree is walked (the deliberate errors of verification.test.ts):
+  // the walk goes on instead of failing with ENOENT.
+  test.skipIf(process.platform === 'win32')('a source file that is gone is not source', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hemera-window-options-'))
+    try {
+      mkdirSync(join(root, 'src', 'main'), { recursive: true })
+      symlinkSync(join(root, 'nothing.ts'), join(root, 'src', 'main', 'gone.ts'))
+      expect(analyze(root)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('the window carries only the allowed webPreferences', () => {
