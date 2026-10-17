@@ -1314,6 +1314,108 @@ describe('A snapshot adds only the paths it listed and checked', () => {
     expect(storeObjects(seen.projectId)).not.toContain('whole-folder-37')
   })
 
+  /** The Workspace with a tracked `settings` file, committed, that the test then replaces. */
+  const withSettings = () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'settings'), 'plain settings\n')
+    git(worktree, 'add', 'settings')
+    git(worktree, 'commit', '-q', '-m', 'settings')
+    return { main, worktree }
+  }
+
+  test('a tracked file replaced by a folder holding a sensitive file: its other files are kept, the secret never reaches the store', async () => {
+    const { main, worktree } = withSettings()
+    rmSync(join(worktree, 'settings'))
+    mkdirSync(join(worktree, 'settings'))
+    writeFileSync(join(worktree, 'settings', '.env.local'), 'TOKEN=probe-secret-17\n')
+    writeFileSync(join(worktree, 'settings', 'notes.txt'), 'notes\n')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).toContain('settings/notes.txt')
+    expect(files).not.toContain('settings')
+    expect(storeObjects(seen.projectId)).not.toContain('probe-secret-17')
+  })
+
+  test('a tracked file replaced by a folder holding only a sensitive file leaves the tree', async () => {
+    const { main, worktree } = withSettings()
+    rmSync(join(worktree, 'settings'))
+    mkdirSync(join(worktree, 'settings'))
+    writeFileSync(join(worktree, 'settings', '.env.local'), 'TOKEN=probe-secret-19\n')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).not.toContain('settings')
+    expect(storeObjects(seen.projectId)).not.toContain('probe-secret-19')
+  })
+
+  test('a repository nested in the Workspace is kept as its commit, never walked into', async () => {
+    const { main, worktree } = workspace()
+    const nested = join(worktree, 'vendor', 'lib')
+    mkdirSync(nested, { recursive: true })
+    git(nested, 'init', '-q', '-b', 'main')
+    writeFileSync(join(nested, 'index.js'), 'export {}\n')
+    git(nested, 'add', 'index.js')
+    git(nested, 'commit', '-q', '-m', 'lib')
+    const commit = git(nested, 'rev-parse', 'HEAD')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(execInStore(store, objectsOf(main), 'ls-tree', seen.tree, 'vendor/lib')).toBe(
+      `160000 commit ${commit}\tvendor/lib`,
+    )
+  })
+
+  test('a path holding glob characters is added as itself, and its neighbours with it', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'x[1]'), 'bracketed\n')
+    mkdirSync(join(worktree, 'x1'))
+    writeFileSync(join(worktree, 'x1', 'notes.txt'), 'notes\n')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(treeFiles(store, seen.tree, objectsOf(main))).toEqual(
+      expect.arrayContaining(['x[1]', 'x1/notes.txt']),
+    )
+  })
+
+  test('a tracked file replaced by a link to a folder outside is never followed', async (context) => {
+    const { main, worktree } = withSettings()
+    const outside = join(work, 'outside-settings')
+    mkdirSync(outside)
+    writeFileSync(join(outside, '.env'), 'TOKEN=outside-folder-23\n')
+    rmSync(join(worktree, 'settings'))
+    try {
+      symlinkSync(outside, join(worktree, 'settings'), 'junction')
+    } catch {
+      context.skip()
+    }
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    expect(storeObjects(seen.projectId)).not.toContain('outside-folder-23')
+  })
+
+  test('a tracked file replaced by a folder between the listing and the add: nothing under it is added', async () => {
+    const { main, worktree } = withSettings()
+    writeFileSync(join(worktree, 'settings'), 'changed settings\n')
+
+    const seen = await takenWith(main, worktree, () => {
+      rmSync(join(worktree, 'settings'))
+      mkdirSync(join(worktree, 'settings'))
+      writeFileSync(join(worktree, 'settings', '.env.local'), 'TOKEN=made-meanwhile-41\n')
+    })
+
+    expect(existsSync(join(worktree, 'settings', '.env.local'))).toBe(true)
+    expect(storeObjects(seen.projectId)).not.toContain('made-meanwhile-41')
+  })
+
   test('a file removed between the listing and the add leaves the snapshot taken without it', async () => {
     const { main, worktree } = workspace()
     writeFileSync(join(worktree, 'form.txt'), 'the form\n')
