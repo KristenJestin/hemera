@@ -2422,14 +2422,19 @@ describe('The end never waits on a scenario nothing can move', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { mission } = yield* launchedWith(markdownProof)
+          // One task for all three scenarios: the reds come from R1.S2's proof and the answer to
+          // the third, not from how many tasks the Building has, and each task is some twenty Git
+          // processes, tens of milliseconds each on Windows (#444).
+          const { mission } = yield* launchedWith(
+            markdownProof,
+            PLAN.filter((task) => task.title === 'Export as Markdown').map((task) =>
+              Object.assign({}, task, { scenarios: ['R1.S1', 'R1.S2', 'R1.S3'] }),
+            ),
+          )
           yield* proofIn(mission.id, 'R1.S2', 'red_recorded')
           const { grantId } = yield* builderOf(mission.id)
           yield* builder.busy
-          yield* builds(grantId, 'T1')
-          yield* builds(grantId, 'T2', [['export.ts', WRONG_EXPORT]])
-          yield* builds(grantId, 'T4')
-          yield* builds(grantId, 'T3')
+          yield* builds(grantId, 'T1', [['export.ts', WRONG_EXPORT]])
           yield* deliveredTo(mission.id, "R1.S2's proof is not green")
           // Two more reds: the third is an error need for the user.
           yield* writes(grantId, 'export.ts', 'export const toCsv = () => "a"\n')
