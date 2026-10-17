@@ -67,6 +67,14 @@ const guardNeeds = Effect.map(listNeeds, (groups) =>
 const shown = (need: Need | undefined): string =>
   need !== undefined && Predicate.isTagged(need.fields, 'Permission') ? need.fields.call : ''
 
+/** Why a need says Hemera's Git stopped. */
+const reasonOf = (need: Need | undefined): string =>
+  need !== undefined && Predicate.isTagged(need.fields, 'Permission') ? need.fields.agentReason : ''
+
+/** The reason every change gives, whatever made it: never an agent blamed for it (#457). */
+const NEUTRAL =
+  'changed since Hemera last saw it: by you, by a program, or by a process an agent left running'
+
 /** Waits for the guard's question, a few seconds at most. */
 const asked = until(guardNeeds, (needs) => needs.length > 0)
 
@@ -156,6 +164,8 @@ describe('A change to what shapes Git stops the engine’s Git until the user al
     expect(shown(result.needs[0])).toContain('~/acme/.git/config')
     expect(shown(result.needs[0])).toContain('+ \thooksPath = h')
     expect(result.status).toContain('Hemera stopped its Git')
+    // Found as the agent's command ends, it is still not said to be the agent's.
+    expect(reasonOf(result.needs[0])).toBe(NEUTRAL)
     // Nothing is restored on its own.
     expect(readFileSync(join(result.main, '.git', 'config'), 'utf8')).toContain('hooksPath = h')
   })
@@ -643,6 +653,7 @@ spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { detached: true, stdi
     expect(result.quiet).toEqual([])
     expect(result.status).toContain('Hemera stopped its Git')
     expect(shown(result.needs[0])).toContain('hooksPath = h')
+    expect(reasonOf(result.needs[0])).toBe(NEUTRAL)
   })
 
   test('a change made while the engine was stopped is asked at the next start, and its Git stays stopped', async () => {
@@ -664,6 +675,7 @@ spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { detached: true, stdi
     expect(reopened.status).toContain('Hemera stopped its Git')
     expect(reopened.needs).toHaveLength(1)
     expect(shown(reopened.needs[0])).toContain('~/acme/.git/hooks/pre-commit')
+    expect(reasonOf(reopened.needs[0])).toBe(NEUTRAL)
   })
 
   test('a repository seen for the first time takes what it has as its baseline: its hooks and its hooksPath ask nothing', async () => {

@@ -870,15 +870,13 @@ export const toolGateLayer = (settings: GateSettings) =>
        * An agent's write, watched by the guard on the engine's Git (#457): what shapes Git in its
        * place is compared before and after it.
        */
-      const guarded = <A, E, R>(grant: Grant, what: string, write: Effect.Effect<A, E, R>) =>
-        Effect.flatMap(
-          actionIn({ projectId: grant.projectId, root: grant.place.root }, what),
-          (action) =>
-            Effect.acquireUseRelease(
-              GitGuard.use((guard) => guard.open(action)),
-              () => write,
-              (close) => close,
-            ),
+      const guarded = <A, E, R>(grant: Grant, write: Effect.Effect<A, E, R>) =>
+        Effect.flatMap(actionIn({ projectId: grant.projectId, root: grant.place.root }), (action) =>
+          Effect.acquireUseRelease(
+            GitGuard.use((guard) => guard.open(action)),
+            () => write,
+            (close) => close,
+          ),
         )
 
       /** 9. The execution. */
@@ -918,21 +916,13 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* held(
                 grant,
                 pathOf(),
-                guarded(
-                  grant,
-                  `wrote ${pathOf().named}`,
-                  fsWrite(yield* fileCall(pathOf(), prepared.judged), call.args),
-                ),
+                guarded(grant, fsWrite(yield* fileCall(pathOf(), prepared.judged), call.args)),
               )
             case 'fs_edit':
               return yield* held(
                 grant,
                 pathOf(),
-                guarded(
-                  grant,
-                  `edited ${pathOf().named}`,
-                  fsEdit(yield* fileCall(pathOf(), prepared.judged), call.args),
-                ),
+                guarded(grant, fsEdit(yield* fileCall(pathOf(), prepared.judged), call.args)),
               )
             case 'commands_list':
               return yield* commandsList(grant)

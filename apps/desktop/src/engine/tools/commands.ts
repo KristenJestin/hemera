@@ -130,10 +130,7 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
     }
     // What shapes the engine's Git in the place is compared from the launch to the end (#457).
     const guard = yield* GitGuard
-    const action = yield* actionIn(
-      { projectId: grant.projectId, root: grant.place.root },
-      command === null ? `ran ${line}` : `ran ${command.name}: ${line}`,
-    )
+    const action = yield* actionIn({ projectId: grant.projectId, root: grant.place.root })
     const stores = yield* Effect.context<Database | DomainEvents>()
     let closeGuard: Effect.Effect<void> = Effect.void
     const openGuard = Effect.flatMap(Effect.provide(guard.open(action), stores), (close) =>

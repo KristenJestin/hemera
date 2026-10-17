@@ -12,14 +12,17 @@
  * command, after it returned, or while the engine was stopped, since the baselines are kept
  * (`git_baselines`). Only the net change counts: a file changed then put back is none.
  *
- * A scope is first seen when an agent's action opens on it: what it has then is its baseline, taken
- * before the action and written before it starts, and nothing is asked. A scope with a baseline
+ * Every repository Hemera knows is first seen at the start and as it is added, and any other one
+ * when an agent's action opens on it or when the engine's Git first reaches it, before that call:
+ * what it has then is its baseline, and nothing is asked. The snapshot stores are repositories as
+ * any. A scope with a baseline
  * kept is compared, so a change made while the engine was stopped asks at the next start; a scope
  * without one is a first sighting. A checkout's own `.git` is part of its repository's scope: one
  * pointed at another repository is a change of the first.
  *
  * An agent's action (`open`) also compares the scopes of its place when it starts and when it ends,
- * so a question comes as soon as the action that made the change is over, in its words.
+ * so a question comes as soon as the action is over. Whatever made a change, its reason is the same
+ * and blames no one: the user, a program or a process an agent left running may have made it.
  *
  * A change holds its scope: every Git spawn of the engine (the Git service, the snapshots, the
  * checkpoints, the diffs) asks the guard first (`GitSpawnGuard`), the repository taken from the
@@ -33,8 +36,8 @@
  *   are as the baseline has them, the hold goes on its own; another state is asked about.
  *
  * The baseline moves only through an allowed hold, a first sighting, and the engine's own
- * `worktree` calls: the administrative files and `.git` files such a call added or removed whole
- * are taken into the baseline. What the engine's Git writes otherwise (the index, the refs, the
+ * `worktree` calls: the administrative folder of the worktree such a call names is taken into the
+ * baseline. What the engine's Git writes otherwise (the index, the refs, the
  * logs, `ORIG_HEAD`, `FETCH_HEAD`, `packed-refs`) is not part of any fingerprint.
  *
  * A hold is written before its question (`git_holds`), its answer with the answer, and is read back
@@ -103,9 +106,9 @@ const HOME = '~'
 /** The key of the hold made when the guard's records could not be read at the start. */
 const UNREAD = '!unread'
 
-/** What a change found at a Git call of the engine is said to come from. */
+/** The reason every change gives, whatever made it: never an agent blamed for what may be the user's. */
 const FOUND =
-  'a change found before Hemera’s Git ran: made by a process an agent left running, outside the actions Hemera watches, or while Hemera was stopped'
+  'changed since Hemera last saw it: by you, by a program, or by a process an agent left running'
 
 /** An agent's action the guard watches. */
 export interface GuardedAction {
@@ -113,8 +116,6 @@ export interface GuardedAction {
   readonly checkouts: ReadonlyArray<string>
   /** The Project whose place it is: the question belongs to it. */
   readonly projectId: string
-  /** What the agent did, in words: `ran …`, `wrote …`. */
-  readonly what: string
 }
 
 export class GitGuard extends Context.Service<
@@ -131,10 +132,7 @@ export class GitGuard extends Context.Service<
 >()('GitGuard') {}
 
 /** An agent's action in its place: every checkout of the place, its root and each repository. */
-export const actionIn = (
-  place: { readonly projectId: string; readonly root: string },
-  what: string,
-) =>
+export const actionIn = (place: { readonly projectId: string; readonly root: string }) =>
   Effect.map(
     getProject(place.projectId).pipe(
       Effect.map((project) => project.repositories),
@@ -150,7 +148,6 @@ export const actionIn = (
         ]),
       ],
       projectId: place.projectId,
-      what,
     }),
   )
 
@@ -341,7 +338,7 @@ export const engineGitGuard = (
       Set<{ readonly folder: string; readonly args: ReadonlyArray<string> }>
     >()
     /** The actions going on, each with the scopes of its place. */
-    const windows = new Set<{ readonly action: GuardedAction; readonly keys: Set<string> }>()
+    const windows = new Set<{ readonly keys: Set<string> }>()
 
     const only = (shapes: Shapes, everywhere: boolean): Shapes =>
       new Map([...shapes].filter(([, shape]) => shape.everywhere === everywhere))
@@ -400,20 +397,12 @@ export const engineGitGuard = (
       change.now?.text != null &&
       onlyWorktreeFormat(change.was.text, change.now.text)
 
-    /** What a change found now is said to come from: the actions still going on there, if any. */
-    const whatFor = (scope: Scope): string => {
-      const going = [...windows].filter((one) => one.keys.has(scope.key))
-      return going.length === 0
-        ? FOUND
-        : `${going.map((one) => one.action.what).join('; ')} (still running)`
-    }
-
     /**
      * Compares a scope with its baseline, and settles its hold with the files as they are now:
      * back as the baseline, it ends; allowed as shown, the shown state becomes the baseline; moved
      * on from what was shown, the question shows them as they are. Answers the files now.
      */
-    const compare = (scope: Scope, what: string): Shapes => {
+    const compare = (scope: Scope): Shapes => {
       const now = fingerprintOf(scope)
       // What an engine `worktree` call still going on adds or removes whole is its own, not asked.
       const calls = [...(flying.get(scope.key) ?? [])]
@@ -435,7 +424,7 @@ export const engineGitGuard = (
           checkouts: scope.checkouts,
           changes: heldOf(changes),
           projectId: scope.projectId,
-          what,
+          what: FOUND,
           needId: null,
           answer: 'none',
         }
@@ -459,7 +448,7 @@ export const engineGitGuard = (
         return now
       }
       hold.changes = heldOf(changes)
-      hold.what = what
+      hold.what = FOUND
       if (hold.answer !== 'none') hold.needId = null
       hold.answer = 'none'
       ask(hold)
@@ -491,7 +480,7 @@ export const engineGitGuard = (
       const moved: Scope[] = []
       const homeScope = scopes.get(HOME)
       if (homeScope === undefined) moved.push(sightedScope(HOME, null, projectId))
-      else compare(homeScope, FOUND)
+      else compare(homeScope)
       for (const checkout of checkouts.map(realPathOf)) {
         const repository = repositoryOf(checkout)
         if (repository === null && !bare) continue
@@ -503,7 +492,7 @@ export const engineGitGuard = (
           continue
         }
         if (scope.projectId === '') scope.projectId = projectId
-        const had = compare(scope, FOUND)
+        const had = compare(scope)
         if (scope.checkouts.has(checkout)) continue
         // A checkout first seen in a known repository: what it adds is taken as it is.
         scope.checkouts.add(checkout)
@@ -538,7 +527,7 @@ export const engineGitGuard = (
             scope.home ||
             scope.key === target ||
             [...scope.checkouts].some((checkout) => inside(checkout, real))
-          if (touched) seen.set(scope, compare(scope, whatFor(scope)))
+          if (touched) seen.set(scope, compare(scope))
         }
         for (const hold of [...holds.values()]) {
           if (!covers(hold, real, target)) continue
@@ -628,14 +617,14 @@ export const engineGitGuard = (
         const { keys, moved } = sightIn(action.checkouts, action.projectId, true)
         // A first sighting is kept before the action starts: a change it makes is a change.
         yield* keepNow(moved)
-        const window = { action, keys }
+        const window = { keys }
         windows.add(window)
         return Effect.sync(() => {
           if (!windows.has(window)) return
           windows.delete(window)
           for (const key of keys) {
             const scope = scopes.get(key)
-            if (scope !== undefined) compare(scope, action.what)
+            if (scope !== undefined) compare(scope)
           }
         })
       })
@@ -861,7 +850,7 @@ export const engineGitGuard = (
             ]),
           ),
           projectId: row.projectId,
-          what: 'an agent’s action before Hemera last stopped',
+          what: FOUND,
           needId: row.needId,
           answer,
         })
