@@ -270,6 +270,15 @@ describe('A git config that writes, or a template that brings hooks, is told wit
       ['env', 'GIT_TEMPLATE_DIR=/tmp/t', 'git', 'init'],
       { file: 'hooks', folders: [], gitDir: null },
     ],
+    // The command `git submodule foreach` hands to its shell is read as one.
+    [
+      ['git', 'submodule', 'foreach', 'git config core.fsmonitor x'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
+    [
+      ['git', 'submodule', '--quiet', 'foreach', '--recursive', 'git config --show-scope a.b c'],
+      { file: 'repository', folders: [], gitDir: null },
+    ],
   ] as const)('%j writes %j', (words, write) => {
     expect(writesOf(words)).toEqual([write])
   })
@@ -300,6 +309,7 @@ describe('A git config that writes, or a template that brings hooks, is told wit
     ['git', 'init', 'sub'],
     ['git', 'clone', 'https://example.test/r.git', 'r'],
     ['git', 'clone', '--depth', '1', 'https://example.test/r.git'],
+    ['git', 'submodule', 'foreach', 'git status'],
     ['git', 'submodule', 'update', '--init'],
     ['git', 'submodule', 'status'],
     ['git', 'config', 'get', 'core.fsmonitor'],

@@ -689,6 +689,13 @@ function carriedBy(
         to: words.length,
       }
     }
+    if (name === 'git') {
+      const carried = foreachCode(rest)
+      if (carried === undefined) return { unreadable: 'a git submodule foreach with no command' }
+      if (carried !== null) {
+        return { text: carried.text, dialect: 'posix', from: from + carried.at, to: words.length }
+      }
+    }
     if (leads && name === 'eval' && dialect === 'posix') {
       return { text: rest.join(' '), dialect: 'posix', from, to: words.length }
     }
@@ -746,6 +753,40 @@ function readCommand(
 interface Code {
   readonly text: string
   readonly at: number
+}
+
+/** Git's options before its subcommand that take the next word as their value. */
+const GIT_OPTION_VALUES = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--config-env',
+  '--exec-path',
+  '--super-prefix',
+])
+
+/**
+ * The command `git submodule foreach` hands to a POSIX shell (Git's own `sh`): its words after
+ * `foreach` and its options, joined. Null when the command is no `submodule foreach`, undefined
+ * when it has no command.
+ */
+function foreachCode(rest: readonly string[]): Code | null | undefined {
+  let at = 0
+  const skip = (values: ReadonlySet<string>) => {
+    while (at < rest.length && (rest[at] ?? '').startsWith('-')) {
+      at += values.has(rest[at] ?? '') ? 2 : 1
+    }
+  }
+  skip(GIT_OPTION_VALUES)
+  if ((rest[at] ?? '').toLowerCase() !== 'submodule') return null
+  at += 1
+  skip(new Set())
+  if ((rest[at] ?? '').toLowerCase() !== 'foreach') return null
+  at += 1
+  skip(new Set())
+  return at < rest.length ? { text: rest.slice(at).join(' '), at } : undefined
 }
 
 /** The string `cmd.exe` is handed after `/c`, `/k` or `/r`: the rest of its line. */

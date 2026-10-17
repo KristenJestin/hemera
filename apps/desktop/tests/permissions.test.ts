@@ -7,7 +7,15 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { NeverProgram } from '@hemera/core/domain'
@@ -315,6 +323,56 @@ describe('A git config that writes always asks, whatever the judge says (#448)',
     ])
     expect(answer.config).not.toContain('fsmonitor')
     expect(answer.read.ok).toBe(true)
+  })
+  test('a git config with --show-scope that writes, a template’s hooks and a submodule foreach’s command ask; the usual reads ask nothing (round 3)', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const writes = [
+      'git config --show-scope filter.x.clean ./evil.sh',
+      'git config --show-scope core.hooksPath ./hooks',
+      'git config --show-origin core.fsmonitor ./watch.sh',
+      'git init --template=./template',
+      `git submodule foreach 'git config core.fsmonitor ./watch.sh'`,
+    ]
+    const reads = [
+      'git config user.name',
+      'git config --get user.email',
+      'git config --list',
+      'git config -l --show-origin',
+      'git config --get-regexp ^core',
+      'git config get core.bare',
+      'git config --show-origin core.bare',
+    ]
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          // A template whose hook a later commit would run.
+          mkdirSync(join(main, 'template', 'hooks'), { recursive: true })
+          writeFileSync(join(main, 'template', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')
+          const asked = []
+          for (const line of writes) asked.push(yield* run(builder, line))
+          const config = readFileSync(join(main, '.git', 'config'), 'utf8')
+          const quiet = []
+          for (const line of reads) quiet.push(yield* run(builder, line))
+          return { asked, config, quiet }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.asked.map((one) => one.ok)).toEqual(writes.map(() => false))
+    expect(questions).toEqual([
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/acme/.git/config',
+      'sensitive place: ~/acme/.git/hooks',
+      'sensitive place: ~/acme/.git/config',
+    ])
+    expect(answer.config).not.toMatch(/filter|hooksPath|fsmonitor/)
+    expect(existsSync(join(work, 'acme', '.git', 'hooks', 'pre-commit'))).toBe(false)
+    expect(answer.quiet.map((one) => one.text)).toEqual(
+      reads.map(() => expect.stringMatching(/^run /)),
+    )
   })
 })
 

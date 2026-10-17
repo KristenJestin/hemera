@@ -252,6 +252,24 @@ describe('Sensitive places always ask', () => {
   )
 })
 
+describe('The command git submodule foreach hands to its shell is read as one (#448)', () => {
+  test('its paths are named, and one with no command does not read', () => {
+    expect(named(['git', 'submodule', 'foreach', 'cat ~/.ssh/config'], LINUX).paths).toContain(
+      '/home/me/.ssh/config',
+    )
+    expect(
+      named(
+        ['git', '-C', 'api', 'submodule', '--quiet', 'foreach', '--recursive', 'cat .env'],
+        LINUX,
+      ).paths,
+    ).toContain('.env')
+    expect(named(['git', 'submodule', 'foreach'], LINUX).unreadable).toBe(
+      'a git submodule foreach with no command',
+    )
+    expect(named(['git', 'submodule', 'update', '--init'], LINUX).unreadable).toBeNull()
+  })
+})
+
 describe('A concern says why the call asked', () => {
   test("outside the role's place, or a sensitive place", () => {
     expect(concernSaid({ kind: 'outside', place: '~/.ssh/config' })).toBe(
