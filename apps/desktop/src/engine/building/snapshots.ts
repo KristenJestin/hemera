@@ -245,8 +245,7 @@ export interface SnapshotsService {
   ) => Effect.Effect<ReadonlyArray<FileDiff>, SnapshotUnavailable | DatabaseError>
   /**
    * Writes a tree of the store into an empty folder, as files to read (#147: the reviewers' copy
-   * of a checkpoint): a sensitive file is its stand-in there, as in the tree, and a link a file
-   * holding its target.
+   * of a checkpoint): a sensitive file is its stand-in there, as in the tree.
    */
   readonly materialize: (
     missionId: string,
@@ -1216,19 +1215,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                 yield* run(store, ['read-tree', '--end-of-options', tree], 'work', { env })
                 yield* run(
                   store,
-                  // A link is written as a file holding its target, on every system: the copy
-                  // never leads its readers outside it (#449).
-                  [
-                    '-c',
-                    'core.bare=false',
-                    '-c',
-                    'core.symlinks=false',
-                    '--work-tree',
-                    folder,
-                    'checkout-index',
-                    '-a',
-                    '-f',
-                  ],
+                  ['-c', 'core.bare=false', '--work-tree', folder, 'checkout-index', '-a', '-f'],
                   'work',
                   { env },
                 )

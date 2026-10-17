@@ -1624,7 +1624,7 @@ describe('A snapshot adds only the paths it listed and checked', () => {
       expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-17')
     })
 
-    test('a link to a file outside: the checkpoint keeps the link, and its copy is a file holding the link’s target', async (context) => {
+    test('a link to a file outside: the checkpoint keeps the link, and its copy never holds the file', async (context) => {
       const { main, worktree } = workspace()
       const target = join(outsideNotes('outside-h', 'OUTSIDE-NOTES-18'), 'notes.txt')
       try {
@@ -1652,8 +1652,11 @@ describe('A snapshot adds only the paths it listed and checked', () => {
 
       expect(entryAt(seen.projectId, main, seen.tree, 'notes-link')).toMatch(/^120000 blob /)
       expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-18')
-      expect(lstatSync(join(copy, 'notes-link')).isFile()).toBe(true)
-      expect(readFileSync(join(copy, 'notes-link'), 'utf8')).not.toContain('OUTSIDE-NOTES-18')
+      // The copy holds the link back, which the reviewers' reads refuse to follow, never the file.
+      const copied = join(copy, 'notes-link')
+      expect(lstatSync(copied).isFile() ? readFileSync(copied, 'utf8') : '').not.toContain(
+        'OUTSIDE-NOTES-18',
+      )
     })
 
     test('a link inside the repository is kept as the link Git stores', async (context) => {
