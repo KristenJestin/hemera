@@ -887,21 +887,31 @@ const markersOf = (text: string): ReadonlySet<string> =>
 /**
  * Masking hides at least all that masking the shapes in turn hid (`feature/1.0` before #381, the
  * oracle): no marker and no known value is left more often than the oracle leaves it, by any of
- * the functions that mask text, paced or not.
+ * the functions that mask text, paced or not. What a CLI printed also hides at least every value
+ * a key that names a credential holds, in any reading of its quotes (#412).
  */
 const hidesAtLeastTheOracle = async (text: string, known: ReadonlyArray<string>): Promise<void> => {
   const oracle = inTurn.maskText(text, known)
-  const masks = [
-    maskText(text, known),
+  const readings = inTurn.maskKeyedInEveryReading(text)
+  const texts = [maskText(text, known), await Effect.runPromise(maskTextPaced(text, known, 0))]
+  const printed = [
     maskPrinted(text, known),
-    await Effect.runPromise(maskTextPaced(text, known, 0)),
     await Effect.runPromise(maskPrintedPaced(text, known, 0)),
   ]
-  for (const masked of masks) {
-    for (const word of [...markersOf(text), ...known]) {
+  const words = [...markersOf(text), ...known]
+  for (const masked of [...texts, ...printed]) {
+    for (const word of words) {
       expect(occurrences(masked, word), `${word} in ${JSON.stringify(text)}`).toBeLessThanOrEqual(
         occurrences(oracle, word),
       )
+    }
+  }
+  for (const masked of printed) {
+    for (const word of words) {
+      expect(
+        occurrences(masked, word),
+        `${word} in a reading of ${JSON.stringify(text)}`,
+      ).toBeLessThanOrEqual(occurrences(readings, word))
     }
   }
 }
@@ -2021,6 +2031,221 @@ describe('JSON written in a JSON string is masked as that JSON, and stays JSON (
   )
 })
 
+describe("A header's value is read by a scan, whatever its length (#412)", () => {
+  // The value was matched by a pattern that crosses a backslash escape at each step: from about
+  // 16 MB of one value, the pattern ran out of its stack, and the whole output became `•••`.
+  const MB = 1024 * 1024
+  const scanned = async (text: string): Promise<string> => {
+    const [masked = ''] = await printedForms([text], [])
+    return masked
+  }
+
+  test(
+    '32 MB of Cookie: \\" is masked, not replaced whole by •••',
+    { timeout: 600_000 },
+    async () => {
+      const text = 'Cookie: \\"'.repeat(Math.ceil((32 * MB) / 10))
+      expect(await scanned(text)).toBe(`Cookie: ${MASK}`)
+      await hidesAtLeastTheOracle(text, [])
+    },
+  )
+
+  test(
+    'a one-line escaped JSON of 20 MB after cookie= is masked, not replaced whole by •••',
+    { timeout: 600_000 },
+    async () => {
+      const json = JSON.stringify(
+        JSON.stringify(Array.from({ length: Math.ceil((20 * MB) / 24) }, () => ({ a: 'b c' }))),
+      )
+      expect(await scanned(`cookie=${json.slice(1, -1)}\nnext`)).toBe(`cookie=${MASK}\nnext`)
+    },
+  )
+
+  test(
+    'a quoted header value of 20 MB is masked, not replaced whole by •••',
+    { timeout: 600_000 },
+    async () => {
+      const text = `Authorization: "${'a \\"b\\" '.repeat(Math.ceil((20 * MB) / 10))}" tail`
+      expect(await scanned(text)).toBe(`Authorization: ${MASK}`)
+    },
+  )
+
+  // What the pattern hid, pinned on feature/1.0 before #412: the scan hides the same.
+  const asThePatternRead: ReadonlyArray<readonly [what: string, text: string, masked: string]> = [
+    ['quoted, an escaped quote in it', 'Cookie: "a\\"b" tail', `Cookie: ${MASK}`],
+    [
+      'quoted, cut by an escaped line end: the space before it is the value',
+      'Cookie: "a\\\nb" x',
+      `Cookie:${MASK}"a\\\nb" x`,
+    ],
+    ['quoted, cut by an escaped line separator', 'Cookie: "a\\ b" c', `Cookie:${MASK}"a\\ b" c`],
+    [
+      'quoted, an escaped backslash before its closing quote',
+      'Cookie: "a\\\\" b"',
+      `Cookie: ${MASK}"`,
+    ],
+    ['quoted, an escaped backslash before a line end', 'Cookie: "a\\\\\nb" c', `Cookie: ${MASK}`],
+    [
+      'quoted, an escaped backslash then an escaped quote',
+      'Cookie: "a\\\\\\"b" c',
+      `Cookie: ${MASK}`,
+    ],
+    ['bare, an escaped backslash before a quote', 'Cookie: a\\\\"b', `Cookie: ${MASK}"b`],
+    [
+      'bare, an escaped backslash then an escaped quote',
+      'Cookie: x\\\\\\"y\'z',
+      `Cookie: ${MASK}'z`,
+    ],
+    ['quoted and never closed, after two spaces', 'Cookie:  "unclosed', `Cookie: ${MASK}"unclosed`],
+    ['quoted and never closed, after no space', 'Cookie:"unclosed', 'Cookie:"unclosed'],
+    ['quoted, then quoted again', 'Cookie: "a" "b"', `Cookie: ${MASK}"b"`],
+    ['single-quoted', "Cookie: 'a b' tail", `Cookie: ${MASK}`],
+    ['single-quoted, a backslash before its end', "Cookie: 'a\\' b", `Cookie: ${MASK}`],
+    ['single-quoted and never closed', "Cookie: 'unclosed", `Cookie:${MASK}'unclosed`],
+    ['bare, on the next line', 'Cookie: \nnext line', `Cookie: \n${MASK}`],
+    ['bare, nothing before a line end and a quote', 'Cookie: \r\n"x', `Cookie:${MASK}\r\n"x`],
+    [
+      'bare, through escaped quotes',
+      'Authorization: Bearer a\\"b c\\" tail',
+      `Authorization: ${MASK}`,
+    ],
+    ['bare, a backslash at the end', 'Authorization: a\\', `Authorization: ${MASK}`],
+    [
+      'bare, a backslash before a line end',
+      'Authorization: a\\\r\nnext',
+      `Authorization: ${MASK}\r\nnext`,
+    ],
+    ['bare, to a quote', 'cookie=x"y', `cookie=${MASK}"y`],
+    ['bare, to a single quote after an escaped quote', 'Cookie: a\\"b\'c', `Cookie: ${MASK}'c`],
+    ['bare, nothing after the spaces', 'Cookie: ', `Cookie:${MASK}`],
+    ['no value at all', 'Cookie:', 'Cookie:'],
+    ['bare, the next sign its first character', 'Cookie : = x', `Cookie : ${MASK}`],
+    ['quoted, after an equals sign', 'cookie="x" y', `cookie=${MASK}`],
+    ['as JSON writes it', 'Authorization": "Bearer x", "b": 1', `Authorization": ${MASK}"b": 1`],
+    ['after a tab and a no-break space', 'Authorization:\t "q" r', `Authorization:\t ${MASK}`],
+    ['inside a word', 'xAuthorization: y', 'xAuthorization: y'],
+    ['after a dash', 'x-Authorization: y', `x-Authorization: ${MASK}`],
+    [
+      'each header of two, in capitals',
+      'Proxy-Authorization: x y\nSet-Cookie: z',
+      `Proxy-Authorization: ${MASK}\nSet-Cookie: ${MASK}`,
+    ],
+    ['in capitals', 'COOKIE: x', `COOKIE: ${MASK}`],
+    [
+      'a header after a quote never closed',
+      'Cookie: "unclosed Cookie: b',
+      `Cookie:${MASK}"unclosed Cookie: ${MASK}`,
+    ],
+    [
+      'a header after a quote cut by an escaped line end',
+      'Cookie:"x\\\nCookie: b',
+      `Cookie:"x\\\nCookie: ${MASK}`,
+    ],
+  ]
+  for (const [what, text, masked] of asThePatternRead) {
+    test(`a header's value read as the pattern read it: ${what}`, async () => {
+      expect(maskText(text, [])).toBe(masked)
+      expect(await Effect.runPromise(maskTextPaced(text, [], 0))).toBe(masked)
+    })
+  }
+})
+
+describe('A key that names a credential in any reading of the quotes hides its value (#412)', () => {
+  // Where the quotes pair two ways, the reading kept was the one where `token` is not a key, and
+  // its value was shown. Every reading is now weighed: a key so named in any of them hides its
+  // value, as masking fails closed everywhere else.
+  test('the input where the quotes pair two ways hides the value of its token', async () => {
+    const text = '[ {"t": {"token": {"v": "plainSx1Zq"}}, "b": "[1, "} ", 2] tail'
+    expect(inTurn.maskKeyedInEveryReading(text)).not.toContain('plainSx1Zq')
+    const [masked = ''] = await printedForms([text], [])
+    expect(masked).not.toContain('plainSx1Zq')
+    expect(masked).toContain('"[1, "} ", 2] tail')
+    await hidesAtLeastTheOracle(text, [])
+  })
+
+  test('a number or a literal a credential holds is hidden as a string is', async () => {
+    // Named so that no shape of text reads a value after it (`tokens` is no label): only the
+    // reading of the key hides it.
+    const texts = [
+      '[ {"t": {"tokens": 987654321}, "b": "[1, "} ", 2] tail',
+      '[ {"t": {"secrets": true}, "b": "[1, "} ", 2] tail',
+    ]
+    const [number = '', literal = ''] = await printedForms(texts, [])
+    expect(number).not.toContain('987654321')
+    expect(literal).not.toContain('true')
+  })
+
+  test('a value cut short is hidden to where its reading breaks', async () => {
+    const texts = [
+      'Said: {"token": [1, "plainSx2Zq" oops',
+      'Said: {"token": "plainSx3Zq\nnext',
+      'Said: {"a": {"secret": {"b": "plainSx4Zq"',
+      'Said: {"\\u0074oken": "plainSx6Zq" oops',
+      'Said: {"token": ["plainSx7Zq", {"secret": [1 oops',
+    ]
+    for (const masked of await printedForms(texts, [])) {
+      expect(masked).not.toMatch(/Sx\d+Zq/)
+      expect(masked).toMatch(/^Said: \{"/)
+    }
+    await Promise.all(texts.map((text) => hidesAtLeastTheOracle(text, [])))
+  })
+
+  test("a credential's value is hidden, and what follows it is not", async () => {
+    const texts = [
+      'Said: [{"token": 1}, "seen1", {"password": "x"}, "seen2", {"secret": {"a": 1}}, "seen3"] tail',
+      // An empty container is read at once: what follows it is read with the key behind it.
+      'Said: [{"tokens": []}, "seen4", {"secrets": {}}, 12345] tail',
+    ]
+    expect(await printedForms(texts, [])).toEqual([
+      `Said: [{"token": "${MASK}"}, "seen1", {"password": "${MASK}"}, "seen2", {"secret": "${MASK}"}, "seen3"] tail`,
+      `Said: [{"tokens": "${MASK}"}, "seen4", {"secrets": "${MASK}"}, 12345] tail`,
+    ])
+  })
+
+  test('a key so named in the reading of a line kept as JSON is masked as before', async () => {
+    const text = 'Said: {"token": {"v": "plainSx5Zq"}, "b": 1}'
+    expect(await printedForms([text], [])).toEqual([`Said: {"token": "${MASK}", "b": 1}`])
+  })
+
+  test('outputs of quotes, brackets and keys, every reading weighed, 5,000 samples', async () => {
+    const piece = fc.oneof(
+      {
+        weight: 6,
+        arbitrary: fc.constantFrom(
+          '"',
+          '"token"',
+          '"password": ',
+          '"a"',
+          ': ',
+          ':',
+          ',',
+          ', ',
+          '{',
+          '}',
+          '[',
+          ']',
+          ' ',
+          '\n',
+          '1',
+          'null',
+          '\\"',
+          'x',
+          'tail',
+        ),
+      },
+      { weight: 2, arbitrary: fc.nat({ max: 999 }).map((index) => `Mk${index}Zq`) },
+      { weight: 1, arbitrary: fc.nat({ max: 999 }).map((index) => `"Mk${index}Zq"`) },
+    )
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(piece, { minLength: 1, maxLength: 24 }).map((parts) => parts.join('')),
+        (text) => hidesAtLeastTheOracle(text, []),
+      ),
+      { numRuns: 5_000 },
+    )
+  })
+})
+
 /** How long `work` takes, run `times` times, in milliseconds. */
 const timed = (work: () => void, times: number): number => {
   const start = performance.now()
@@ -2174,6 +2399,30 @@ describe('Masking takes time in proportion to what it masks, whatever it is give
         JSON.stringify(
           Array.from({ length: size / 60 }, () => '{"password":"x","note":"token=\\"a b\\""}'),
         ),
+      printed,
+      4_000,
+    ],
+    [
+      'a header value of escaped quotes (#412)',
+      (size) => 'Cookie: \\"'.repeat(size / 10),
+      printed,
+      4_000,
+    ],
+    [
+      'header values quoted and cut by an escaped line end (#412)',
+      (size) => 'Cookie:"x\\\nCookie: "a \\"b\\" c\n'.repeat(size / 30),
+      printed,
+      4_000,
+    ],
+    [
+      'credentials that each open a container never closed (#412)',
+      (size) => '{"token":'.repeat(size / 9),
+      printed,
+      4_000,
+    ],
+    [
+      'credentials in containers that break, line after line (#412)',
+      (size) => 'Said: [{"password": [1, "x"], "\\u0074oken": "y" oops\n'.repeat(size / 50),
       printed,
       4_000,
     ],

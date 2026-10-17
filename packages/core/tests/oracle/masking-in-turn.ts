@@ -1,7 +1,9 @@
 /**
  * The masking as it was on feature/1.0 before #381 (25efacc5), frozen as a test oracle: the
  * masking now must hide at least all that this one hid. Never imported by product code, and never
- * changed: it is what the order of the shapes used to give.
+ * changed: it is what the order of the shapes used to give. At its end, apart, what #412 decided
+ * printed text hides on top: a value a key that names a credential holds in any reading of the
+ * quotes (`maskKeyedInEveryReading`).
  */
 
 /**
@@ -973,4 +975,146 @@ export function maskAction(
     return maskShapes(withoutKnown)
   })
   return lostDestination ? null : maskedRecord(masked)
+}
+
+/*
+ * Added by #412, apart from the masking above, which stays as it was: what masking hides on top
+ * where the quotes of a text pair in more than one way. A key that names a credential in any
+ * reading hides its value, as a field so named is hidden in JSON. A reading is JSON read from an
+ * opener, any opener of the text, as far as it goes: each value a key so named holds is hidden
+ * from where it begins to where it ends, or to where the reading broke when it broke first. Slow
+ * and plain on purpose: a reading from every opener, one character at a time.
+ */
+
+/** A value a key that names a credential holds, in some reading of a text. */
+type Keyed = readonly [start: number, end: number]
+
+/** Where reading a JSON string stopped, and whether it was closed there. */
+interface Stopped {
+  readonly stop: number
+  readonly closed: boolean
+}
+
+/** Where the JSON string whose quote is at `at` stops, and whether it was closed there. */
+const stringRead = (text: string, at: number): Stopped => {
+  let next = at + 1
+  for (;;) {
+    const code = text.charCodeAt(next)
+    if (Number.isNaN(code) || code < 0x20) return { stop: next, closed: false }
+    if (code === 0x22) return { stop: next + 1, closed: true }
+    if (code !== 0x5c) next += 1
+    else if (text.charAt(next + 1) === 'u') {
+      if (!/^[\dA-Fa-f]{4}$/.test(text.slice(next + 2, next + 6)))
+        return { stop: next, closed: false }
+      next += 6
+    } else if (ESCAPED.has(text.charAt(next + 1))) next += 2
+    else return { stop: next, closed: false }
+  }
+}
+
+/** A container open in a reading, and where the value a key so named holds began, or -1. */
+interface Frame {
+  readonly closing: string
+  readonly keyed: number
+}
+
+/** The values keys that name a credential hold in the reading from the opener at `start`. */
+const readingFrom = (text: string, start: number, found: Keyed[]): void => {
+  const frames: Frame[] = []
+  const space = (at: number): number => {
+    let next = at
+    while (next < text.length && JSON_SPACE.includes(text.charAt(next))) next += 1
+    return next
+  }
+  /** The reading broke at `at`: each value a key so named holds, still open, is hidden to there. */
+  const broke = (at: number) => {
+    for (const frame of frames) if (frame.keyed !== -1) found.push([frame.keyed, at])
+  }
+  let keyed = false
+  /** A key and its colon read from `at`: where its value begins, or -1 when the reading broke. */
+  const field = (at: number): number => {
+    if (text.charAt(at) !== '"') {
+      broke(at)
+      return -1
+    }
+    const name = stringRead(text, at)
+    if (!name.closed) {
+      broke(name.stop)
+      return -1
+    }
+    const colon = space(name.stop)
+    if (text.charAt(colon) !== ':') {
+      broke(colon)
+      return -1
+    }
+    keyed = CREDENTIAL_FIELD.test(JSON.parse(text.slice(at, name.stop)))
+    return colon + 1
+  }
+  let at = start
+  for (;;) {
+    // A value.
+    at = space(at)
+    const first = text.charAt(at)
+    let end = -1
+    if (first === '{' || first === '[') {
+      const closing = first === '{' ? '}' : ']'
+      const inside = space(at + 1)
+      if (text.charAt(inside) === closing) end = inside + 1
+      else {
+        frames.push({ closing, keyed: keyed ? at : -1 })
+        keyed = false
+        at = closing === '}' ? field(inside) : inside
+        if (at === -1) return
+        continue
+      }
+    } else if (first === '"') {
+      const read = stringRead(text, at)
+      if (!read.closed) {
+        if (keyed) found.push([at, read.stop])
+        return broke(read.stop)
+      }
+      end = read.stop
+    } else end = jsonScalarEnd(text, at)
+    if (end === -1) return broke(at)
+    if (keyed) found.push([at, end])
+    keyed = false
+    // What follows a value: a comma and the next, or what closes the container.
+    for (;;) {
+      const frame = frames.at(-1)
+      if (frame === undefined) return
+      at = space(end)
+      if (text.charAt(at) === ',') {
+        at = frame.closing === '}' ? field(space(at + 1)) : at + 1
+        if (at === -1) return
+        break
+      }
+      if (text.charAt(at) !== frame.closing) return broke(at)
+      frames.pop()
+      end = at + 1
+      if (frame.keyed !== -1) found.push([frame.keyed, end])
+    }
+  }
+}
+
+/** The values keys that name a credential hold, in every reading of a text. */
+export const keyedInEveryReading = (text: string): ReadonlyArray<Keyed> => {
+  const found: Keyed[] = []
+  for (let at = 0; at < text.length; at += 1) {
+    if (text.charAt(at) === '{' || text.charAt(at) === '[') readingFrom(text, at, found)
+  }
+  return found
+}
+
+/** A text with every value a key that names a credential holds, in any reading, masked. */
+export const maskKeyedInEveryReading = (text: string): string => {
+  const spans = keyedInEveryReading(text)
+    .filter(([start, end]) => end > start)
+    .toSorted((a, b) => a[0] - b[0])
+  const hidden = done(union(spans, []))
+  return done(
+    applied(
+      text,
+      hidden.map(([start, end]) => ({ start, end, by: MASK })),
+    ),
+  )
 }
