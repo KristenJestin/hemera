@@ -714,15 +714,30 @@ describe('A red read from the words of each runner', () => {
 
   test('a Rust #[test] fn x failing is a red, by name', () => {
     const path = 'src/lib.rs'
-    const names = addedTestNames({
+    // The proof adds the test to the file's `mod tests`: its patch places in the file's code.
+    const code = [
+      'pub fn to_markdown() -> String { String::new() }',
+      '',
+      '#[cfg(test)]',
+      'mod tests {',
+      '    use super::*;',
+      '',
+      '    #[test]',
+      '    fn exports_markdown() {',
+      '        assert_eq!(to_markdown(), "| total |");',
+      '    }',
+      '}',
+      '',
+    ].join('\n')
+    const added = {
       insertion: 'addition',
-      code: '',
+      code,
       patch:
-        '@@ -8,0 +9,5 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
-    })
-    expect(names).toEqual(['exports_markdown'])
-    const tests = inTests('exports_markdown')
-    expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, tests)).toBe(true)
+        '@@ -6,0 +7,4 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
+    } as const
+    expect(addedTestNames(added)).toEqual(['exports_markdown'])
+    const names = addedTests(added)
+    expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, names)).toBe(true)
     expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, inTests('one_is_one'))).toBe(false)
   })
 
@@ -4992,6 +5007,9 @@ describe('A Go or Rust red is read within its package (#384)', () => {
     expect(validRed(run(twoModules, 101, 'src/a.rs'), 'src/a.rs', rustFile(RUST_MODULE_A))).toBe(
       true,
     )
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = twoModules.replace('panicked at src/a.rs:6:9:', 'panicked at src/b.rs:3:5:')
+    expect(validRed(run(helped, 101, 'src/b.rs'), 'src/b.rs', rustFile(RUST_MODULE_B))).toBe(false)
   })
 
   test('Rust: an integration test failing in tests/c.rs is not the red of a same-named test of tests/d.rs', () => {
@@ -5066,6 +5084,27 @@ describe('A Go or Rust red is read within its package (#384)', () => {
     const path = 'src/lib.rs'
     expect(validRed(run(output, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
     expect(validRed(run(output, 101, path), path, rustFile(RUST_MODULE_A), true)).toBe(true)
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = output.replace('panicked at a/src/lib.rs:5:9:', 'panicked at src/lib.rs:5:9:')
+    expect(validRed(run(helped, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+  })
+
+  test("Rust: a member's red run through its own manifest is not the red of the root crate's test of the same path", () => {
+    // `cargo test --manifest-path member/Cargo.toml; cargo test`: no rerun hint names a package.
+    const output = captured('cargo-test-two-manifests')
+    const path = 'src/lib.rs'
+    expect(validRed(run(output, 0, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    expect(validRed(run(output, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    // The member's run alone: one binary, but its panic was raised in another file.
+    const member = output.slice(0, output.indexOf('   Compiling acme'))
+    expect(validRed(run(member, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    expect(validRed(run(member, 101, path), path, rustFile(RUST_MODULE_A), true)).toBe(true)
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = output.replace(
+      'panicked at member/src/lib.rs:5:9:',
+      'panicked at src/lib.rs:5:9:',
+    )
+    expect(validRed(run(helped, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
   })
 
   test('Rust: a crate in a folder of the repository is told apart from no other crate: the key line decides', () => {
@@ -5076,6 +5115,9 @@ describe('A Go or Rust red is read within its package (#384)', () => {
     const member = 'm/src/lib.rs'
     expect(validRed(run(output, 101, member), member, rustFile(RUST_MODULE_A))).toBe(false)
     expect(validRed(run(output, 101, member), member, rustFile(RUST_MODULE_A), true)).toBe(true)
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = output.replace('panicked at src/lib.rs:5:9:', 'panicked at m/src/lib.rs:5:9:')
+    expect(validRed(run(helped, 101, member), member, rustFile(RUST_MODULE_A))).toBe(false)
   })
 
   test('Rust: a failure whose Running line was cut off is uncertain: the key line decides', () => {

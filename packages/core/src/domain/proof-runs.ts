@@ -208,7 +208,7 @@ const NEXTEST_STATUS =
 /** cargo-nextest's count of the test binaries it runs. */
 const NEXTEST_STARTING = /^\s*Starting \d+ tests? across (?<binaries>\d+) binar(?:y|ies)\b/
 /** cargo's line naming the test binary it runs next, by its source: `unittests src/lib.rs`, `tests/c.rs`. */
-const CARGO_RUNNING = /^\s+Running (?<source>(?:unittests )?\S+) \(/
+const CARGO_RUNNING = /^\s+Running (?<source>(?:unittests )?\S+) \((?<binary>[^)]*)\)/
 /** cargo's rerun hint naming a package: it ran the tests of more than one package of a workspace. */
 const CARGO_PACKAGE_HINT = /^error: .*\bto rerun pass `-p |^\s+`-p \S/
 /** libtest's heading of a failure's output, below its `failures:` line. */
@@ -221,6 +221,8 @@ const RUST_LISTED = /^ {4}(?<name>[A-Za-z_][\w:]*)\s*$/
  * the next line, or, before Rust 1.73, quoted after `panicked at`.
  */
 const RUST_PANIC = /^\s*thread '(?<thread>[^']*)'(?: \(\d+\))? panicked at (?:'(?<said>.*)|.*:\s*$)/
+/** Where a Rust panic was raised: the file its line ends with, before its line and column. */
+const RUST_PANIC_FILE = /\bpanicked at (?:'.*', )?(?<file>[^\s']+?):\d+:\d+:?\s*$/
 /** A panic's message that an assertion prints: `assert!`, `assert_eq!`, pretty_assertions'. */
 const RUST_PANIC_ASSERTION = /^assertion\b/
 /** A panic's message that an error prints: `todo!()`, `unimplemented!()`, an `unwrap()`, an index. */
@@ -406,7 +408,8 @@ export interface Printed {
   /**
    * Where a Go or Rust test ran, as the output says for certain: its Go package (its import path,
    * or gotestsum's path from the module's root, `.` or `./pkg/b`), or its Rust test binary
-   * (`lib`, `main`, `bin:x`, `test:x`); null when the output does not say for certain.
+   * (`lib`, `bin` for `src/main.rs`, `bin:x`, `test:x`); null when the output does not say for
+   * certain.
    */
   readonly unit: string | null
 }
@@ -420,6 +423,8 @@ interface JsFiles {
 /** A failing test as its runner prints it, and what one of its failures says. */
 export interface PrintedFailure extends Printed {
   readonly verdict: Verdict
+  /** The files a Rust test's panics were raised in, as their lines print them. */
+  readonly panickedIn: ReadonlyArray<string>
 }
 
 /**
@@ -751,6 +756,7 @@ const failingLinesOf = (
       file: name.file,
       unit: unitOf(name, entry.at),
       verdict: entry.read.verdict(below),
+      panickedIn: [],
     }
     return [{ at: entry.at, failure }]
   })
@@ -773,7 +779,8 @@ const failingLinesOf = (
  * result line names. Rust: the test binary cargo or cargo-nextest last named at or above each line
  * (cargo's `Running` line, nextest's status line), and that binary as a failure's unit when the
  * whole output tells it apart for certain: for cargo, a run of one package (no rerun hint naming
- * one with `-p`, which cargo prints when it runs several); for nextest, binaries of one crate,
+ * one with `-p`, which cargo prints when it runs several, and no source run as two binaries, which
+ * two runs of cargo on two packages print); for nextest, binaries of one crate,
  * every binary it counted shown.
  */
 const placesOf = (lines: ReadonlyArray<string>) => {
@@ -792,14 +799,22 @@ const placesOf = (lines: ReadonlyArray<string>) => {
   goPackages.reverse()
   const rustAt: Array<string | null> = []
   const binaries = new Set<string>()
+  // The binaries cargo ran from each source: two of one source are two packages' (their deps names).
+  const built = new Map<string, Set<string>>()
   let counted: number | null = null
   let packages = false
   let current: string | null = null
   for (const line of lines) {
-    const source = CARGO_RUNNING.exec(line)?.groups?.['source']
+    const running = CARGO_RUNNING.exec(line)?.groups
+    const source = running?.['source']
     const binary = NEXTEST_STATUS.exec(line)?.groups?.['binary']
-    if (source !== undefined) current = `cargo ${posix(source)}`
-    else if (binary !== undefined) {
+    if (source !== undefined) {
+      current = `cargo ${posix(source)}`
+      const deps = built.get(current) ?? new Set<string>()
+      deps.add(posix(running?.['binary'] ?? ''))
+      built.set(current, deps)
+      if (deps.size > 1) packages = true
+    } else if (binary !== undefined) {
       current = `nextest ${binary}`
       binaries.add(binary)
     }
@@ -820,13 +835,16 @@ const placesOf = (lines: ReadonlyArray<string>) => {
   return { goBelow, goPackages, rustAt, rustUnit }
 }
 
-/** cargo's test binary as a unit, from its source: `lib`, `main`, `bin:x`, `test:x`. */
+/** cargo's test binary as a unit, from its source: `lib`, `bin` (`src/main.rs`), `bin:x`, `test:x`. */
 const cargoUnit = (source: string): string | null => {
   const unit =
     /^unittests src\/(?:(?<root>lib|main)\.rs|bin\/(?<bin>[\w-]+)(?:\.rs|\/main\.rs))$/.exec(
       source,
     )?.groups
-  if (unit !== undefined) return unit['root'] ?? `bin:${unit['bin'] ?? ''}`
+  if (unit !== undefined) {
+    if (unit['root'] === undefined) return `bin:${unit['bin'] ?? ''}`
+    return RUST_BIN_ROOT.test(unit['root']) ? 'bin' : 'lib'
+  }
   const test = /^tests\/(?<test>[\w-]+)(?:\.rs|\/main\.rs)$/.exec(source)?.groups?.['test']
   return test === undefined ? null : `test:${test}`
 }
@@ -837,7 +855,7 @@ const nextestUnit = (id: string): string | null => {
   if (crate === undefined || more.length > 0) return null
   if (target === undefined) return 'lib'
   const bin = /^bin\/(?<bin>[\w-]+)$/.exec(target)?.groups?.['bin']
-  if (bin !== undefined) return bin === crate ? 'main' : `bin:${bin}`
+  if (bin !== undefined) return bin === crate ? 'bin' : `bin:${bin}`
   return /^[\w-]+$/.test(target) ? `test:${target}` : null
 }
 
@@ -883,6 +901,7 @@ const goVerdicts = (
       file: one.file,
       unit: one.unit,
       verdict: verdict === 'silent' ? 'assertion' : verdict,
+      panickedIn: one.panickedIn,
     }
     return failure
   })
@@ -910,13 +929,18 @@ const rustVerdicts = (
       : RUST_PANIC_ERROR.test(said)
         ? 'error'
         : 'silent'
-    return [{ thread: `${rustAt[at] ?? ''}\n${found['thread'] ?? ''}`, verdict }]
+    const file = posix(RUST_PANIC_FILE.exec(line)?.groups?.['file'] ?? '')
+    return [{ thread: `${rustAt[at] ?? ''}\n${found['thread'] ?? ''}`, verdict, file }]
   })
   const byThread = new Map<string, Array<Verdict>>()
+  const files = new Map<string, Array<string>>()
   for (const panic of panics) {
     const verdicts = byThread.get(panic.thread) ?? []
     verdicts.push(panic.verdict)
     byThread.set(panic.thread, verdicts)
+    const raised = files.get(panic.thread) ?? []
+    raised.push(panic.file)
+    files.set(panic.thread, raised)
   }
   return read
     .filter((one) => one.failure.runner === 'rust')
@@ -932,6 +956,7 @@ const rustVerdicts = (
           one.verdict,
           ...(byThread.get(`${rustAt[at] ?? ''}\n${one.name}`) ?? []),
         ]),
+        panickedIn: files.get(`${rustAt[at] ?? ''}\n${one.name}`) ?? [],
       }
       return failure
     })
@@ -1532,6 +1557,11 @@ const goRoot = (packages: ReadonlyArray<string>): string | null => {
 const goClaims = (unit: string, folder: string): boolean =>
   folder !== '' && (unit === folder || unit.endsWith(`/${folder}`))
 
+/** The crate's own binary's root file, `src/main.rs`, without its extension. */
+const RUST_BIN_ROOT = /^main$/
+/** The crate's library's root file, `src/lib.rs`, without its extension. */
+const RUST_LIB_ROOT = /^lib$/
+
 /** A Rust module's name as a path part, `mod.rs` aside. */
 const RUST_MODULE = /^[A-Za-z_]\w*$/
 
@@ -1554,7 +1584,7 @@ const rustPlace = (
   const path = [...rest.slice(0, -1), file.slice(0, -3)]
   const modulesOf = (inner: ReadonlyArray<string>) => {
     const named = inner.at(-1) === 'mod' ? inner.slice(0, -1) : inner
-    const modules = inner.length === 1 && inner[0] === 'main' ? [] : named
+    const modules = inner.length === 1 && RUST_BIN_ROOT.test(inner[0] ?? '') ? [] : named
     return modules.every((module) => RUST_MODULE.test(module)) ? modules : null
   }
   const [first = '', second = ''] = path
@@ -1563,9 +1593,11 @@ const rustPlace = (
       ? { units: [`test:${first}`], inner: path.slice(1) }
       : first === 'bin'
         ? { units: [`bin:${second}`], inner: path.slice(2) }
-        : path.length === 1 && (first === 'lib' || first === 'main')
-          ? { units: [first], inner: [] }
-          : { units: ['lib', 'main'], inner: path }
+        : path.length === 1 && RUST_LIB_ROOT.test(first)
+          ? { units: ['lib'], inner: [] }
+          : path.length === 1 && RUST_BIN_ROOT.test(first)
+            ? { units: ['bin'], inner: [] }
+            : { units: ['lib', 'bin'], inner: path }
   const modules = modulesOf(binary.inner)
   return modules === null ? null : { units: binary.units, modules }
 }
@@ -1573,15 +1605,20 @@ const rustPlace = (
 /**
  * Whether a Rust failure is the declared test's own: printed in a binary that may hold its file,
  * under the path its file and its inline modules make, its function last, or its cases after it.
- * Unknown when its binary, its file's place or its modules were not read for certain.
+ * Unknown when its binary, its file's place or its modules were not read for certain, or when one
+ * of its panics was raised in another file than the test's.
  */
 const rustPlaced = (
-  failure: Printed,
+  failure: PrintedFailure,
   test: TestName,
   place: ReturnType<typeof rustPlace>,
+  testPath: string,
 ): Placed => {
   if (place === null || failure.unit === null) return 'unknown'
   if (!place.units.includes(failure.unit)) return 'other'
+  // A panic raised in another file may be another crate's test of the same path, or a helper's.
+  const file = pathParts(testPath).join('/')
+  if (failure.panickedIn.some((one) => one.replace(/^\.\//, '') !== file)) return 'unknown'
   if (!Predicate.hasProperty(test, 'modules') || test.modules === null) return 'unknown'
   const prefix = [...place.modules, ...test.modules]
   const parts = failure.name.split('::')
@@ -1687,7 +1724,7 @@ const named = (
   const place = rustPlace(testPath)
   const placed = (failure: PrintedFailure, name: TestName): Placed => {
     if (failure.runner === 'go') return goPlaced(failure.unit, folder, claimed, root)
-    if (failure.runner === 'rust') return rustPlaced(failure, name, place)
+    if (failure.runner === 'rust') return rustPlaced(failure, name, place, testPath)
     return 'own'
   }
   const verdicts = names.map((name) => {
@@ -1718,6 +1755,7 @@ const reportFailure = (failure: ProofRunClass['failures'][number]): PrintedFailu
   ...reportPrinted(failure.test),
   file: failure.file,
   verdict: failure.assertion ? 'assertion' : 'error',
+  panickedIn: [],
 })
 
 /**
