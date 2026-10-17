@@ -10,7 +10,7 @@
  *   node tools/window-options.ts
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 /** The only `webPreferences` entries the window may carry. */
@@ -68,11 +68,25 @@ export interface Refusal {
 
 function sourceFilesOf(directory: string): string[] {
   if (!existsSync(directory)) return []
-  return readdirSync(directory).flatMap((entry) => {
-    const path = join(directory, entry)
-    if (statSync(path).isDirectory()) return sourceFilesOf(path)
-    return /\.tsx?$/.test(entry) ? [path] : []
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return sourceFilesOf(path)
+    return /\.tsx?$/.test(entry.name) ? [path] : []
   })
+}
+
+/**
+ * What a source file holds, or nothing when it is gone: a file another test creates and removes
+ * while the tree is walked (a deliberate error of `verification.test.ts`) is not source.
+ */
+function sourceOf(path: string): string {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error) {
+    // SAFETY: what `readFileSync` throws is a system error, which carries a `code`.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
 }
 
 const WEB_PREFERENCES = /webPreferences\s*:\s*\{([^}]*)\}/g
@@ -142,7 +156,7 @@ export function refusalsOf(file: string, source: string): Refusal[] {
 
 export function analyze(applicationRoot: string): Refusal[] {
   return sourceFilesOf(join(applicationRoot, 'src')).flatMap((file) =>
-    refusalsOf(relative(applicationRoot, file).replaceAll('\\', '/'), readFileSync(file, 'utf8')),
+    refusalsOf(relative(applicationRoot, file).replaceAll('\\', '/'), sourceOf(file)),
   )
 }
 
