@@ -714,15 +714,31 @@ describe('A red read from the words of each runner', () => {
 
   test('a Rust #[test] fn x failing is a red, by name', () => {
     const path = 'src/lib.rs'
-    const names = addedTestNames({
+    // The proof adds the test to the file's `mod tests`: its patch places in the file's code.
+    const code = [
+      'pub fn to_markdown() -> String { String::new() }',
+      '',
+      '#[cfg(test)]',
+      'mod tests {',
+      '    use super::*;',
+      '',
+      '    #[test]',
+      '    fn exports_markdown() {',
+      '        assert_eq!(to_markdown(), "| total |");',
+      '    }',
+      '}',
+      '',
+    ].join('\n')
+    const added = {
       insertion: 'addition',
-      code: '',
+      code,
       patch:
-        '@@ -8,0 +9,5 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
-    })
-    expect(names).toEqual(['exports_markdown'])
+        '@@ -6,0 +7,4 @@\n+    #[test]\n+    fn exports_markdown() {\n+        assert_eq!(to_markdown(), "| total |");\n+    }\n',
+    } as const
+    expect(addedTestNames(added)).toEqual(['exports_markdown'])
+    const names = addedTests(added)
     expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, names)).toBe(true)
-    expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, ['one_is_one'])).toBe(false)
+    expect(validRed(run(CARGO_SCENARIO_FAILS, 101, path), path, inTests('one_is_one'))).toBe(false)
   })
 
   test('jest’s and node:test’s marks are read, by name', () => {
@@ -1189,6 +1205,17 @@ const rustTests = (names: ReadonlyArray<string>) => {
   return addedTests(file).filter((_, at) => names.includes(declared[at] ?? ''))
 }
 
+/** Rust tests of a crate's `src/lib.rs`, declared in its `mod tests`. */
+const inTests = (...names: ReadonlyArray<string>) =>
+  names.map((rust) => ({ rust, modules: ['tests'] }))
+
+/** cargo's line before the tests of the crate's library, which tells their binary. */
+const LIB_BINARY = '     Running unittests src/lib.rs (target/debug/deps/acme-d5b7551ab0e24432)'
+
+/** A libtest output with the line naming its binary, as cargo prints it above. */
+const inLib = (output: string) =>
+  output.includes('     Running ') ? output : `${LIB_BINARY}\n${output}`
+
 describe('A red read from the failing names #260 still missed', () => {
   test('a failing Rust #[should_panic] test is a red, by name; one that panicked as expected is not', () => {
     const output = captured('cargo-test-should-panic')
@@ -1283,7 +1310,7 @@ describe('A red read from the failing names #260 still missed', () => {
       'fn rejects_markdown(rows: Vec<&str>) {}',
     ].join('\n')
     expect(addedTests({ insertion: 'new_file', code: lines, patch: null })).toEqual([
-      { function: 'rejects_markdown' },
+      { function: 'rejects_markdown', modules: [] },
     ])
   })
 
@@ -1308,10 +1335,12 @@ describe('A red read from the failing names #260 still missed', () => {
 
   test('a cased Rust test does not take the failures of a module of the same name', () => {
     const path = 'src/lib.rs'
-    const render = [{ function: 'render' }]
-    // Each test's panic, named by its thread, as libtest and cargo-nextest print it.
+    const render = [{ function: 'render', modules: ['tests'] }]
+    // Each test's panic, named by its thread, as libtest and cargo-nextest print it, below the
+    // line that tells its binary.
     const failed = (line: string) =>
       [
+        line.startsWith('test ') ? LIB_BINARY : '    Starting 1 test across 1 binary',
         line,
         `thread '${line.replace(/^.* (\S+::\S+)(?: \.\.\. FAILED)?$/, '$1')}' panicked at src/lib.rs:9:5:`,
         'assertion `left == right` failed',
@@ -1974,7 +2003,8 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
 
   test('a Go subtest Go renamed with #01, as a duplicate name, is a red by its name', () => {
     const path = 'export_test.go'
-    const output = '--- FAIL: TestE (0.00s)\n    --- FAIL: TestE/csv#01 (0.00s)\n'
+    const output =
+      '--- FAIL: TestE (0.00s)\n    --- FAIL: TestE/csv#01 (0.00s)\nFAIL\texample.com/acme\t0.01s\n'
     const subtest = { parent: 'TestE', subtest: 'csv', nesting: [], whole: true }
     expect(validRed(run(output, 1, path), path, [subtest])).toBe(true)
     const other = { parent: 'TestE', subtest: 'cs', nesting: [], whole: true }
@@ -1984,6 +2014,7 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
   test('a Rust run with the terse format is a red by its name, from the failure’s stdout', () => {
     const path = 'src/lib.rs'
     const output = [
+      LIB_BINARY,
       'running 2 tests',
       '.F',
       'failures:',
@@ -1995,8 +2026,8 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
       'failures:',
       '    tests::exports',
     ].join('\n')
-    expect(validRed(run(output, 101, path), path, ['exports'])).toBe(true)
-    expect(validRed(run(output, 101, path), path, ['imports'])).toBe(false)
+    expect(validRed(run(output, 101, path), path, inTests('exports'))).toBe(true)
+    expect(validRed(run(output, 101, path), path, inTests('imports'))).toBe(false)
   })
 
   test('mocha’s dot reporter with a nested describe is a red by its name', () => {
@@ -2365,6 +2396,7 @@ describe('A red read failure by failure, each runner by its own reader (#342)', 
   test('a libtest stdout heading a test prints before the failures list is not a failure', () => {
     const path = 'src/lib.rs'
     const output = [
+      LIB_BINARY,
       'running 2 tests',
       '---- tests::exports_markdown stdout ----',
       'assertion `left == right` failed',
@@ -2380,8 +2412,8 @@ describe('A red read failure by failure, each runner by its own reader (#342)', 
       'failures:',
       '    tests::one_is_one',
     ].join('\n')
-    expect(validRed(run(output, 101, path), path, ['exports_markdown'])).toBe(false)
-    expect(validRed(run(output, 101, path), path, ['one_is_one'])).toBe(true)
+    expect(validRed(run(output, 101, path), path, inTests('exports_markdown'))).toBe(false)
+    expect(validRed(run(output, 101, path), path, inTests('one_is_one'))).toBe(true)
   })
 })
 
@@ -2445,6 +2477,7 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       '    saves_test.go:9: dial tcp 127.0.0.1:5432: connect: connection refused',
       '--- FAIL: TestSaves (0.00s)',
       'FAIL',
+      'FAIL\texample.com/acme\t0.01s',
     ].join('\n')
     expect(validRed(run(next, 1, path), path, ['TestOneIsOne'])).toBe(true)
     expect(validRed(run(next, 1, path), path, ['TestSaves'])).toBe(false)
@@ -2455,6 +2488,7 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       '    saves_test.go:9: dial tcp 127.0.0.1:5432: connect: connection refused',
       '--- FAIL: TestSaves (0.00s)',
       'FAIL',
+      'FAIL\texample.com/acme\t0.01s',
     ].join('\n')
     expect(validRed(run(unordered, 1, path), path, ['TestOneIsOne'])).toBe(true)
     for (const output of [after, verbose]) {
@@ -2626,6 +2660,7 @@ describe('A red read block by block, a test vetoed by any block that is no asser
   test('a Rust test that returned an error is not a red, beside an older one failing on an assertion', () => {
     const path = 'src/lib.rs'
     const output = [
+      LIB_BINARY,
       'running 2 tests',
       'test tests::exports ... FAILED',
       'test tests::one_is_one ... FAILED',
@@ -2643,8 +2678,8 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       '    tests::exports',
       '    tests::one_is_one',
     ].join('\n')
-    expect(validRed(run(output, 101, path), path, ['exports'])).toBe(false)
-    expect(validRed(run(output, 101, path), path, ['one_is_one'])).toBe(true)
+    expect(validRed(run(output, 101, path), path, inTests('exports'))).toBe(false)
+    expect(validRed(run(output, 101, path), path, inTests('one_is_one'))).toBe(true)
   })
 
   test('a JUnit report’s pytest failure is read by its own error, never the source it prints', () => {
@@ -2864,36 +2899,36 @@ describe('A red read by its test’s path, its errors and its panics, the key li
   test('a Rust panic is an assertion only when its message says one, a known runtime error is not, any other leaves it to the key line', () => {
     const path = 'src/lib.rs'
     for (const name of ['cargo-test-panics', 'cargo-test-panics-nocapture-v']) {
-      const output = run(captured(name), 101, path)
+      const output = run(inLib(captured(name)), 101, path)
       for (const one of RUST_PANICS.asserts) {
-        expect([name, one, validRed(output, path, [one])]).toEqual([name, one, true])
+        expect([name, one, validRed(output, path, inTests(one))]).toEqual([name, one, true])
       }
       for (const one of RUST_PANICS.errs) {
-        expect([name, one, validRed(output, path, [one], true)]).toEqual([name, one, false])
+        expect([name, one, validRed(output, path, inTests(one), true)]).toEqual([name, one, false])
       }
       for (const one of RUST_PANICS.says_nothing) {
-        expect([name, one, validRed(output, path, [one])]).toEqual([name, one, false])
-        expect([name, one, validRed(output, path, [one], true)]).toEqual([name, one, true])
+        expect([name, one, validRed(output, path, inTests(one))]).toEqual([name, one, false])
+        expect([name, one, validRed(output, path, inTests(one), true)]).toEqual([name, one, true])
       }
     }
     // A test that returned `Err` says so under its own heading; with --nocapture, its `Error:`
     // line is no test's, and the key line decides.
-    const headed = run(captured('cargo-test-panics'), 101, path)
-    expect(validRed(headed, path, ['returns_err'], true)).toBe(false)
+    const headed = run(inLib(captured('cargo-test-panics')), 101, path)
+    expect(validRed(headed, path, inTests('returns_err'), true)).toBe(false)
     const nocapture = run(captured('cargo-test-panics-nocapture-v'), 101, path)
-    expect(validRed(nocapture, path, ['returns_err'])).toBe(false)
+    expect(validRed(nocapture, path, inTests('returns_err'))).toBe(false)
   })
 
   test('a Rust panic printed with --nocapture is its thread’s test’s, wherever its result line lands', () => {
     const path = 'src/lib.rs'
-    const output = run(captured('cargo-test-panics-nocapture'), 101, path)
+    const output = run(inLib(captured('cargo-test-panics-nocapture')), 101, path)
     for (const one of RUST_PANICS.asserts) {
-      expect([one, validRed(output, path, [one])]).toEqual([one, true])
+      expect([one, validRed(output, path, inTests(one))]).toEqual([one, true])
     }
     for (const one of ['uses_todo', 'uses_unimplemented', 'unwraps', 'index']) {
-      expect([one, validRed(output, path, [one], true)]).toEqual([one, false])
+      expect([one, validRed(output, path, inTests(one), true)]).toEqual([one, false])
     }
-    expect(validRed(output, path, ['assert_msg'])).toBe(false)
+    expect(validRed(output, path, inTests('assert_msg'))).toBe(false)
   })
 
   test('a cargo-nextest test that hit todo!() is not a red', () => {
@@ -2908,8 +2943,8 @@ describe('A red read by its test’s path, its errors and its panics, the key li
         '    not yet implemented',
       ].join('\n'),
     )
-    expect(validRed(run(output, 100, path), path, ['exports_async'], true)).toBe(false)
-    expect(validRed(run(output, 100, path), path, ['rejects_empty'])).toBe(true)
+    expect(validRed(run(output, 100, path), path, inTests('exports_async'), true)).toBe(false)
+    expect(validRed(run(output, 100, path), path, inTests('rejects_empty'))).toBe(true)
   })
 
   test('a TAP report where another test errors still names the red of the test the proof adds', () => {
@@ -4888,5 +4923,501 @@ describe('The reporting Hemera adds to a proof’s command (#342, round 9)', () 
     expect(wordsOf(line)).toContain(`--outputFile.json=${path}`)
     const node = withReporting('node --test tests/', path)?.line ?? ''
     expect(wordsOf(node)).toContain(`--test-reporter-destination=${path}`)
+  })
+})
+
+/** A Rust module of the crate `acme` whose test `saves` fails (`src/a.rs`). */
+const RUST_MODULE_A = `#[cfg(test)]
+mod tests {
+    #[test]
+    fn saves() {
+        println!("saving from a");
+        assert_eq!(super::super::double(1), 3);
+    }
+}
+`
+/** Another module of the crate, its test of the same name passing (`src/b.rs`). */
+const RUST_MODULE_B = RUST_MODULE_A.replace('from a', 'from b').replace('3);', '2);')
+/** The crate's root (`src/lib.rs`): a doctest of `double` that fails, and a test `double`. */
+const RUST_CRATE_ROOT = `//! \`\`\`
+//! assert_eq!(acme::double(2), 5);
+//! \`\`\`
+pub mod a;
+pub mod b;
+
+/// \`\`\`
+/// assert_eq!(acme::double(1), 3);
+/// \`\`\`
+pub fn double(n: i32) -> i32 {
+    n * 2
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn double() {
+        assert_eq!(super::double(2), 4);
+    }
+}
+`
+/** Two integration tests of the crate: \`tests/c.rs\`, which fails, and \`tests/d.rs\`. */
+const RUST_INTEGRATION_C = `#[test]
+fn saves() {
+    assert_eq!(acme::double(2), 5);
+}
+`
+const RUST_INTEGRATION_D = RUST_INTEGRATION_C.replace('5);', '4);')
+
+/** The tests a new Rust file declares, as a proof adding it reads them. */
+const rustFile = (code: string) => addedTests({ insertion: 'new_file', code, patch: null })
+
+/** go test, Go 1.27, `./...`: `TestSaves` fails in package `pkg/a`; its namesake of `pkg/b` passes. */
+const GO_TWO_PACKAGES = [
+  '--- FAIL: TestSaves (0.00s)',
+  '    saves_test.go:6: got 1, want 2',
+  'FAIL',
+  'FAIL\texample.com/acme/pkg/a\t0.002s',
+  'ok  \texample.com/acme/pkg/b\t0.002s',
+  '?   \texample.com/acme/cmd/acme\t[no test files]',
+  'FAIL',
+].join('\n')
+
+/** A Go test file of package `b` whose test runs a subtest `case 1`. */
+const GO_SUBTEST_FILE = `package b
+
+import "testing"
+
+func TestSaves(t *testing.T) {
+	t.Run("case 1", func(t *testing.T) {
+		if got := 1; got != 2 {
+			t.Errorf("got %d, want 2", got)
+		}
+	})
+}
+`
+
+describe('A Go or Rust red is read within its package (#384)', () => {
+  const twoModules = captured('cargo-test-two-modules-binaries')
+
+  test('Rust: a test failing in module a is not the red of a same-named test of module b', () => {
+    expect(run(twoModules, 101, 'src/b.rs').classification).toBe('assertion_failed')
+    expect(validRed(run(twoModules, 101, 'src/b.rs'), 'src/b.rs', rustFile(RUST_MODULE_B))).toBe(
+      false,
+    )
+    expect(validRed(run(twoModules, 101, 'src/a.rs'), 'src/a.rs', rustFile(RUST_MODULE_A))).toBe(
+      true,
+    )
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = twoModules.replace('panicked at src/a.rs:6:9:', 'panicked at src/b.rs:3:5:')
+    expect(validRed(run(helped, 101, 'src/b.rs'), 'src/b.rs', rustFile(RUST_MODULE_B))).toBe(false)
+  })
+
+  test('Rust: an integration test failing in tests/c.rs is not the red of a same-named test of tests/d.rs', () => {
+    const d = 'tests/d.rs'
+    expect(validRed(run(twoModules, 101, d), d, rustFile(RUST_INTEGRATION_D))).toBe(false)
+    const c = 'tests/c.rs'
+    expect(validRed(run(twoModules, 101, c), c, rustFile(RUST_INTEGRATION_C))).toBe(true)
+    // A module's test of the same name is no integration test's either way round.
+    expect(validRed(run(twoModules, 101, d), d, rustFile(RUST_MODULE_A))).toBe(false)
+  })
+
+  test('Rust: a doctest failing is not the red of a test of the same name', () => {
+    const path = 'src/lib.rs'
+    expect(validRed(run(twoModules, 101, path), path, rustFile(RUST_CRATE_ROOT))).toBe(false)
+  })
+
+  test('Rust: with --nocapture, the tests of two modules and two binaries interleaved are each read in their own', () => {
+    const output = captured('cargo-test-two-modules-nocapture')
+    const cases = [
+      ['src/a.rs', RUST_MODULE_A, true],
+      ['src/b.rs', RUST_MODULE_B, false],
+      ['tests/c.rs', RUST_INTEGRATION_C, true],
+      ['tests/d.rs', RUST_INTEGRATION_D, false],
+    ] as const
+    for (const [path, code, red] of cases) {
+      expect([path, validRed(run(output, 101, path), path, rustFile(code))]).toEqual([path, red])
+    }
+  })
+
+  test('Rust: a panic that is another error in tests/c.rs does not refuse the assertion of tests/d.rs', () => {
+    const output = twoModules
+      .replace(
+        'panicked at tests/c.rs:3:5:\nassertion `left == right` failed',
+        'panicked at tests/c.rs:3:5:\ncalled `Option::unwrap()` on a `None` value',
+      )
+      .replace(
+        'running 1 test\ntest saves ... ok',
+        [
+          'running 1 test',
+          'test saves ... FAILED',
+          '',
+          'failures:',
+          '',
+          '---- saves stdout ----',
+          '',
+          "thread 'saves' (469210) panicked at tests/d.rs:3:5:",
+          'assertion `left == right` failed',
+          '  left: 4',
+          ' right: 5',
+          '',
+          'failures:',
+          '    saves',
+        ].join('\n'),
+      )
+    const d = 'tests/d.rs'
+    expect(validRed(run(output, 101, d), d, rustFile(RUST_INTEGRATION_D))).toBe(true)
+    const c = 'tests/c.rs'
+    expect(validRed(run(output, 101, c), c, rustFile(RUST_INTEGRATION_C), true)).toBe(false)
+  })
+
+  test("Rust: in a workspace's run, a member's red is told apart from no other member's: the key line decides", () => {
+    const output = captured('cargo-test-workspace')
+    for (const path of ['a/src/lib.rs', 'b/src/lib.rs']) {
+      const names = rustFile(RUST_MODULE_A)
+      expect(validRed(run(output, 101, path), path, names)).toBe(false)
+      expect(validRed(run(output, 101, path), path, names, true)).toBe(true)
+    }
+  })
+
+  test("Rust: a workspace's run stopped at a member's red is not the red of the root crate's test of the same path", () => {
+    const output = captured('cargo-test-workspace-stopped')
+    const path = 'src/lib.rs'
+    expect(validRed(run(output, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    expect(validRed(run(output, 101, path), path, rustFile(RUST_MODULE_A), true)).toBe(true)
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = output.replace('panicked at a/src/lib.rs:5:9:', 'panicked at src/lib.rs:5:9:')
+    expect(validRed(run(helped, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+  })
+
+  test("Rust: a member's red run through its own manifest is not the red of the root crate's test of the same path", () => {
+    // `cargo test --manifest-path member/Cargo.toml; cargo test`: no rerun hint names a package.
+    const output = captured('cargo-test-two-manifests')
+    const path = 'src/lib.rs'
+    expect(validRed(run(output, 0, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    expect(validRed(run(output, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    // The member's run alone: one binary, but its panic was raised in another file.
+    const member = output.slice(0, output.indexOf('   Compiling acme'))
+    expect(validRed(run(member, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+    expect(validRed(run(member, 101, path), path, rustFile(RUST_MODULE_A), true)).toBe(true)
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = output.replace(
+      'panicked at member/src/lib.rs:5:9:',
+      'panicked at src/lib.rs:5:9:',
+    )
+    expect(validRed(run(helped, 101, path), path, rustFile(RUST_MODULE_A))).toBe(false)
+  })
+
+  test('Rust: a crate in a folder of the repository is told apart from no other crate: the key line decides', () => {
+    const output = captured('cargo-test-workspace-root')
+    expect(validRed(run(output, 101, 'src/lib.rs'), 'src/lib.rs', rustFile(RUST_MODULE_A))).toBe(
+      true,
+    )
+    const member = 'm/src/lib.rs'
+    expect(validRed(run(output, 101, member), member, rustFile(RUST_MODULE_A))).toBe(false)
+    expect(validRed(run(output, 101, member), member, rustFile(RUST_MODULE_A), true)).toBe(true)
+    // Its panic raised in the declared test's file (a helper there) does not make it the test's.
+    const helped = output.replace('panicked at src/lib.rs:5:9:', 'panicked at m/src/lib.rs:5:9:')
+    expect(validRed(run(helped, 101, member), member, rustFile(RUST_MODULE_A))).toBe(false)
+  })
+
+  test('Rust: a failure whose Running line was cut off is uncertain: the key line decides', () => {
+    const cut = twoModules.slice(twoModules.indexOf('\nrunning 3 tests'))
+    for (const path of ['src/a.rs', 'src/b.rs']) {
+      const names = rustFile(path === 'src/a.rs' ? RUST_MODULE_A : RUST_MODULE_B)
+      expect(validRed(run(cut, 101, path), path, names)).toBe(false)
+      expect(validRed(run(cut, 101, path), path, names, true)).toBe(true)
+    }
+    // Uncertain, a failure that may be the test's still refuses it when it is another error.
+    const unwrapped = cut.replace(
+      'panicked at src/a.rs:6:9:\nassertion `left == right` failed',
+      'panicked at src/a.rs:6:9:\ncalled `Option::unwrap()` on a `None` value',
+    )
+    const a = 'src/a.rs'
+    expect(validRed(run(unwrapped, 101, a), a, rustFile(RUST_MODULE_A), true)).toBe(false)
+  })
+
+  test('Rust: Windows paths and CRLF line ends are read as on Linux', () => {
+    const output = twoModules
+      .replace(
+        'unittests src/lib.rs (target/debug/deps/',
+        'unittests src\\lib.rs (target\\debug\\deps\\',
+      )
+      .replace(
+        'tests/c.rs (target/debug/deps/c-0e8fa604be354400)',
+        'tests\\c.rs (target\\debug\\deps\\c-0e8fa604be354400.exe)',
+      )
+      .replace(
+        'tests/d.rs (target/debug/deps/d-53b860629dae7d46)',
+        'tests\\d.rs (target\\debug\\deps\\d-53b860629dae7d46.exe)',
+      )
+      .replaceAll('\n', '\r\n')
+    const cases = [
+      ['src\\a.rs', RUST_MODULE_A, true],
+      ['src/b.rs', RUST_MODULE_B, false],
+      ['tests\\c.rs', RUST_INTEGRATION_C, true],
+      ['tests\\d.rs', RUST_INTEGRATION_D, false],
+    ] as const
+    for (const [path, code, red] of cases) {
+      expect([path, validRed(run(output, 101, path), path, rustFile(code))]).toEqual([path, red])
+    }
+  })
+
+  test("Rust: cargo-nextest's binary names the test's binary; two crates, or a binary it did not show, make it uncertain", () => {
+    const failing = (id: string) => [
+      `        FAIL [   0.004s] (1/2) ${id} saves`,
+      '  stderr ───',
+      '',
+      "    thread 'saves' (1510136) panicked at tests/c.rs:3:5:",
+      '    assertion `left == right` failed',
+      '',
+    ]
+    const nextest = (binaries: number, ids: ReadonlyArray<string>) =>
+      [
+        `    Starting 2 tests across ${String(binaries)} binaries`,
+        ...failing(ids[0] ?? ''),
+        ...ids.slice(1).map((id) => `        PASS [   0.004s] (2/2) ${id} saves`),
+        '────────────',
+        '     Summary [   0.005s] 2 tests run: 1 passed, 1 failed, 0 skipped',
+        `        FAIL [   0.004s] (1/2) ${ids[0] ?? ''} saves`,
+        'error: test run failed',
+      ].join('\n')
+    const c = 'tests/c.rs'
+    const d = 'tests/d.rs'
+    const one = nextest(2, ['acme::c', 'acme::d'])
+    expect(validRed(run(one, 100, c), c, rustFile(RUST_INTEGRATION_C))).toBe(true)
+    expect(validRed(run(one, 100, d), d, rustFile(RUST_INTEGRATION_D))).toBe(false)
+    // Two crates of a workspace, each with a tests/c.rs: either one's.
+    const two = nextest(2, ['acme::c', 'other::c'])
+    expect(validRed(run(two, 100, c), c, rustFile(RUST_INTEGRATION_C))).toBe(false)
+    expect(validRed(run(two, 100, c), c, rustFile(RUST_INTEGRATION_C), true)).toBe(true)
+    // Stopped at the first failure: the binary it never showed may be another crate's tests/c.rs.
+    const stopped = nextest(2, ['acme::c'])
+    expect(validRed(run(stopped, 100, c), c, rustFile(RUST_INTEGRATION_C))).toBe(false)
+  })
+
+  test("Rust: a test's modules are read from its file, its strings, chars, lifetimes and comments aside", () => {
+    const code = [
+      'mod outer {',
+      "    const OPEN: char = '{';",
+      '    const RAW: &str = r#"} " mod fake { "#;',
+      '    /* } /* nested } */ still a comment { */',
+      "    fn keep<'a>(text: &'a str) -> &'a str { text }",
+      '    #[cfg(test)]',
+      '    pub(crate) mod tests {',
+      '        // mod commented {',
+      '        #[test]',
+      '        fn saves() {',
+      '            assert_eq!("}", "{");',
+      '        }',
+      '    }',
+      '}',
+      '',
+    ].join('\n')
+    const output = [
+      '     Running unittests src/lib.rs (target/debug/deps/acme-d5b7551ab0e24432)',
+      '',
+      'running 1 test',
+      'test b::outer::tests::saves ... FAILED',
+      '',
+      'failures:',
+      '',
+      '---- b::outer::tests::saves stdout ----',
+      "thread 'b::outer::tests::saves' (1) panicked at src/b.rs:11:13:",
+      'assertion `left == right` failed',
+      '',
+      'failures:',
+      '    b::outer::tests::saves',
+      '',
+      'error: test failed, to rerun pass `--lib`',
+    ].join('\n')
+    const path = 'src/b.rs'
+    expect(validRed(run(output, 101, path), path, rustFile(code))).toBe(true)
+    // Its module path is not another module's.
+    const other = output.replaceAll('b::outer::tests::saves', 'b::tests::saves')
+    expect(validRed(run(other, 101, path), path, rustFile(code))).toBe(false)
+    // A file its reader is not certain of (a string never closed) names no module: the key line decides.
+    const broken = `${code}const NEVER: &str = "`
+    expect(validRed(run(output, 101, path), path, rustFile(broken))).toBe(false)
+    expect(validRed(run(output, 101, path), path, rustFile(broken), true)).toBe(true)
+  })
+
+  test('Go: a test failing in package pkg/a is not the red of a same-named test of package pkg/b', () => {
+    const b = 'pkg/b/saves_test.go'
+    expect(run(GO_TWO_PACKAGES, 1, b).classification).toBe('assertion_failed')
+    expect(validRed(run(GO_TWO_PACKAGES, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(validRed(run(GO_TWO_PACKAGES, 1, b), b, ['TestSaves'], true)).toBe(true)
+    const a = 'pkg/a/saves_test.go'
+    expect(validRed(run(GO_TWO_PACKAGES, 1, a), a, ['TestSaves'])).toBe(true)
+  })
+
+  test('Go: with go test -v, two packages each read in their own', () => {
+    const output = [
+      '=== RUN   TestSaves',
+      '    saves_test.go:6: got 1, want 2',
+      '--- FAIL: TestSaves (0.00s)',
+      'FAIL',
+      'FAIL\texample.com/acme/pkg/a\t0.002s',
+      '=== RUN   TestSaves',
+      '--- PASS: TestSaves (0.00s)',
+      'PASS',
+      'ok  \texample.com/acme/pkg/b\t0.002s',
+      'FAIL',
+    ].join('\n')
+    const b = 'pkg/b/saves_test.go'
+    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    const a = 'pkg/a/saves_test.go'
+    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+  })
+
+  test('Go: a subtest failing in package pkg/a is not the red of a same-named subtest of package pkg/b', () => {
+    const output = [
+      '--- FAIL: TestSaves (0.00s)',
+      '    --- FAIL: TestSaves/case_1 (0.00s)',
+      '        saves_test.go:9: got 1, want 2',
+      'FAIL',
+      'FAIL\texample.com/acme/pkg/a\t0.002s',
+      'ok  \texample.com/acme/pkg/b\t0.002s',
+      'FAIL',
+    ].join('\n')
+    const subtests = addedTests({
+      insertion: 'new_file',
+      code: GO_SUBTEST_FILE,
+      patch: null,
+    }).filter((name) => Predicate.hasProperty(name, 'subtest'))
+    expect(subtests).toHaveLength(1)
+    const b = 'pkg/b/saves_test.go'
+    expect(validRed(run(output, 1, b), b, subtests)).toBe(false)
+    const a = 'pkg/a/saves_test.go'
+    expect(validRed(run(output, 1, a), a, subtests)).toBe(true)
+  })
+
+  test("Go: a panic in package pkg/a does not refuse the assertion of package pkg/b's test of the same name", () => {
+    const output = [
+      '--- FAIL: TestSaves (0.00s)',
+      'panic: runtime error: invalid memory address or nil pointer dereference [recovered]',
+      '\tpanic: runtime error: invalid memory address or nil pointer dereference',
+      '[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x4f1b2a]',
+      'FAIL\texample.com/acme/pkg/a\t0.003s',
+      '--- FAIL: TestSaves (0.00s)',
+      '    saves_test.go:6: got 1, want 2',
+      'FAIL',
+      'FAIL\texample.com/acme/pkg/b\t0.002s',
+      'FAIL',
+    ].join('\n')
+    const b = 'pkg/b/saves_test.go'
+    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(true)
+  })
+
+  test("Go: gotestsum's package names the test's package", () => {
+    const output = [
+      '✖  pkg/a (2ms)',
+      '✓  pkg/b (1ms)',
+      '',
+      '=== Failed',
+      '=== FAIL: pkg/a TestSaves (0.00s)',
+      '    saves_test.go:6: got 1, want 2',
+      '',
+      'DONE 2 tests, 1 failure in 0.002s',
+    ].join('\n')
+    const b = 'pkg/b/saves_test.go'
+    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    const a = 'pkg/a/saves_test.go'
+    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+  })
+
+  test('Go: go test -json of two packages is not read: never a red by name', () => {
+    const output = [
+      '{"Action":"output","Package":"example.com/acme/pkg/a","Test":"TestSaves","Output":"--- FAIL: TestSaves (0.00s)\\n"}',
+      '{"Action":"fail","Package":"example.com/acme/pkg/a","Test":"TestSaves","Elapsed":0}',
+      '{"Action":"pass","Package":"example.com/acme/pkg/b","Test":"TestSaves","Elapsed":0}',
+    ].join('\n')
+    const b = 'pkg/b/saves_test.go'
+    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+  })
+
+  test('Go: a failure whose package line is missing (the output cut short) is uncertain: the key line decides', () => {
+    const output = ['--- FAIL: TestSaves (0.00s)', '    saves_test.go:6: got 1, want 2'].join('\n')
+    const b = 'pkg/b/saves_test.go'
+    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(validRed(run(output, 1, b), b, ['TestSaves'], true)).toBe(true)
+    // Uncertain, a failure that may be the test's still refuses it when it is another error.
+    const panicked = output.replace('    saves_test.go:6: got 1, want 2', 'panic: boom [recovered]')
+    expect(validRed(run(panicked, 1, b), b, ['TestSaves'], true)).toBe(false)
+  })
+
+  test("Go: a test's folder that two printed packages end with is uncertain: the key line decides", () => {
+    const output = GO_TWO_PACKAGES.replace('example.com/acme/pkg/b', 'example.com/acme/x/pkg/a')
+    const a = 'pkg/a/saves_test.go'
+    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(false)
+    expect(validRed(run(output, 1, a), a, ['TestSaves'], true)).toBe(true)
+  })
+
+  test("Go: a test at the module's root is its package's when every other printed package is under it, or gotestsum's `.`", () => {
+    const path = 'saves_test.go'
+    const output = GO_TWO_PACKAGES.replace('example.com/acme/pkg/a', 'example.com/acme')
+    expect(validRed(run(output, 1, path), path, ['TestSaves'])).toBe(true)
+    // A package outside it: which one is the module's root is not certain, the key line decides.
+    const outside = output.replace('example.com/acme/pkg/b', 'example.com/other')
+    expect(validRed(run(outside, 1, path), path, ['TestSaves'])).toBe(false)
+    expect(validRed(run(outside, 1, path), path, ['TestSaves'], true)).toBe(true)
+    // A package's test is not the root's.
+    expect(validRed(run(GO_TWO_PACKAGES, 1, path), path, ['TestSaves'])).toBe(false)
+    const gotestsum = '=== FAIL: . TestSaves (0.00s)\n    saves_test.go:6: got 1, want 2\n'
+    expect(validRed(run(gotestsum, 1, path), path, ['TestSaves'])).toBe(true)
+    const elsewhere = gotestsum.replace('FAIL: .', 'FAIL: pkg/a')
+    expect(validRed(run(elsewhere, 1, path), path, ['TestSaves'])).toBe(false)
+  })
+
+  test('Go: Windows paths and CRLF line ends are read as on Linux', () => {
+    const output = GO_TWO_PACKAGES.replaceAll('\n', '\r\n')
+    const b = 'pkg\\b\\saves_test.go'
+    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    const a = 'pkg\\a\\saves_test.go'
+    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+  })
+
+  test('the package of each Go and Rust failure is read in linear time on long outputs', () => {
+    const go = (size: number) =>
+      Array.from({ length: size }, (_, at) =>
+        [
+          '--- FAIL: TestSaves (0.00s)',
+          '    saves_test.go:6: got 1, want 2',
+          'FAIL',
+          `FAIL\texample.com/acme/pkg/p${String(at)}\t0.002s`,
+        ].join('\n'),
+      ).join('\n')
+    const goPath = 'pkg/b/saves_test.go'
+    const goRead = (output: string) =>
+      expect(validRed(run(output, 1, goPath), goPath, ['TestSaves'])).toBe(false)
+    expect(growth(go, 2_000, goRead)).toBeLessThan(24)
+    const rust = (size: number) =>
+      Array.from({ length: size }, (_, at) =>
+        [
+          `     Running tests/t${String(at)}.rs (target/debug/deps/t${String(at)}-0e8fa604be354400)`,
+          '',
+          'running 1 test',
+          'test saves ... FAILED',
+          '',
+          'failures:',
+          '    saves',
+          '',
+          `error: test failed, to rerun pass \`--test t${String(at)}\``,
+        ].join('\n'),
+      ).join('\n')
+    const rustPath = 'tests/d.rs'
+    const rustRead = (output: string) =>
+      expect(validRed(run(output, 101, rustPath), rustPath, rustFile(RUST_INTEGRATION_D))).toBe(
+        false,
+      )
+    expect(growth(rust, 500, rustRead)).toBeLessThan(24)
+    const source = (size: number) =>
+      Array.from(
+        { length: size },
+        (_, at) =>
+          `mod m${String(at)} {\n    const C: char = '{';\n    #[test]\n    fn saves_${String(at)}() {}\n}\n`,
+      ).join('')
+    const sourceRead = (code: string) =>
+      expect(rustFile(code)).toHaveLength(code.split('#[test]').length - 1)
+    expect(growth(source, 500, sourceRead)).toBeLessThan(24)
   })
 })
