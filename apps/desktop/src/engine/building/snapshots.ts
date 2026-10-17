@@ -32,6 +32,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -960,10 +961,20 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                         'work',
                         {
                           env,
-                          input: Buffer.from(paths.map((path) => `:(literal)${path}\0`).join('')),
+                          input: Buffer.from(
+                            paths.map((path) => pathspecOf(repository.folder, path)).join(''),
+                          ),
                         },
                       ).pipe(Effect.asVoid)
-                const ordinary = pending.filter(({ path }) => !sensitive(path))
+                // A changed path that is now a folder Git would walk into (a tracked file replaced
+                // by one, or by a junction) is never handed to `add`: what it holds is listed on its
+                // own, and the path leaves the tree.
+                const folders = pending.filter(
+                  ({ path }) => !sensitive(path) && walkedInto(repository.folder, path),
+                )
+                const ordinary = pending.filter(
+                  ({ path }) => !sensitive(path) && !folders.some((one) => one.path === path),
+                )
                 // Git refuses a listed path that matches nothing: an untracked file removed since
                 // it was listed. The add is asked once more without those.
                 yield* addOnly(ordinary.map(({ path }) => path)).pipe(
@@ -977,10 +988,11 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                     ),
                   ),
                 )
-                if (dropped.length > 0) {
+                const removed = [...dropped, ...folders.map(({ path }) => path)]
+                if (removed.length > 0) {
                   yield* run(
                     repository.folder,
-                    [...WHOLE_INDEX, 'update-index', '--force-remove', '--', ...dropped],
+                    [...WHOLE_INDEX, 'update-index', '--force-remove', '--', ...removed],
                     'work',
                     { env },
                   )
@@ -1293,6 +1305,39 @@ function regularFileIn(folder: string, path: string): string | null {
     return realpathSync.native(real) === real && lstatSync(real).isFile() ? real : null
   } catch {
     return null
+  }
+}
+
+/**
+ * A listed path as `add` reads it: that path and nothing under it, so a file replaced by a folder
+ * since it was listed adds nothing it holds. A nested repository (listed `sub/`) is added as its
+ * commit, and a link as itself: Git walks into neither, and refuses a pathspec beyond a link.
+ */
+function pathspecOf(folder: string, path: string): string {
+  const only = `:(literal)${path}\0`
+  if (path.endsWith('/')) return only
+  try {
+    if (lstatSync(join(folder, path)).isSymbolicLink()) return only
+  } catch {}
+  return `${only}:(exclude,glob)${path.replace(/[\\*?[\]]/g, '\\$&')}/**\0`
+}
+
+/**
+ * Whether Git would walk into a repository's path: a folder, or on Windows a link to one (Git for
+ * Windows walks a junction as a folder). A nested repository, listed `sub/`, is never walked.
+ */
+function walkedInto(folder: string, path: string): boolean {
+  if (path.endsWith('/')) return false
+  try {
+    const found = lstatSync(join(folder, path))
+    return (
+      found.isDirectory() ||
+      (process.platform === 'win32' &&
+        found.isSymbolicLink() &&
+        statSync(join(folder, path)).isDirectory())
+    )
+  } catch {
+    return false
   }
 }
 
