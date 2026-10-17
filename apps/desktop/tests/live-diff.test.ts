@@ -10,7 +10,15 @@
  * Workspace as the user or through the Builder's tools.
  */
 
-import { readFileSync, rmSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -581,6 +589,32 @@ describe('A sensitive file is listed, its content withheld', () => {
         after: DiffWithheld.make({ reason: 'content withheld: .env', size: SECRET.length }),
       }),
     )
+  })
+})
+
+describe('A file on disk is read into the diff only as itself', () => {
+  test('an untracked link to a file outside the Workspace never shows that file', async (context) => {
+    const outside = join(work, 'outside-notes.txt')
+    writeFileSync(outside, 'OUTSIDE-NOTES-63\n')
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth()
+          try {
+            symlinkSync(outside, join(api, 'notes.md'), 'file')
+          } catch {
+            return null
+          }
+          const diff = yield* live(missionId)
+          return { diff, contents: yield* fileOf(missionId, 'api', 'notes.md') }
+        }),
+      ),
+    )
+    if (seen === null) return context.skip()
+    expect(entry(seen.diff, 'api', 'notes.md')).toMatchObject({ letter: 'A', untracked: true })
+    expect(JSON.stringify(seen.contents)).not.toContain('OUTSIDE-NOTES-63')
   })
 })
 

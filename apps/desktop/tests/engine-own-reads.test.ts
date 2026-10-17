@@ -60,6 +60,18 @@ describe('A file the engine reads on its own behalf is never waited on (#434)', 
     await expect(openOwn(link, 1024)).rejects.toThrow(THROUGH_A_LINK)
   })
 
+  test('a link at the last name is refused without a real path, on every system', async (context) => {
+    const outside = join(work, 'outside.txt')
+    writeFileSync(outside, 'never read\n')
+    const link = join(work, 'package.json')
+    try {
+      symlinkSync(outside, link, 'file')
+    } catch {
+      context.skip()
+    }
+    expect(refusal(() => readOwnSync(link, 1024))).toBe(THROUGH_A_LINK)
+  })
+
   test('a file over the cap is refused, and one at the cap is read', async () => {
     const file = join(work, 'index')
     writeFileSync(file, 'x'.repeat(1025))
