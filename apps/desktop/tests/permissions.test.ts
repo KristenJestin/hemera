@@ -374,6 +374,49 @@ describe('A git config that writes always asks, whatever the judge says (#448)',
       reads.map(() => expect.stringMatching(/^run /)),
     )
   })
+  test('a git alias set on the line, or a subcommand that is none of Git’s own, asks; Git’s own commands and lfs ask nothing (round 4)', async () => {
+    const allows = Layer.succeed(Judge, {
+      judge: () => Effect.succeed({ verdict: 'allow', reason: 'risk 0.1' }),
+    })
+    const aliased = [
+      'git -c alias.x=config x core.fsmonitor ./watch.sh',
+      `git -c alias.x='!git config core.hooksPath h' x`,
+      'git --config-env=alias.x=AL x core.pager less',
+      'git co main',
+    ]
+    const usual = [
+      'git status',
+      'git diff',
+      'git log -1',
+      'git add .',
+      'git lfs pull',
+      'git rev-parse --is-inside-work-tree',
+    ]
+    const { answer, questions } = await withBuilder(
+      ({ builder, main }) =>
+        Effect.gen(function* () {
+          spawnSync('git', ['init', '-q', main])
+          const asked = []
+          for (const line of aliased) asked.push(yield* run(builder, line))
+          const config = readFileSync(join(main, '.git', 'config'), 'utf8')
+          const ran = []
+          for (const line of usual) ran.push(yield* run(builder, line))
+          return { asked, config, ran }
+        }),
+      { tools: { judge: allows } },
+    )
+    expect(answer.asked.map((one) => one.ok)).toEqual(aliased.map(() => false))
+    expect(questions).toEqual([
+      'sensitive place: a git alias set on its line (alias.x); sensitive place: a git command that does not read (git x)',
+      'sensitive place: a git alias set on its line (alias.x); sensitive place: a git command that does not read (git x)',
+      'sensitive place: a git alias set on its line (alias.x); sensitive place: a git command that does not read (git x)',
+      'sensitive place: a git command that does not read (git co)',
+    ])
+    expect(answer.config).not.toMatch(/fsmonitor|hooksPath|pager/)
+    expect(answer.ran.map((one) => one.text)).toEqual(
+      usual.map(() => expect.stringMatching(/^run /)),
+    )
+  })
 })
 
 describe('What cannot be read with certainty counts as outside', () => {

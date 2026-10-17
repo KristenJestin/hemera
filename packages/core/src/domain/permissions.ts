@@ -243,14 +243,18 @@ const GIT_VALUES = new Set([
  */
 export type GitSettingsWrite =
   | {
-      readonly file: 'repository' | 'hooks'
+      readonly kind: 'repository' | 'hooks'
       readonly folders: ReadonlyArray<string>
       readonly gitDir: string | null
     }
-  | { readonly file: 'named'; readonly folders: ReadonlyArray<string>; readonly path: string }
-  | { readonly file: 'global' }
-  | { readonly file: 'system' }
-  | { readonly file: 'unread' }
+  | { readonly kind: 'named'; readonly folders: ReadonlyArray<string>; readonly path: string }
+  | { readonly kind: 'global' }
+  | { readonly kind: 'system' }
+  | { readonly kind: 'unread' }
+  /** An alias set on the line itself (`-c alias.x=…`): what it runs is not read. */
+  | { readonly kind: 'alias'; readonly setting: string }
+  /** A subcommand that is none of Git's own: an alias, or a program of that name. */
+  | { readonly kind: 'command'; readonly name: string }
 
 /**
  * The read actions of `git config`, by how many words after them they take at most: a name, and a
@@ -296,6 +300,214 @@ const CONFIG_VALUES = new Set([
   '--url',
 ])
 
+/**
+ * Git's own commands, and `lfs`, the one external command judged as Git's: what `git
+ * --list-cmds=main` lists for Git 2.55.0 on Linux, with what `git help -a` lists that it did not
+ * install there (`gitk`, `gitweb`, `scalar`, `sh-i18n`, `sh-setup`) and the credential helpers Git
+ * ships on macOS and Windows. Frozen: a command Git adds later asks until it is listed here. Any
+ * other subcommand is an alias, from the user's configuration or the agent's, or another program,
+ * and it is not read (#448).
+ */
+export const GIT_COMMANDS: ReadonlySet<string> = new Set([
+  'add',
+  'am',
+  'annotate',
+  'apply',
+  'archimport',
+  'archive',
+  'backfill',
+  'bisect',
+  'blame',
+  'branch',
+  'bugreport',
+  'bundle',
+  'cat-file',
+  'check-attr',
+  'check-ignore',
+  'check-mailmap',
+  'check-ref-format',
+  'checkout',
+  'checkout--worker',
+  'checkout-index',
+  'cherry',
+  'cherry-pick',
+  'citool',
+  'clean',
+  'clone',
+  'column',
+  'commit',
+  'commit-graph',
+  'commit-tree',
+  'config',
+  'count-objects',
+  'credential',
+  'credential-cache',
+  'credential-cache--daemon',
+  'credential-libsecret',
+  'credential-manager',
+  'credential-osxkeychain',
+  'credential-store',
+  'credential-wincred',
+  'cvsexportcommit',
+  'cvsimport',
+  'cvsserver',
+  'daemon',
+  'describe',
+  'diagnose',
+  'diff',
+  'diff-files',
+  'diff-index',
+  'diff-pairs',
+  'diff-tree',
+  'difftool',
+  'difftool--helper',
+  'fast-export',
+  'fast-import',
+  'fetch',
+  'fetch-pack',
+  'filter-branch',
+  'fmt-merge-msg',
+  'for-each-ref',
+  'for-each-repo',
+  'format-patch',
+  'format-rev',
+  'fsck',
+  'fsck-objects',
+  'fsmonitor--daemon',
+  'gc',
+  'get-tar-commit-id',
+  'gitk',
+  'gitweb',
+  'grep',
+  'gui',
+  'gui--askpass',
+  'gui--askyesno',
+  'hash-object',
+  'help',
+  'history',
+  'hook',
+  'http-backend',
+  'http-fetch',
+  'http-push',
+  'imap-send',
+  'index-pack',
+  'init',
+  'init-db',
+  'instaweb',
+  'interpret-trailers',
+  'last-modified',
+  'lfs',
+  'log',
+  'ls-files',
+  'ls-remote',
+  'ls-tree',
+  'mailinfo',
+  'mailsplit',
+  'maintenance',
+  'merge',
+  'merge-base',
+  'merge-file',
+  'merge-index',
+  'merge-octopus',
+  'merge-one-file',
+  'merge-ours',
+  'merge-recursive',
+  'merge-recursive-ours',
+  'merge-recursive-theirs',
+  'merge-resolve',
+  'merge-subtree',
+  'merge-tree',
+  'mergetool',
+  'mktag',
+  'mktree',
+  'multi-pack-index',
+  'mv',
+  'name-rev',
+  'notes',
+  'p4',
+  'pack-objects',
+  'pack-redundant',
+  'pack-refs',
+  'patch-id',
+  'pickaxe',
+  'prune',
+  'prune-packed',
+  'pull',
+  'push',
+  'quiltimport',
+  'range-diff',
+  'read-tree',
+  'rebase',
+  'receive-pack',
+  'reflog',
+  'refs',
+  'remote',
+  'remote-ext',
+  'remote-fd',
+  'remote-ftp',
+  'remote-ftps',
+  'remote-http',
+  'remote-https',
+  'repack',
+  'replace',
+  'replay',
+  'repo',
+  'request-pull',
+  'rerere',
+  'reset',
+  'restore',
+  'rev-list',
+  'rev-parse',
+  'revert',
+  'rm',
+  'scalar',
+  'send-email',
+  'send-pack',
+  'sh-i18n',
+  'sh-i18n--envsubst',
+  'sh-setup',
+  'shell',
+  'shortlog',
+  'show',
+  'show-branch',
+  'show-index',
+  'show-ref',
+  'sparse-checkout',
+  'stage',
+  'stash',
+  'status',
+  'stripspace',
+  'submodule',
+  'submodule--helper',
+  'subtree',
+  'svn',
+  'switch',
+  'symbolic-ref',
+  'tag',
+  'unpack-file',
+  'unpack-objects',
+  'update-index',
+  'update-ref',
+  'update-server-info',
+  'upload-archive',
+  'upload-archive--writer',
+  'upload-pack',
+  'url-parse',
+  'var',
+  'verify-commit',
+  'verify-pack',
+  'verify-tag',
+  'version',
+  'web--browse',
+  'whatchanged',
+  'worktree',
+  'write-tree',
+])
+
+/** The alias a setting Git is handed (`-c`, `--config-env`) defines, or null. */
+const aliasOf = (setting: string): string | null =>
+  /^alias\./i.test(setting) ? (setting.split('=')[0] ?? setting) : null
+
 /** Whether a setting Git is handed (`-c`, `--config-env`) names the template folder. */
 const namesTemplates = (setting: string): boolean => /^init\.templatedir=/i.test(setting)
 
@@ -316,7 +528,7 @@ function gitSettingsWrite(
     const word = args[at] ?? ''
     const value = args[at + 1]
     if (word === '-C' || word === '--git-dir') {
-      if (value === undefined) return { file: 'unread' }
+      if (value === undefined) return { kind: 'unread' }
       if (word === '-C') folders.push(value)
       else gitDir = value
       at += 2
@@ -327,7 +539,7 @@ function gitSettingsWrite(
       templates ||= namesTemplates(word.slice('--config-env='.length))
       at += 1
     } else if (GIT_VALUES.has(word)) {
-      if (value === undefined) return { file: 'unread' }
+      if (value === undefined) return { kind: 'unread' }
       if (word === '-c' || word === '--config-env') templates ||= namesTemplates(value)
       at += 2
     } else if (word.startsWith('-')) at += 1
@@ -338,10 +550,10 @@ function gitSettingsWrite(
   const rest = args.slice(at + 1)
   if (sub === 'init' || sub === 'clone') {
     templates ||= rest.some((word) => word === '--template' || word.startsWith('--template='))
-    return templates ? { file: 'hooks', folders, gitDir } : null
+    return templates ? { kind: 'hooks', folders, gitDir } : null
   }
   if (sub !== 'config') return null
-  let file: GitSettingsWrite = { file: 'repository', folders, gitDir }
+  let file: GitSettingsWrite = { kind: 'repository', folders, gitDir }
   let reads: number | null = null
   let writes = false
   const positional: string[] = []
@@ -353,15 +565,15 @@ function gitSettingsWrite(
       continue
     }
     if (word === '--') options = false
-    else if (word === '--global') file = { file: 'global' }
-    else if (word === '--system') file = { file: 'system' }
-    else if (word.startsWith('--file=')) file = { file: 'named', folders, path: word.slice(7) }
+    else if (word === '--global') file = { kind: 'global' }
+    else if (word === '--system') file = { kind: 'system' }
+    else if (word.startsWith('--file=')) file = { kind: 'named', folders, path: word.slice(7) }
     else if (CONFIG_WRITES.has(word)) writes = true
     else if (CONFIG_READS.has(word)) reads = reads === null ? (CONFIG_READS.get(word) ?? 0) : -1
     else if (CONFIG_VALUES.has(word)) {
       const value = rest[index + 1]
-      if (value === undefined) return { file: 'unread' }
-      if (word === '-f' || word === '--file') file = { file: 'named', folders, path: value }
+      if (value === undefined) return { kind: 'unread' }
+      if (word === '-f' || word === '--file') file = { kind: 'named', folders, path: value }
       index += 1
     }
   }
@@ -380,23 +592,61 @@ function gitSettingsWrite(
   return read ? null : file
 }
 
+/** The aliases a Git command's own options set, before its subcommand. */
+function aliasesSet(args: ReadonlyArray<string>): string[] {
+  const set: string[] = []
+  for (let at = 0; at < args.length; at += 1) {
+    const word = args[at] ?? ''
+    const setting =
+      word === '-c' || word === '--config-env'
+        ? args[at + 1]
+        : word.startsWith('--config-env=')
+          ? word.slice('--config-env='.length)
+          : undefined
+    const alias = setting === undefined ? null : aliasOf(setting)
+    if (alias !== null) set.push(alias)
+    if (GIT_VALUES.has(word)) at += 1
+    else if (!word.startsWith('-')) break
+  }
+  return set
+}
+
 /**
  * Every write a line's commands would make to what Git reads as its own, through any wrapper or
- * shell, read at every word as the refusals read them: each always asks, as a sensitive place
- * does. A `git config` is a read only when it says so and holds no write form; anything else asks.
+ * shell, read at every word as the refusals read them, and every Git command it runs that does not
+ * read (an alias set on the line, a subcommand that is none of Git's own), read on the programs the
+ * line starts: each always asks, as a sensitive place does. A `git config` is a read only when it
+ * says so and holds no write form; anything else asks.
  */
-export function gitSettingsWrites(
-  sequences: ReadonlyArray<ReadonlyArray<string>>,
-): ReadonlyArray<GitSettingsWrite> {
+export function gitSettingsWrites(action: EffectiveAction): ReadonlyArray<GitSettingsWrite> {
   const writes: GitSettingsWrite[] = []
-  for (const words of sequences) {
+  for (const words of action.sequences) {
     for (const [at, word] of words.entries()) {
       if (programName(word) !== 'git') continue
-      const write = gitSettingsWrite(words.slice(0, at), words.slice(at + 1))
+      const args = words.slice(at + 1)
+      for (const setting of aliasesSet(args)) writes.push({ kind: 'alias', setting })
+      const write = gitSettingsWrite(words.slice(0, at), args)
       if (write !== null) writes.push(write)
     }
   }
+  for (const [program = '', ...args] of action.programs) {
+    if (programName(program) !== 'git') continue
+    const { sub, at } = gitSubcommandAt(args)
+    if (at < args.length && !GIT_COMMANDS.has(sub)) writes.push({ kind: 'command', name: sub })
+  }
   return writes
+}
+
+/** Where a Git command's subcommand is, past Git's own options, and the subcommand as written. */
+function gitSubcommandAt(args: ReadonlyArray<string>) {
+  let at = 0
+  while (at < args.length) {
+    const word = args[at] ?? ''
+    if (GIT_VALUES.has(word)) at += 2
+    else if (word.startsWith('-')) at += 1
+    else break
+  }
+  return { sub: args[at] ?? '', at }
 }
 
 /** A Git command's subcommand and what follows it, past Git's own options. */

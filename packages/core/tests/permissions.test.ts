@@ -153,131 +153,130 @@ describe('A deletion of .git is refused wherever it hides', () => {
 
 describe('A git config that writes, or a template that brings hooks, is told with what it writes, wherever it hides (#448)', () => {
   const writesOf = (words: ReadonlyArray<string>, context = LINUX) =>
-    gitSettingsWrites(effectiveAction(words, context).sequences)
+    gitSettingsWrites(effectiveAction(words, context))
 
   test.each([
     [
       ['git', 'config', 'core.fsmonitor', './tools/watch.sh'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['git', '-C', 'api', 'config', 'core.fsmonitor', 'x'],
-      { file: 'repository', folders: ['api'], gitDir: null },
+      { kind: 'repository', folders: ['api'], gitDir: null },
     ],
     [
       ['git', '-C', 'a', '-C', 'b', 'config', 'k.v', 'x'],
-      { file: 'repository', folders: ['a', 'b'], gitDir: null },
+      { kind: 'repository', folders: ['a', 'b'], gitDir: null },
     ],
     [
       ['git', '--git-dir=.git', 'config', 'k.v', 'x'],
-      { file: 'repository', folders: [], gitDir: '.git' },
+      { kind: 'repository', folders: [], gitDir: '.git' },
     ],
     [
       ['git', '--git-dir', 'repo.git', 'config', 'k.v', 'x'],
-      { file: 'repository', folders: [], gitDir: 'repo.git' },
+      { kind: 'repository', folders: [], gitDir: 'repo.git' },
     ],
     [
       ['git', '-c', 'a.b=c', 'config', 'k.v', 'x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['git', 'config', '--local', '--add', 'k.v', 'x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['git', 'config', '--worktree', 'k.v', 'x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
-    [['git', 'config', 'set', 'k.v', 'x'], { file: 'repository', folders: [], gitDir: null }],
-    [['git', 'config', '--unset', 'k.v'], { file: 'repository', folders: [], gitDir: null }],
-    [['git', 'config', '-e'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', 'set', 'k.v', 'x'], { kind: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '--unset', 'k.v'], { kind: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '-e'], { kind: 'repository', folders: [], gitDir: null }],
     [
       ['git', 'config', '--file', '.git/config', 'k.v', 'x'],
-      { file: 'named', folders: [], path: '.git/config' },
+      { kind: 'named', folders: [], path: '.git/config' },
     ],
-    [['git', 'config', '-f', 'x.cfg', 'k.v', 'x'], { file: 'named', folders: [], path: 'x.cfg' }],
+    [['git', 'config', '-f', 'x.cfg', 'k.v', 'x'], { kind: 'named', folders: [], path: 'x.cfg' }],
     [
       ['git', '-C', 'api', 'config', '--file=x.cfg', 'k.v', 'x'],
-      { file: 'named', folders: ['api'], path: 'x.cfg' },
+      { kind: 'named', folders: ['api'], path: 'x.cfg' },
     ],
-    [['git', 'config', '--global', 'core.hooksPath', '/tmp/h'], { file: 'global' }],
-    [['git', 'config', '--system', 'k.v', 'x'], { file: 'system' }],
-    [['git', 'config', '-f'], { file: 'unread' }],
-    [['git', '-C'], { file: 'unread' }],
-    [['/usr/bin/git', 'config', 'k.v', 'x'], { file: 'repository', folders: [], gitDir: null }],
-    [['git.exe', 'CONFIG', 'k.v', 'x'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '--global', 'core.hooksPath', '/tmp/h'], { kind: 'global' }],
+    [['git', 'config', '--system', 'k.v', 'x'], { kind: 'system' }],
+    [['git', 'config', '-f'], { kind: 'unread' }],
+    [['git', '-C'], { kind: 'unread' }],
+    [['/usr/bin/git', 'config', 'k.v', 'x'], { kind: 'repository', folders: [], gitDir: null }],
     [
       ['sh', '-c', 'cd api && git config core.fsmonitor x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['env', 'A=1', 'git', 'config', 'k.v', 'x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['powershell', '-Command', 'git config core.fsmonitor x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     // `--show-*` never makes a read: Git takes `--show-scope` with a write (#448, round 3).
     [
       ['git', 'config', '--show-scope', 'core.fsmonitor', 'y'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['git', 'config', '--show-scope', 'filter.x.clean', 'evil'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['git', 'config', '--show-origin', 'core.hooksPath', 'hooks'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
-    [['git', 'config', '--show-scope'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '--show-scope'], { kind: 'repository', folders: [], gitDir: null }],
     // A read action with a write form, or more words than it takes, asks.
     [
       ['git', 'config', '--get', 'a.b', 'c', 'd'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
-    [['git', 'config', '--list', 'a.b'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '--list', 'a.b'], { kind: 'repository', folders: [], gitDir: null }],
     [
       ['git', 'config', '--get', '--unset', 'a.b'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
-    [['git', 'config', 'get', 'a.b', 'c'], { file: 'repository', folders: [], gitDir: null }],
-    [['git', 'config', '-e', '--list'], { file: 'repository', folders: [], gitDir: null }],
-    [['git', 'config', 'edit'], { file: 'repository', folders: [], gitDir: null }],
-    [['git', 'config', 'unset', 'a.b'], { file: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', 'get', 'a.b', 'c'], { kind: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', '-e', '--list'], { kind: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', 'edit'], { kind: 'repository', folders: [], gitDir: null }],
+    [['git', 'config', 'unset', 'a.b'], { kind: 'repository', folders: [], gitDir: null }],
     // A template puts its hooks into the repository's own hooks folder.
-    [['git', 'init', '--template=/tmp/t'], { file: 'hooks', folders: [], gitDir: null }],
-    [['git', 'init', '--template', '/tmp/t'], { file: 'hooks', folders: [], gitDir: null }],
+    [['git', 'init', '--template=/tmp/t'], { kind: 'hooks', folders: [], gitDir: null }],
+    [['git', 'init', '--template', '/tmp/t'], { kind: 'hooks', folders: [], gitDir: null }],
     [
       ['git', '-C', 'api', 'init', '--template=t'],
-      { file: 'hooks', folders: ['api'], gitDir: null },
+      { kind: 'hooks', folders: ['api'], gitDir: null },
     ],
     [
       ['git', 'clone', '--template=/tmp/t', 'https://example.test/r.git'],
-      { file: 'hooks', folders: [], gitDir: null },
+      { kind: 'hooks', folders: [], gitDir: null },
     ],
     [
       ['git', '-c', 'init.templateDir=/tmp/t', 'init'],
-      { file: 'hooks', folders: [], gitDir: null },
+      { kind: 'hooks', folders: [], gitDir: null },
     ],
     [
       ['git', '-c', 'INIT.TEMPLATEDIR=/tmp/t', 'clone', 'x'],
-      { file: 'hooks', folders: [], gitDir: null },
+      { kind: 'hooks', folders: [], gitDir: null },
     ],
-    [['GIT_TEMPLATE_DIR=/tmp/t', 'git', 'init'], { file: 'hooks', folders: [], gitDir: null }],
+    [['GIT_TEMPLATE_DIR=/tmp/t', 'git', 'init'], { kind: 'hooks', folders: [], gitDir: null }],
     [
       ['env', 'GIT_TEMPLATE_DIR=/tmp/t', 'git', 'init'],
-      { file: 'hooks', folders: [], gitDir: null },
+      { kind: 'hooks', folders: [], gitDir: null },
     ],
     // The command `git submodule foreach` hands to its shell is read as one.
     [
       ['git', 'submodule', 'foreach', 'git config core.fsmonitor x'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
     [
       ['git', 'submodule', '--quiet', 'foreach', '--recursive', 'git config --show-scope a.b c'],
-      { file: 'repository', folders: [], gitDir: null },
+      { kind: 'repository', folders: [], gitDir: null },
     ],
   ] as const)('%j writes %j', (words, write) => {
     expect(writesOf(words)).toEqual([write])
@@ -319,6 +318,66 @@ describe('A git config that writes, or a template that brings hooks, is told wit
     ['git', 'log', '--', 'config'],
     ['cat', '.git/config'],
   ])('%j writes nothing', (...words) => {
+    expect(writesOf(words)).toEqual([])
+  })
+})
+
+describe('A git alias does not read, wherever it comes from (#448, round 4)', () => {
+  const writesOf = (words: ReadonlyArray<string>) =>
+    gitSettingsWrites(effectiveAction(words, LINUX))
+
+  test.each([
+    [['git', '-c', 'alias.x=config', 'x', 'core.fsmonitor', 'y'], 'alias.x'],
+    [['git', '-c', 'alias.x=!git config core.hooksPath h', 'x'], 'alias.x'],
+    [['git', '--config-env=alias.x=AL', 'x', 'core.pager', 'less'], 'alias.x'],
+    [['git', '--config-env', 'alias.x=AL', 'x'], 'alias.x'],
+    [['git', '-c', 'ALIAS.St=status', 'status'], 'ALIAS.St'],
+    [['sh', '-c', `git -c alias.x='!sh -c id' x`], 'alias.x'],
+  ] as const)('%j sets the alias %s on its line, and asks', (words, setting) => {
+    expect(writesOf(words)).toContainEqual({ kind: 'alias', setting })
+  })
+
+  test('git.exe CONFIG is a write of the configuration, and, spelled so, none of Git’s own commands', () => {
+    expect(writesOf(['git.exe', 'CONFIG', 'k.v', 'x'])).toEqual([
+      { kind: 'repository', folders: [], gitDir: null },
+      { kind: 'command', name: 'CONFIG' },
+    ])
+  })
+
+  test.each([
+    [['git', '-c', 'alias.x=config', 'x', 'core.fsmonitor', 'y'], 'x'],
+    [['git', 'co', 'main'], 'co'],
+    [['git', 'flow', 'init'], 'flow'],
+    [['git', 'filter-repo', '--force'], 'filter-repo'],
+    [['git', 'Status'], 'Status'],
+    [['git', '-C', 'api', 's'], 's'],
+    [['sh', '-c', 'cd api && git last'], 'last'],
+    [['env', 'A=1', 'git', 'x'], 'x'],
+    [['git', 'submodule', 'foreach', 'git up'], 'up'],
+  ] as const)('%j runs %s, which is none of Git’s own commands, and asks', (words, name) => {
+    expect(writesOf(words)).toContainEqual({ kind: 'command', name })
+  })
+
+  test.each([
+    ['git', 'status'],
+    ['git', 'diff', '--stat'],
+    ['git', 'log', '--oneline', '-5'],
+    ['git', 'add', '.'],
+    ['git', 'commit', '-m', 'x'],
+    ['git', 'lfs', 'pull'],
+    ['git', 'rev-parse', 'HEAD'],
+    ['git', '-C', 'api', 'status'],
+    ['git', '--no-pager', 'log'],
+    ['git', '-c', 'color.ui=never', 'diff'],
+    ['git', 'help', '-a'],
+    ['git', '--version'],
+    ['git'],
+    ['git', 'stage', 'notes.md'],
+    ['git', 'worktree', 'list'],
+    ['git', 'credential-manager', 'get'],
+    ['grep', '-r', 'git', 'src'],
+    ['echo', 'git', 'x'],
+  ])('%j asks nothing', (...words) => {
     expect(writesOf(words)).toEqual([])
   })
 })
