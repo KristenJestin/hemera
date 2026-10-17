@@ -15,6 +15,10 @@
  *   hard links (`SECOND_NAME_REFUSED`, one place); a file only read may have several;
  * - a file read is one whose content the session may read (`./withholding.ts`, #392): a file in a
  *   sensitive place is never opened, its read refused as withheld.
+ * - a file whose content is withheld and whose change must still be seen (a Probe's capture,
+ *   #425) is opened for a keyed hash only (`keyedHashJudged`), its bytes never handed out;
+ * - a refusal says what was found: a link on the way, a file replaced or removed once opened, a
+ *   name that differs from the disk's only in case.
  *
  * A folder is used through its handle too: on Linux a name in it is reached through
  * `/proc/self/fd/<fd>/<name>`, which is the opened folder itself whatever happens to its path, so
@@ -25,6 +29,7 @@
  * keeps racing can beat: the residual put to the maintainer.
  */
 
+import { createHmac } from 'node:crypto'
 import {
   type BigIntStats,
   type Dirent,
@@ -62,17 +67,28 @@ export const THROUGH_A_LINK =
  * file is never used for, and why. It is read as any file (pnpm, bun and uv make one of every
  * dependency file, and a command that could plant one could as well copy the file); it is never
  * kept as evidence, where a hard link would carry a file from outside the Workspace into the
- * mission's evidence, and never written over, the rule #373 set for writes.
+ * mission's evidence, nor in a Probe's capture (#425), and never written over, the rule #373 set
+ * for writes.
  */
 const SECOND_NAME_REFUSED = {
   evidence:
     'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept as evidence',
+  capture:
+    'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept in a Probe’s capture',
   write:
     'it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never written over',
 } as const
 
 /** What a file with more than one name is refused for. */
 export type OneNameFor = keyof typeof SECOND_NAME_REFUSED
+
+/** Why a file is refused that another took the place of, or that was removed, once it was opened. */
+export const REPLACED =
+  'it was replaced or removed while it was opened, and a file is never used in place of the one judged'
+
+/** Why a file is refused whose name on the disk differs from the one asked only in case. */
+export const CASE_ONLY =
+  'its name on the disk differs from the one asked only in case, and a path is used only as the disk names it'
 
 /** Why a pipe, a device or a folder is not read or written as a file. */
 export const NOT_A_FILE = 'it is not a regular file (a pipe, a device or a folder)'
@@ -96,6 +112,8 @@ const NEVER_WAITING = BY_HANDLE ? constants.O_NONBLOCK | constants.O_NOFOLLOW : 
 /** The reasons a use of a judged path is refused rather than failed. */
 const JUDGED_REFUSALS: ReadonlyArray<string> = [
   THROUGH_A_LINK,
+  REPLACED,
+  CASE_ONLY,
   NOT_A_FILE,
   OVER_CAP,
   ...Object.values(SECOND_NAME_REFUSED),
@@ -122,22 +140,37 @@ const opened = (path: string, flags: number, mode?: number) =>
     throw codeOf(cause) === 'ELOOP' ? new NotJudged(THROUGH_A_LINK) : cause
   })
 
-/** Checks by name that `path` still leads to `real`: the check of a platform with no other. */
+/** Whether a platform's names fold case: two paths that differ only in case are one. */
+const FOLDS_CASE = process.platform === 'win32' || process.platform === 'darwin'
+
+/**
+ * Checks by name that `path` still leads to `real`: the check of a platform with no other. A path
+ * that leads there under another case only is said as such (Git's index can name a file in a case
+ * the disk does not), and refused all the same.
+ */
 export async function stillJudged(path: string, real: string = path): Promise<void> {
-  if ((await realpath(path)) !== real) throw new NotJudged(THROUGH_A_LINK)
+  const found = await realpath(path)
+  if (found === real) return
+  const caseOnly = FOLDS_CASE && found.toLowerCase() === real.toLowerCase()
+  throw new NotJudged(caseOnly ? CASE_ONLY : THROUGH_A_LINK)
 }
 
-/** Proves an open handle is at `real`: on the handle where the system says where, else by name. */
+/**
+ * Proves an open handle is at `real`: on the handle where the system says where, else by name. A
+ * handle whose file has no name left was replaced (renamed over) or removed after the open.
+ */
 async function proven(handle: FileHandle, path: string, real: string): Promise<void> {
+  const held = await handle.stat({ bigint: true })
+  const replaced = () => new NotJudged(held.nlink === 0n ? REPLACED : THROUGH_A_LINK)
   if (BY_HANDLE) {
     const at = await whereIs(handle).catch(() => null)
-    if (at !== real) throw new NotJudged(THROUGH_A_LINK)
+    if (at !== real) throw replaced()
     return
   }
-  const held = await handle.stat({ bigint: true })
   await stillJudged(path, real)
   const named = await stat(path, { bigint: true })
-  if (held.dev !== named.dev || held.ino !== named.ino) throw new NotJudged(THROUGH_A_LINK)
+  // The same name with no link on its way, and another file: this one was replaced.
+  if (held.dev !== named.dev || held.ino !== named.ino) throw new NotJudged(REPLACED)
 }
 
 /**
@@ -151,6 +184,8 @@ export type Opening =
       readonly real?: string
       readonly oneNameFor?: OneNameFor
       readonly withholding: Withholding
+      /** A suite's hold point, between the open and its proof. */
+      readonly opened?: () => Promise<void>
     }
 
 /**
@@ -174,6 +209,7 @@ export async function openJudged(path: string, options: Opening): Promise<FileHa
         )
       : await opened(path, constants.O_RDONLY | NEVER_WAITING)
   try {
+    if (read?.opened !== undefined) await read.opened()
     const file = await handle.stat({ bigint: true })
     if (!file.isFile()) throw new NotJudged(NOT_A_FILE)
     await proven(handle, path, real)
@@ -300,6 +336,30 @@ export async function readRegular(path: string): Promise<Buffer> {
   try {
     if (!(await handle.stat()).isFile()) throw new NotJudged(NOT_A_FILE)
     return await handle.readFile()
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * The keyed hash (HMAC-SHA256 under `key`) of the content of the file at a judged path, read
+ * through the handle that was proven, for a file whose content is withheld but whose change must
+ * still be seen (a Probe's capture, #425): it is opened whatever withholds it and has as many
+ * names as it has, and none of its bytes leaves this function. A pipe, a device or a folder, and a
+ * file not where it was judged, are refused as `openJudged` refuses them.
+ */
+export async function keyedHashJudged(
+  path: string,
+  key: Uint8Array,
+  real: string = path,
+): Promise<string> {
+  const handle = await opened(path, constants.O_RDONLY | NEVER_WAITING)
+  try {
+    if (!(await handle.stat()).isFile()) throw new NotJudged(NOT_A_FILE)
+    await proven(handle, path, real)
+    const keyed = createHmac('sha256', key)
+    for await (const chunk of handle.createReadStream({ autoClose: false })) keyed.update(chunk)
+    return keyed.digest('hex')
   } finally {
     await handle.close()
   }
