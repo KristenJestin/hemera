@@ -95,7 +95,6 @@ import { containedIn, resolvePath } from '../tools/paths.ts'
 import { fingerprintOf } from '../tools/read.ts'
 import { mutate } from '../transaction.ts'
 import { attributedIn } from './attempts.ts'
-import { goModuleOf } from './go-module.ts'
 import { type Loop, lineageIn, runningOf, taskOfFile } from './loop.ts'
 import { fileOf } from './place.ts'
 import { OutsideChanges } from './outside.ts'
@@ -208,6 +207,7 @@ export interface ProofParts {
       | 'placed'
       | 'test-reading'
       | 'test-read'
+      | 'red-ran'
       | 'greening'
       | 'handing'
       | 'greens-due'
@@ -1126,20 +1126,6 @@ export const buildingProofs = (parts: ProofParts) => {
     )
   }
 
-  /**
-   * The Go module of a proof's Go test file (#462), which tells its red's package apart: null for
-   * another file, and for one whose `go.mod` does not read.
-   */
-  const goModuleOfProof = (building: BuildingRow, proof: Proof) =>
-    Effect.gen(function* () {
-      const test = proof.test
-      if (test === undefined || !test.path.endsWith('.go')) return null
-      const folder = folderOf(building, test.repository)
-      if (folder === null) return null
-      const { root } = yield* placeOfBuilding(building)
-      return yield* onDisk(() => goModuleOf(root, folder, test.path))
-    }).pipe(Effect.orElseSucceed(() => null))
-
   /** A red phase's run judged (CT-35): recorded, held on a need, or handed back to the Builder. */
   const judgeRed = (building: BuildingRow, scenario: string, proof: Proof, run: ProofRun) =>
     Effect.gen(function* () {
@@ -1189,8 +1175,7 @@ export const buildingProofs = (parts: ProofParts) => {
               code: test.code,
               patch: test.patch ?? null,
             })
-      const goModule = yield* goModuleOfProof(building, proof)
-      if (validRed(run, test?.path ?? null, names, run.keyLineMatched, goModule)) {
+      if (validRed(run, test?.path ?? null, names, run.keyLineMatched, run.goModule)) {
         if (run.keyLineMatched === false) {
           const question = [
             `${scenario}'s red is not the one Planning saw.`,
@@ -1252,6 +1237,7 @@ export const buildingProofs = (parts: ProofParts) => {
       if (proof === null || !(yield* inPlace(building, proof))) return null
       const run = yield* runOf(building, scenario, 'red', proof)
       if ((yield* activeBuildingIn(database, building.missionId))?.id !== building.id) return run
+      yield* parts.hold('red-ran')
       yield* judgeRed(building, scenario, proof, run)
       // A red recorded once its tasks are done (a proof the Builder fixed late) runs its green.
       const after = yield* scenarioProofIn(database, building.id, scenario)

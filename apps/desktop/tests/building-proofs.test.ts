@@ -1410,6 +1410,37 @@ describe('A Go red read against the module its go.mod names (#462)', () => {
     expect(seen.events).toEqual([{ scenario: 'R1.S2', classification: 'assertion_failed' }])
   })
 
+  test('a go.mod changed between the end of the run and its judgement is not read: the module the run ran under decides', async () => {
+    const ran = Deferred.makeUnsafe<void>()
+    const changed = Deferred.makeUnsafe<void>()
+    const hold: BuilderHold = (point) =>
+      point === 'red-ran'
+        ? Effect.andThen(Deferred.succeed(ran, undefined), Deferred.await(changed))
+        : Effect.void
+    const seen = await proofsEngine(data, hold).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launchedWith((api) => ({
+            'R1.S2': goModuleProof(api, 'pkg/saves_test.go'),
+          }))
+          yield* Deferred.await(ran)
+          // A write once the run's locks are released: the printed package would now be the file's.
+          writeFileSync(join(yield* apiOf(mission.id), 'go.mod'), 'module example.com/m/internal\n')
+          yield* Deferred.succeed(changed, undefined)
+          yield* deliveredTo(mission.id, 'Fix the setup')
+          return {
+            proof: yield* proofsOf(mission.id),
+            events: yield* payloadsOf(mission.id, 'building.red_invalid'),
+          }
+        }),
+      ),
+    )
+    const s2 = seen.proof.scenarios.find((one) => one.scenario === 'R1.S2')
+    expect(s2?.state).toBe('waiting_red')
+    expect(seen.events).toEqual([{ scenario: 'R1.S2', classification: 'assertion_failed' }])
+  })
+
   test('the same red is the red of a test file at internal/pkg', async () => {
     const seen = await proofsEngine(data).run(({ profile }) =>
       within(
