@@ -933,10 +933,20 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                     ),
                   ),
                 )
-                const withheld = [...new Set(pending)].flatMap((path) => {
-                  const real = sensitive(path) ? regularFileIn(repository.folder, path) : null
+                const touched = [...new Set(pending)].filter(sensitive)
+                const withheld = touched.flatMap((path) => {
+                  const real = regularFileIn(repository.folder, path)
                   return real === null ? [] : [{ path, real }]
                 })
+                // A sensitive path that is not a regular file of the repository (a link, or a file a
+                // folder link leads to, which Git for Windows follows through a junction) is never
+                // handed to `add`, which would copy what it leads to: the first link on its way is
+                // left out of `add`, and the path out of the tree.
+                const dropped = touched.filter((path) => !withheld.some((one) => one.path === path))
+                const excluded = new Set([
+                  ...withheld.map(({ path }) => path),
+                  ...dropped.map((path) => linkOnTheWay(repository.folder, path)),
+                ])
                 yield* run(
                   repository.folder,
                   [
@@ -945,11 +955,19 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                     '--all',
                     '--',
                     '.',
-                    ...withheld.map(({ path }) => `:(exclude,literal)${path}`),
+                    ...[...excluded].map((path) => `:(exclude,literal)${path}`),
                   ],
                   'work',
                   { env },
                 )
+                if (dropped.length > 0) {
+                  yield* run(
+                    repository.folder,
+                    [...WHOLE_INDEX, 'update-index', '--force-remove', '--', ...dropped],
+                    'work',
+                    { env },
+                  )
+                }
                 for (const { path, real } of withheld) {
                   // Read at its real path, never waited on (#434): a pipe put there since is refused.
                   const bytes = yield* Effect.try({
@@ -1259,6 +1277,24 @@ function regularFileIn(folder: string, path: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * The first link (a symbolic link, or a junction on Windows) on the way of a repository's path,
+ * as a path of the repository; the path itself when none stands there. Git refuses a pathspec
+ * beyond a symbolic link, and Git for Windows walks into a junction as into a folder.
+ */
+function linkOnTheWay(folder: string, path: string): string {
+  const names = path.split('/')
+  for (let at = 1; at <= names.length; at += 1) {
+    const way = names.slice(0, at).join('/')
+    try {
+      if (lstatSync(join(folder, way)).isSymbolicLink()) return way
+    } catch {
+      return path
+    }
+  }
+  return path
 }
 
 /**

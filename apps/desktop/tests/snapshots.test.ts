@@ -1132,6 +1132,12 @@ describe('A checkpoint reads only the repository’s own Git folder, and never w
 
     const store = join(data, 'snapshots', `${seen.projectId}.git`)
     expect(treeFiles(store, seen.tree, objectsOf(main))).not.toContain('config/.env.local')
+    const everything = execFileSync(
+      'git',
+      ['cat-file', '--batch-all-objects', '--batch', '--unordered'],
+      { cwd: store, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    )
+    expect(everything).not.toContain('TOKEN=outside')
   })
 
   test.skipIf(process.platform === 'win32')(
