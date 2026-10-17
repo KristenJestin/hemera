@@ -111,6 +111,17 @@ export interface GitCallOptions {
   readonly input?: Uint8Array
 }
 
+/**
+ * What the engine's every Git call asks first (#457): why it may not run in `folder` (what shapes
+ * Git there changed since the user last allowed it), or null; and what is done once it has run.
+ */
+export interface GitSpawnGuard {
+  readonly before: (
+    folder: string,
+    args: ReadonlyArray<string>,
+  ) => { readonly refused: string | null; readonly after: () => void }
+}
+
 /** Runs one command in `folder` and answers the bytes it printed, as they are. */
 export type GitBytesSpawn = (
   folder: string,
@@ -122,10 +133,15 @@ export type GitBytesSpawn = (
 /**
  * The machine's spawn: a child with its arguments and no shell. Abandoned (interrupted, or cut at
  * its limit), it is ended, and the interruption returns once it has exited, not once it was told
- * to go. What it printed is answered as bytes: a blob is not text.
+ * to go. What it printed is answered as bytes: a blob is not text. With a guard, a call it refuses
+ * is answered as a failure in its words and nothing is spawned.
  */
 export const spawnGitBytes =
-  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitBytesSpawn =>
+  (
+    program: GitProgram,
+    mask: (text: string) => Masked<string> = SHAPES_ONLY,
+    guard?: GitSpawnGuard,
+  ): GitBytesSpawn =>
   (folder, args, kind, options = {}) => {
     const run = Effect.callback<Buffer, GitRefusal>((resume) => {
       const child = spawn(
@@ -204,7 +220,7 @@ export const spawnGitBytes =
         end(child)
       })
     })
-    return outsideTransaction(`run git ${args.join(' ')}`, run).pipe(
+    const spawned = outsideTransaction(`run git ${args.join(' ')}`, run).pipe(
       Effect.catchTag('SideEffectInTransaction', (refused) => Effect.die(refused)),
       Effect.timeoutOrElse({
         duration: LIMITS[kind],
@@ -214,13 +230,27 @@ export const spawnGitBytes =
           ),
       }),
     )
+    if (guard === undefined) return spawned
+    return Effect.suspend(() => {
+      const checked = guard.before(folder, args)
+      if (checked.refused !== null) {
+        return Effect.fail(
+          new GitFailed({ args: [...args], folder, stderr: mask(checked.refused) }),
+        )
+      }
+      return Effect.ensuring(spawned, Effect.sync(checked.after))
+    })
   }
 
 /** The same spawn, answering what Git printed as text. */
 export const spawnGit =
-  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitSpawn =>
+  (
+    program: GitProgram,
+    mask: (text: string) => Masked<string> = SHAPES_ONLY,
+    guard?: GitSpawnGuard,
+  ): GitSpawn =>
   (folder, args, kind) =>
-    spawnGitBytes(program, mask)(folder, args, kind).pipe(
+    spawnGitBytes(program, mask, guard)(folder, args, kind).pipe(
       Effect.map((printed) => printed.toString('utf8')),
     )
 
