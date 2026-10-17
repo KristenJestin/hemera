@@ -16,6 +16,7 @@
  */
 
 import {
+  type FixedFields,
   MAIN_CHECKOUT_NAME,
   type Masked,
   maskArguments,
@@ -59,9 +60,10 @@ export interface SecretsRegistry {
   readonly maskPrinted: (text: string) => Effect.Effect<Masked<string>>
   /**
    * A structured value the engine builds, with every string in it masked, and its credential
-   * fields whole; its names and tags kept, as its schema reads them back.
+   * fields whole; its names and tags kept, as its schema reads them back, and the fields `fixed`
+   * lists when they hold a literal it allows (#416).
    */
-  readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
+  readonly maskRecord: (record: Schema.JsonObject, fixed?: FixedFields) => Masked<Schema.JsonObject>
   /** The arguments an agent sent, masked as `maskRecord` masks a record, their names and tags too. */
   readonly maskArguments: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
@@ -92,7 +94,7 @@ export function secretsRegistry(): SecretsRegistry {
     mask: (text) => maskPrinted(text, values()),
     maskPaced: (text) => maskPrintedPaced(text, values()),
     maskPrinted: (text) => maskPrintedPaced(text, values()),
-    maskRecord: (record) => maskRecord(record, values()),
+    maskRecord: (record, fixed) => maskRecord(record, values(), fixed),
     maskArguments: (record) => maskArguments(record, values()),
   }
 }
