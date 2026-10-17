@@ -30,7 +30,19 @@
  */
 
 import { createHmac } from 'node:crypto'
-import { type BigIntStats, type Dirent, constants } from 'node:fs'
+import {
+  type BigIntStats,
+  type Dirent,
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import {
   type FileHandle,
   lstat,
@@ -82,6 +94,9 @@ export const CASE_ONLY =
 /** Why a pipe, a device or a folder is not read or written as a file. */
 export const NOT_A_FILE = 'it is not a regular file (a pipe, a device or a folder)'
 
+/** Why a file is not read: it is larger than what its reader reads of such a file. */
+export const OVER_CAP = 'it is larger than Hemera reads of such a file'
+
 /** Why a write is said to have failed when its folder moved while it was written. */
 export const MOVED =
   'its folder was moved away from where it was judged while it was written, and what was written went with it'
@@ -101,6 +116,7 @@ const JUDGED_REFUSALS: ReadonlyArray<string> = [
   REPLACED,
   CASE_ONLY,
   NOT_A_FILE,
+  OVER_CAP,
   ...Object.values(SECOND_NAME_REFUSED),
 ]
 
@@ -207,20 +223,114 @@ export async function openJudged(path: string, options: Opening): Promise<FileHa
   }
 }
 
-/** The whole file at a judged path (at `real`, when it is reached by another), read through the handle that was proven. */
+/** The bytes of an open file from `from` until `buffer` is full or the file ends: how many. */
+async function readInto(handle: FileHandle, buffer: Buffer, from = 0): Promise<number> {
+  if (from === buffer.length) return from
+  const { bytesRead } = await handle.read(buffer, from, buffer.length - from, from)
+  return bytesRead === 0 ? from : readInto(handle, buffer, from + bytesRead)
+}
+
+/** A whole open file of at most `cap` bytes, read through its handle; a larger one is refused. */
+async function readUpTo(handle: FileHandle, cap: number): Promise<Buffer> {
+  const { size } = await handle.stat()
+  if (size > cap) throw new NotJudged(OVER_CAP)
+  const buffer = Buffer.alloc(size)
+  return buffer.subarray(0, await readInto(handle, buffer))
+}
+
+/**
+ * The whole file at a judged path (at `real`, when it is reached by another), read through the
+ * handle that was proven; with `cap`, a file larger than that is refused, never read.
+ */
 export async function readJudged(
   path: string,
   options: {
     readonly real?: string
     readonly oneNameFor?: OneNameFor
     readonly withholding: Withholding
+    readonly cap?: number
   },
 ): Promise<Buffer> {
   const handle = await openJudged(path, options)
   try {
-    return await handle.readFile()
+    return options.cap === undefined ? await handle.readFile() : await readUpTo(handle, options.cap)
   } finally {
     await handle.close()
+  }
+}
+
+/**
+ * A file the engine reads on its own behalf at a real path it chose (a recorded write's, a
+ * script's), never for a session: opened without following a link as its last name and without
+ * waiting on a pipe, proven at that path, a regular file of at most `cap` bytes. Anything else is
+ * refused with why (`NotJudged`), at once. The handle is the caller's to close.
+ */
+export async function openOwn(real: string, cap: number): Promise<FileHandle> {
+  const handle = await opened(real, constants.O_RDONLY | NEVER_WAITING)
+  try {
+    const file = await handle.stat()
+    if (!file.isFile()) throw new NotJudged(NOT_A_FILE)
+    if (file.size > cap) throw new NotJudged(OVER_CAP)
+    await proven(handle, real, real)
+    return handle
+  } catch (cause) {
+    await handle.close()
+    throw cause
+  }
+}
+
+/** Proves an open descriptor is at `real`, as `proven` does a handle, without waiting. */
+function provenSync(file: number, path: string, real: string, held: BigIntStats): void {
+  if (BY_HANDLE) {
+    if (readlinkSync(`/proc/self/fd/${String(file)}`) !== real) throw new NotJudged(THROUGH_A_LINK)
+    return
+  }
+  if (realpathSync.native(path) !== real) throw new NotJudged(THROUGH_A_LINK)
+  const named = statSync(path, { bigint: true })
+  if (held.dev !== named.dev || held.ino !== named.ino) throw new NotJudged(THROUGH_A_LINK)
+}
+
+/** A file the engine read on its own behalf: its bytes, and what its handle said of it. */
+export interface OwnRead {
+  readonly bytes: Buffer
+  readonly stats: BigIntStats
+}
+
+/**
+ * A whole file the engine reads on its own behalf where it cannot wait (a synchronous step: a
+ * snapshot's copy of the index, a digest, a manifest): never through a link as its last name and
+ * never waiting on a pipe, then read through its descriptor only when it is a regular file of at
+ * most `cap` bytes; with `real`, only when the descriptor is proven at that real path, so no link
+ * stood on the way either. Anything else is refused with why (`NotJudged`), at once.
+ *
+ * Where the open has no flag for it (Windows), the descriptor must be the very file the last name
+ * was before the open (`lstat`): a link there, or put there in between, is refused rather than
+ * read.
+ */
+export function readOwnSync(path: string, cap: number, real?: string): OwnRead {
+  const named = lstatSync(path, { bigint: true })
+  let file: number
+  try {
+    file = openSync(path, constants.O_RDONLY | NEVER_WAITING)
+  } catch (cause) {
+    throw cause instanceof Error && codeOf(cause) === 'ELOOP'
+      ? new NotJudged(THROUGH_A_LINK)
+      : cause
+  }
+  try {
+    const stats = fstatSync(file, { bigint: true })
+    if (stats.dev !== named.dev || stats.ino !== named.ino) throw new NotJudged(THROUGH_A_LINK)
+    if (!stats.isFile()) throw new NotJudged(NOT_A_FILE)
+    if (stats.size > BigInt(cap)) throw new NotJudged(OVER_CAP)
+    if (real !== undefined) provenSync(file, path, real, stats)
+    const bytes = Buffer.alloc(Number(stats.size))
+    let length = 0
+    for (let read = -1; read !== 0 && length < bytes.length; length += read) {
+      read = readSync(file, bytes, length, bytes.length - length, length)
+    }
+    return { bytes: bytes.subarray(0, length), stats }
+  } finally {
+    closeSync(file)
   }
 }
 

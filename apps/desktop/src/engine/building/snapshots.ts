@@ -25,19 +25,19 @@
 import { isUtf8 } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   utimesSync,
+  writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 
 import { sensitivePlace } from '@hemera/core/domain'
 import { and, asc, count, countDistinct, eq, or } from 'drizzle-orm'
@@ -53,9 +53,31 @@ import {
   type EngineTransaction,
   refusedWhile,
 } from '../storage/database.ts'
-import { fileContents, missions, snapshotChanges, snapshotFiles } from '../storage/schema.ts'
+import {
+  fileContents,
+  missions,
+  projectRepositories,
+  projects,
+  snapshotChanges,
+  snapshotFiles,
+} from '../storage/schema.ts'
+import { readOwnSync } from '../tools/judged.ts'
 import { mutate } from '../transaction.ts'
 import { recordTreeIn } from './proof-store.ts'
+
+/**
+ * The most of a file a snapshot reads itself (the user's index, a sensitive file it withholds):
+ * far above any index Git writes, and what keeps a file planted there from filling the engine.
+ */
+export const READ_CAP = 256 * 1024 * 1024
+
+/**
+ * Why a snapshot is refused when the Git folder its repository names is not the repository's own
+ * (#439): a worktree's `.git` an agent pointed at a Git folder of its own making, whose index the
+ * snapshot would otherwise read.
+ */
+export const FOREIGN_GIT_FOLDER =
+  "its Git folder is not the repository's own (the Git folder of one of its Project's repositories in the main checkout, or a worktree's entry in it)"
 
 /** The folder of the data folder that holds the snapshot stores, one per Project. */
 export const SNAPSHOTS_FOLDER = 'snapshots'
@@ -629,6 +651,76 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           Effect.map((printed) => join(text(printed).trim(), 'objects')),
         )
 
+      /**
+       * The Git folders a snapshot of the mission's Project may read, as they really are: the
+       * shared one of each of its repositories in the main checkout. They are named by the main
+       * checkout, never by a Workspace an agent writes in.
+       */
+      /** The shared Git folder of a repository of a main checkout, once found: it does not move. */
+      const sharedOf = new Map<string, string>()
+      const ownGitFolders = (missionId: string) =>
+        Effect.gen(function* () {
+          const rows = yield* database
+            .select({ main: projects.mainCheckout, path: projectRepositories.path })
+            .from(missions)
+            .innerJoin(projects, eq(projects.id, missions.projectId))
+            .leftJoin(projectRepositories, eq(projectRepositories.projectId, projects.id))
+            .where(eq(missions.id, missionId))
+            .pipe(Effect.mapError(refusedWhile('reading the repositories of a snapshot')))
+          const folders = new Set(
+            rows.flatMap((row) =>
+              row.path === null ? [row.main] : [row.main, join(row.main, row.path)],
+            ),
+          )
+          const found = yield* Effect.forEach([...folders], (folder) => {
+            const known = sharedOf.get(folder)
+            if (known !== undefined) return Effect.succeed(Option.some(known))
+            return run(
+              folder,
+              ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+              'read',
+            ).pipe(
+              Effect.flatMap((printed) =>
+                Effect.try({ try: () => realpathSync.native(text(printed).trim()), catch: String }),
+              ),
+              Effect.tap((shared) => Effect.sync(() => sharedOf.set(folder, shared))),
+              Effect.option,
+            )
+          })
+          return found.flatMap(Option.toArray)
+        })
+
+      /**
+       * The index a snapshot of a repository copies, at its real path, and the objects it borrows:
+       * only from the repository's own Git folder (its shared one, or a worktree's entry in it),
+       * else refused with why (#439).
+       */
+      const gitFoldersOf = (repository: RepositoryPlace, missionId: string) =>
+        Effect.gen(function* () {
+          // Both in one call: each Git process is tens of milliseconds on Windows, and a Building
+          // takes dozens of snapshots (#442). Its own Git folder's `index` is the one Git uses (no
+          // GIT_INDEX_FILE is set).
+          const [common = '', own = ''] = text(
+            yield* run(
+              repository.folder,
+              ['rev-parse', '--path-format=absolute', '--git-common-dir', '--absolute-git-dir'],
+              'read',
+            ),
+          )
+            .trim()
+            .split('\n')
+          const real = (path: string) =>
+            Effect.try({ try: () => realpathSync.native(path), catch: String })
+          const shared = yield* real(common)
+          const folder = yield* real(own)
+          const project = yield* ownGitFolders(missionId)
+          const ownEntry = folder === shared || dirname(folder) === join(shared, 'worktrees')
+          if (!project.includes(shared) || !ownEntry) {
+            return yield* Effect.fail(`${FOREIGN_GIT_FOLDER}: ${folder}`)
+          }
+          return { index: join(folder, 'index'), objects: join(shared, 'objects') }
+        })
+
       /** What a call in the store is handed: the repository's objects to borrow, when it is there. */
       const borrowing = (repository: RepositoryPlace) =>
         objectsOf(repository.folder).pipe(
@@ -803,18 +895,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           // When it began: a snapshot that ends after a later one never makes its tree current.
           const takenAt = new Date().toISOString()
           const store = yield* storeOf(owner.missionId)
-          // The common folder and the index in one call: each Git process is tens of milliseconds
-          // on Windows, and a Building takes dozens of snapshots.
-          const [commonDir = '', index = ''] = text(
-            yield* run(
-              repository.folder,
-              ['rev-parse', '--path-format=absolute', '--git-common-dir', '--git-path', 'index'],
-              'read',
-            ),
-          )
-            .trim()
-            .split('\n')
-          const objects = join(commonDir, 'objects')
+          const { index, objects } = yield* gitFoldersOf(repository, owner.missionId)
           const alternate = { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateOf(objects) }
           const tree = yield* Effect.acquireUseRelease(
             Effect.try({
@@ -824,14 +905,20 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
             (scratch) =>
               Effect.gen(function* () {
                 const copy = join(scratch, 'index')
-                yield* Effect.try({ try: () => copyIndex(index, copy), catch: String })
+                yield* Effect.try({
+                  try: () => copyIndex(index, copy),
+                  catch: (cause) =>
+                    `the index ${index} is not read: ${cause instanceof Error ? cause.message : String(cause)}`,
+                })
                 const env = {
                   ...alternate,
                   GIT_INDEX_FILE: copy,
                   GIT_OBJECT_DIRECTORY: join(store, 'objects'),
                 }
-                // A sensitive file Git would add (untracked, or changed) is left out of `add`, and
-                // a stand-in holding only its fingerprint takes its place in the copied index.
+                // What Git would add (untracked, or changed), listed once: only those paths are
+                // added, never the folder, so a file or a link made there since is left to the
+                // next snapshot. A sensitive one is left out of `add`, and a stand-in holding only
+                // its fingerprint takes its place in the copied index.
                 const pending = fields(
                   text(
                     yield* run(
@@ -840,6 +927,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                         '--no-optional-locks',
                         'ls-files',
                         '-z',
+                        '-t',
                         '--others',
                         '--modified',
                         '--exclude-standard',
@@ -848,27 +936,73 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
                       { env },
                     ),
                   ),
+                ).map((line) => ({ untracked: line.startsWith('? '), path: line.slice(2) }))
+                const touched = [...new Set(pending.map(({ path }) => path))].filter(sensitive)
+                const withheld = touched.flatMap((path) => {
+                  const real = regularFileIn(repository.folder, path)
+                  return real === null ? [] : [{ path, real }]
+                })
+                // A sensitive path that is not a regular file of the repository (a link, or a file a
+                // folder link leads to, which Git for Windows follows through a junction) is left
+                // out of the tree, as it is out of `add`, which would copy what it leads to.
+                const dropped = touched.filter((path) => !withheld.some((one) => one.path === path))
+                const addOnly = (paths: ReadonlyArray<string>) =>
+                  paths.length === 0
+                    ? Effect.void
+                    : run(
+                        repository.folder,
+                        [
+                          ...WHOLE_INDEX,
+                          'add',
+                          '--all',
+                          '--pathspec-from-file=-',
+                          '--pathspec-file-nul',
+                        ],
+                        'work',
+                        {
+                          env,
+                          input: Buffer.from(
+                            paths.map((path) => pathspecOf(repository.folder, path)).join(''),
+                          ),
+                        },
+                      ).pipe(Effect.asVoid)
+                // A changed path that is now a folder Git would walk into (a tracked file replaced
+                // by one, or by a junction) is never handed to `add`: what it holds is listed on its
+                // own, and the path leaves the tree.
+                const folders = pending.filter(
+                  ({ path }) => !sensitive(path) && walkedInto(repository.folder, path),
                 )
-                const withheld = [...new Set(pending)].filter(
-                  (path) => sensitive(path) && regularFile(join(repository.folder, path)),
+                const ordinary = pending.filter(
+                  ({ path }) => !sensitive(path) && !folders.some((one) => one.path === path),
                 )
-                yield* run(
-                  repository.folder,
-                  [
-                    ...WHOLE_INDEX,
-                    'add',
-                    '--all',
-                    '--',
-                    '.',
-                    ...withheld.map((path) => `:(exclude,literal)${path}`),
-                  ],
-                  'work',
-                  { env },
+                // Git refuses a listed path that matches nothing: an untracked file removed since
+                // it was listed. The add is asked once more without those.
+                yield* addOnly(ordinary.map(({ path }) => path)).pipe(
+                  Effect.catchTag('GitFailed', () =>
+                    addOnly(
+                      ordinary
+                        .filter(
+                          ({ untracked, path }) => !untracked || present(repository.folder, path),
+                        )
+                        .map(({ path }) => path),
+                    ),
+                  ),
                 )
-                for (const path of withheld) {
+                const removed = [...dropped, ...folders.map(({ path }) => path)]
+                if (removed.length > 0) {
+                  yield* run(
+                    repository.folder,
+                    [...WHOLE_INDEX, 'update-index', '--force-remove', '--', ...removed],
+                    'work',
+                    { env },
+                  )
+                }
+                for (const { path, real } of withheld) {
+                  // Read at its real path, never waited on (#434): a pipe put there since is refused.
                   const bytes = yield* Effect.try({
-                    try: () => readFileSync(join(repository.folder, path)),
-                    catch: String,
+                    try: () => readOwnSync(real, READ_CAP, real).bytes,
+                    catch: (cause) =>
+                      `${path} is not read: ${cause instanceof Error ? cause.message : String(cause)}`,
                   })
                   const blob = text(
                     yield* run(repository.folder, ['hash-object', '-w', '--stdin'], 'work', {
@@ -1160,10 +1294,58 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
     }),
   )
 
-/** Whether a path is a regular file: a link or a folder is never read as a sensitive content. */
-function regularFile(path: string): boolean {
+/**
+ * The real path of a file of a repository when it is a regular file reached through no link, the
+ * repository's folder aside; null for anything else: a link, a folder, or a file a folder link
+ * leads to is never read as a sensitive content.
+ */
+function regularFileIn(folder: string, path: string): string | null {
   try {
-    return lstatSync(path).isFile()
+    const real = join(realpathSync.native(folder), path)
+    return realpathSync.native(real) === real && lstatSync(real).isFile() ? real : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A listed path as `add` reads it: that path and nothing under it, so a file replaced by a folder
+ * since it was listed adds nothing it holds. A nested repository (listed `sub/`) is added as its
+ * commit, and a link as itself: Git walks into neither, and refuses a pathspec beyond a link.
+ */
+function pathspecOf(folder: string, path: string): string {
+  const only = `:(literal)${path}\0`
+  if (path.endsWith('/')) return only
+  try {
+    if (lstatSync(join(folder, path)).isSymbolicLink()) return only
+  } catch {}
+  return `${only}:(exclude,glob)${path.replace(/[\\*?[\]]/g, '\\$&')}/**\0`
+}
+
+/**
+ * Whether Git would walk into a repository's path: a folder, or on Windows a link to one (Git for
+ * Windows walks a junction as a folder). A nested repository, listed `sub/`, is never walked.
+ */
+function walkedInto(folder: string, path: string): boolean {
+  if (path.endsWith('/')) return false
+  try {
+    const found = lstatSync(join(folder, path))
+    return (
+      found.isDirectory() ||
+      (process.platform === 'win32' &&
+        found.isSymbolicLink() &&
+        statSync(join(folder, path)).isDirectory())
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Whether something, a link included, stands at a repository's path. */
+function present(folder: string, path: string): boolean {
+  try {
+    lstatSync(join(folder, path))
+    return true
   } catch {
     return false
   }
@@ -1175,12 +1357,14 @@ function regularFile(path: string): boolean {
  * never be newer than the index, or a file rewritten at the same size in the second the index was
  * written would read as unchanged. Its times are the index's floored to the second: older or equal
  * whatever precision Git compares, where a `Date` rounds to the millisecond and can be newer.
+ * It is read at its real path in the repository's own Git folder as the engine reads a file on its
+ * own behalf (#439): a link, a pipe or a file over the cap there is refused, never waited on.
  */
 function copyIndex(from: string, to: string): void {
   try {
-    const { atimeNs, mtimeNs } = statSync(from, { bigint: true })
-    copyFileSync(from, to)
-    utimesSync(to, Number(atimeNs / 1_000_000_000n), Number(mtimeNs / 1_000_000_000n))
+    const { bytes, stats } = readOwnSync(from, READ_CAP, from)
+    writeFileSync(to, bytes)
+    utimesSync(to, Number(stats.atimeNs / 1_000_000_000n), Number(stats.mtimeNs / 1_000_000_000n))
   } catch (failure) {
     if (Predicate.hasProperty(failure, 'code') && failure.code === 'ENOENT') return
     throw failure

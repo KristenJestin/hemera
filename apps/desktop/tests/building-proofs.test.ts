@@ -66,10 +66,10 @@ import {
 import { readEvidence } from '../src/engine/memory/evidence.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { NeedOwners, answerNeed, expireNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
-import { PROOF_LIMIT, proofLimitFor } from '../src/engine/building/proof-runner.ts'
+import { PROOF_LIMIT, TEST_CAP, proofLimitFor } from '../src/engine/building/proof-runner.ts'
 import { saveCheck, setProofLimit } from '../src/engine/project-checks.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
-import { NOT_A_FILE, THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
+import { NOT_A_FILE, OVER_CAP, THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
 import { listActions } from '../src/engine/tools/actions.ts'
 import { fingerprintOf } from '../src/engine/tools/read.ts'
 import { Runs } from '../src/engine/runs.ts'
@@ -768,6 +768,100 @@ describe('A proof written only where Hemera judged it (#385)', () => {
         },
       ],
     ])
+  })
+})
+
+/**
+ * The mission launched with the export proof, `plant` run on its test file in `api` right before
+ * Hemera reads it for its red run, and the file put back once read, so the run itself runs the
+ * real test: the run recorded, its evidence, and whether the engine answered a call meanwhile.
+ */
+const ranAfter = (plant: (file: string) => void) => {
+  const reading = Deferred.makeUnsafe<void>()
+  const planted = Deferred.makeUnsafe<void>()
+  const read = Deferred.makeUnsafe<void>()
+  const back = Deferred.makeUnsafe<void>()
+  const hold: BuilderHold = (point) => {
+    if (point === 'test-reading') {
+      return Effect.andThen(Deferred.succeed(reading, undefined), Deferred.await(planted))
+    }
+    if (point === 'test-read') {
+      return Effect.andThen(Deferred.succeed(read, undefined), Deferred.await(back))
+    }
+    return Effect.void
+  }
+  return proofsEngine(data, hold).run(({ profile }) =>
+    within(
+      profile,
+      Effect.gen(function* () {
+        const { mission } = yield* launchedWith(exportProof)
+        yield* Deferred.await(reading)
+        const file = join(yield* apiOf(mission.id), EXPORT_PATH)
+        const original = readFileSync(file)
+        rmSync(file)
+        plant(file)
+        yield* Deferred.succeed(planted, undefined)
+        yield* Deferred.await(read)
+        // Another call of the engine, answered while the proof's test file was read.
+        const answered = yield* proofOf(mission.id, 'R1.S2')
+        rmSync(file)
+        writeFileSync(file, original)
+        yield* Deferred.succeed(back, undefined)
+        yield* until(
+          Effect.map(proofOf(mission.id, 'R1.S2'), (proof) => proof.runs.length > 0),
+          20_000,
+        )
+        const run = (yield* proofOf(mission.id, 'R1.S2')).runs[0]
+        const evidence = yield* readEvidence(mission.id, run?.evidenceId ?? '')
+        return {
+          answered: answered.scenario,
+          run,
+          evidence: new TextDecoder().decode(evidence.bytes),
+        }
+      }),
+    ),
+  )
+}
+
+describe('A proof’s test file read before its run (#434)', () => {
+  test.skipIf(process.platform === 'win32')(
+    'a proof’s test file replaced by a pipe is refused at once, and the engine answers another call meanwhile',
+    async () => {
+      const seen = await ranAfter((file) => execFileSync('mkfifo', [file]))
+      expect(seen.answered).toBe('R1.S2')
+      expect(seen.run).toMatchObject({ testSha256: null, testEvidenceId: null })
+      expect(seen.evidence).toContain(`Hemera did not read api/${EXPORT_PATH}: ${NOT_A_FILE}\n`)
+    },
+  )
+
+  test.skipIf(process.platform === 'win32')('a link to /dev/zero is refused', async () => {
+    const seen = await ranAfter((file) => symlinkSync('/dev/zero', file))
+    expect(seen.run).toMatchObject({ testSha256: null, testEvidenceId: null })
+    expect(seen.evidence).toContain(`Hemera did not read api/${EXPORT_PATH}: ${LEADS_OUT}\n`)
+  })
+
+  test('a test file over the cap is refused, never read whole', async () => {
+    const seen = await ranAfter((file) => writeFileSync(file, 'x'.repeat(TEST_CAP + 1)))
+    expect(seen.run).toMatchObject({ testSha256: null, testEvidenceId: null })
+    expect(seen.evidence).toContain(`Hemera did not read api/${EXPORT_PATH}: ${OVER_CAP}\n`)
+  })
+
+  test('a link to another file of its repository is followed, as fs_write follows one', async (context) => {
+    if (!linksFiles()) context.skip()
+    const seen = await ranAfter((file) => {
+      const twin = join(file, '..', 'twin.test.mjs')
+      writeFileSync(twin, EXPORT_TEST)
+      symlinkSync(twin, file, 'file')
+    })
+    expect(seen.run?.testSha256).toBe(fingerprintOf(Buffer.from(EXPORT_TEST, 'utf8')))
+    expect(seen.evidence).not.toContain('Hemera did not read')
+  })
+
+  test('an ordinary test file is still read, its fingerprint and its evidence recorded', async () => {
+    const seen = await ranAfter((file) => writeFileSync(file, EXPORT_TEST))
+    expect(seen.run?.testSha256).toBe(fingerprintOf(Buffer.from(EXPORT_TEST, 'utf8')))
+    expect(seen.run?.testEvidenceId).not.toBeNull()
+    expect(seen.evidence).not.toContain('Hemera did not read')
   })
 })
 

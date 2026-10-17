@@ -6,7 +6,8 @@
  * once, after the reconciliation.
  */
 
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
@@ -18,6 +19,7 @@ import {
   actionRulesLayer,
   listActions,
 } from '../src/engine/tools/actions.ts'
+import { NOT_A_FILE } from '../src/engine/tools/judged.ts'
 import { fingerprintOf } from '../src/engine/tools/read.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { commandRuns } from '../src/engine/storage/schema.ts'
@@ -67,6 +69,54 @@ describe('An engine killed between the intent and the outcome of an action', () 
       [ids[2], 'indeterminate'],
     ])
     expect(readFileSync(files[2] ?? '', 'utf8')).toBe('someone else\n')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe at a recorded write’s path: the restart check refuses at once, and says why (#439)',
+    async () => {
+      const pipe = join(work, 'written.txt')
+      const [id] = await commandsEngine(data)(({ profile }) =>
+        profile.use(
+          Effect.forEach([pipe], (path) =>
+            intentOf('file.write', {
+              path,
+              before: fingerprint('before\n'),
+              after: fingerprint('after\n'),
+            }),
+          ),
+        ),
+      )
+      // An agent's command turns the written file into a pipe while the engine is down.
+      execFileSync('mkfifo', [pipe])
+
+      const actions = await commandsEngine(data)(({ profile }) => profile.use(listActions()))
+      expect(actions.map((action) => [action.id, action.state, action.outcome])).toEqual([
+        [id, 'indeterminate', `its file is not read: ${NOT_A_FILE}`],
+      ])
+    },
+  )
+
+  test('a link at a recorded write’s path: the restart check never follows it (#439)', async (context) => {
+    const outside = join(work, 'outside.txt')
+    const link = join(work, 'written.txt')
+    writeFileSync(outside, 'after\n')
+    try {
+      symlinkSync(outside, link, 'file')
+    } catch {
+      context.skip()
+    }
+    await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        intentOf('file.write', {
+          path: link,
+          before: fingerprint('before\n'),
+          after: fingerprint('after\n'),
+        }),
+      ),
+    )
+
+    const actions = await commandsEngine(data)(({ profile }) => profile.use(listActions()))
+    expect(actions.map((action) => action.state)).toEqual(['indeterminate'])
   })
 
   test('a command becomes indeterminate and is never run again', async () => {

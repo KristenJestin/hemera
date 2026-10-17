@@ -51,8 +51,14 @@ export interface EffectfulAction {
 /** What a post-condition finds of an action whose outcome was lost. */
 export type FoundOutcome = 'done' | 'failed' | 'indeterminate'
 
+/** What a post-condition finds, and, when it cannot say, why: recorded as the action's outcome. */
+export interface Found {
+  readonly found: FoundOutcome
+  readonly why: string | null
+}
+
 /** How a kind of action is checked against the world, from what its intent recorded. */
-export type PostCondition = (details: Schema.Json) => Effect.Effect<FoundOutcome>
+export type PostCondition = (details: Schema.Json) => Effect.Effect<Found>
 
 /** What is done with an indeterminate action of a kind that has no checkable post-condition. */
 export type IndeterminateHandler = (action: EffectfulAction) => Effect.Effect<void>
@@ -75,19 +81,29 @@ export const FileWriteDetails = Schema.Struct({
 
 const readFileWrite = Schema.decodeUnknownOption(FileWriteDetails)
 
+const saying = (outcome: FoundOutcome, why: string | null = null): Found => ({
+  found: outcome,
+  why,
+})
+
 /**
  * A file write: the file's fingerprint is the one the write would produce, it was done; the one
- * before, it failed; anything else, nobody can say.
+ * before, it failed; anything else, nobody can say. A file that is not read (a pipe, a link put in
+ * its place) is refused at once, and why is said (#439).
  */
 export const fileWritten: PostCondition = (details) =>
   Effect.gen(function* () {
     const read = readFileWrite(details)
-    if (Option.isNone(read)) return 'indeterminate'
-    const now = yield* Effect.promise(() => fingerprintFile(read.value.path).catch(() => undefined))
-    if (now === undefined) return 'indeterminate'
-    if (now === read.value.after) return 'done'
-    if (now === read.value.before) return 'failed'
-    return 'indeterminate'
+    if (Option.isNone(read)) return saying('indeterminate')
+    const now = yield* Effect.promise(() =>
+      fingerprintFile(read.value.path).catch((cause: Error) => cause),
+    )
+    if (now instanceof Error) {
+      return saying('indeterminate', `its file is not read: ${now.message}`)
+    }
+    if (now === read.value.after) return saying('done')
+    if (now === read.value.before) return saying('failed')
+    return saying('indeterminate')
   })
 
 /** The rules of this version: `file.write` has a post-condition; nothing has a handler yet. */
@@ -300,9 +316,27 @@ export const settleLeftActions: Effect.Effect<
   const still: EffectfulAction[] = []
   for (const action of left) {
     const check = rules.postConditions.get(action.kind)
-    const found = check === undefined ? 'indeterminate' : yield* check(action.details)
+    const { found, why } =
+      check === undefined ? { found: 'indeterminate', why: null } : yield* check(action.details)
     if (found === 'indeterminate') {
-      still.push({ ...action, state: 'indeterminate' })
+      // Why the world could not be read is kept as its outcome; it stays indeterminate.
+      if (why !== null) {
+        yield* mutate('recording why an action stays indeterminate', (transaction) =>
+          transaction
+            .update(effectfulActions)
+            .set({ outcome: maskText(why, []) })
+            .where(eq(effectfulActions.id, action.id))
+            .pipe(
+              Effect.mapError(refusedWhile('recording an action')),
+              Effect.as({ result: undefined, events: [] }),
+            ),
+        )
+      }
+      still.push({
+        ...action,
+        state: 'indeterminate',
+        outcome: why === null ? action.outcome : maskText(why, []),
+      })
       continue
     }
     yield* mutate('recording what the world shows of an action', (transaction) =>

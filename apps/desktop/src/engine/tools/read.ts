@@ -14,9 +14,9 @@
  */
 
 import { createHash } from 'node:crypto'
-import { type FileHandle, open } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 
-import { openJudged } from './judged.ts'
+import { openJudged, openOwn } from './judged.ts'
 import type { Withholding } from './withholding.ts'
 
 /** The bytes a page covers, and where the next one starts. */
@@ -57,9 +57,19 @@ async function fingerprintThrough(
   return fingerprintThrough(handle, hash, from + bytesRead)
 }
 
-/** The fingerprint of a file, or null when there is no file there. */
+/**
+ * The most of a file a fingerprint reads: far above what a session writes, and what keeps a check
+ * from hashing a sparse file of a terabyte planted where a write was.
+ */
+export const FINGERPRINT_CAP = 1024 * 1024 * 1024
+
+/**
+ * The fingerprint of the file at a real path, or null when there is no file there. It is opened as
+ * the engine opens a file on its own behalf (`openOwn`): a link as its last name, a pipe, a device
+ * or a file over the cap is refused with why, at once, and never waited on.
+ */
 export async function fingerprintFile(path: string): Promise<string | null> {
-  const handle = await open(path, 'r').catch((cause: NodeJS.ErrnoException) => {
+  const handle = await openOwn(path, FINGERPRINT_CAP).catch((cause: NodeJS.ErrnoException) => {
     if (cause.code === 'ENOENT') return null
     throw cause
   })

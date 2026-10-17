@@ -12,10 +12,13 @@
  * A line with a test file whose runner Hemera knows is run with the reporter flags Hemera adds
  * (#342, round 9): the Spec's command stays as it is, the line run is it and a reporting suffix,
  * and the evidence shows both. A catalogue command's line is given the same suffix, run as a copy.
+ *
+ * Its test file is read by whoever asks for the run, right before it (#434): at the path judged
+ * for it, never through a link, never waiting on a pipe, never past `TEST_CAP`. A test file that
+ * was not read is said in the run's evidence, and the run is recorded without its fingerprint.
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 import {
@@ -48,6 +51,12 @@ import { type ReportPlan, disposeReport, prepareReport, reportFor } from './proo
 import { writeTrees } from './proof-store.ts'
 import { bases as basesCodec } from './tasks.ts'
 
+/** The most of a proof's test file Hemera reads: far above any test a scenario adds. */
+export const TEST_CAP = 8 * 1024 * 1024
+
+/** A proof's test file as it was read before its run: its bytes, or why it was not read. */
+export type TestRead = { readonly bytes: Buffer } | { readonly refused: string }
+
 /** What a proof run is asked: the scenario of a Building, its Proof block, and why it runs. */
 export interface ProofAsked {
   readonly missionId: string
@@ -57,6 +66,8 @@ export interface ProofAsked {
   readonly proof: Proof
   /** The repositories whose trees the run is recorded on: a later change there makes it stale. */
   readonly repositories: ReadonlyArray<string>
+  /** Its test file, read right before the run; null for a proof with none in the Workspace. */
+  readonly testFile: TestRead | null
 }
 
 /** A proof run as it was recorded. */
@@ -160,8 +171,8 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
     const repositories = bases
       .map((one) => one.repository)
       .filter((one) => asked.repositories.includes(one))
-    const testFile = test === null || base === null ? null : join(base.folder, test.path)
-    const testBytes = testFile !== null && existsSync(testFile) ? readFileSync(testFile) : null
+    const read = asked.testFile
+    const testBytes = read !== null && 'bytes' in read ? read.bytes : null
     // A catalogue command's line is the catalogue's: with Hemera's reporting, it runs as a copy of
     // it, in its folder, its marks (ask before running, its resources) still read from it.
     plan =
@@ -267,7 +278,12 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
     })
     const key = asked.proof.key_line
     // What ran, when Hemera added its reporting to the Spec's command: the line, and what it added.
-    const heading = asking === null ? '' : `$ ${line}\nHemera added: ${asking.added}\n\n`
+    const ran = asking === null ? '' : `$ ${line}\nHemera added: ${asking.added}\n\n`
+    const unread =
+      read !== null && 'refused' in read && test !== null
+        ? `Hemera did not read ${test.repository}/${test.path}: ${read.refused}\n\n`
+        : ''
+    const heading = `${ran}${unread}`
     const evidence = (name: string, text: string) =>
       putEvidence({
         missionId: asked.missionId,
