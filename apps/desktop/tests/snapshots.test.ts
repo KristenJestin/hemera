@@ -1020,6 +1020,15 @@ describe('A checkpoint reads only the repository’s own Git folder, and never w
     return { main, worktree, entry }
   }
 
+  /**
+   * Points the worktree's `.git` at another Git folder. It is removed first: Git for Windows makes
+   * it hidden, and Windows refuses to open a hidden file for writing over (EPERM).
+   */
+  const pointAt = (worktree: string, folder: string) => {
+    rmSync(join(worktree, '.git'))
+    writeFileSync(join(worktree, '.git'), `gitdir: ${folder}\n`)
+  }
+
   /** A Git folder of an agent's making, which the worktree's `.git` is pointed at. */
   const pointedAtFake = (worktree: string, index: (fake: string) => void) => {
     const fake = join(work, 'fake-git')
@@ -1027,7 +1036,7 @@ describe('A checkpoint reads only the repository’s own Git folder, and never w
     git(fake, 'init', '-q', '-b', 'main')
     const folder = join(fake, '.git')
     index(join(folder, 'index'))
-    writeFileSync(join(worktree, '.git'), `gitdir: ${folder}\n`)
+    pointAt(worktree, folder)
     return folder
   }
 
@@ -1089,7 +1098,7 @@ describe('A checkpoint reads only the repository’s own Git folder, and never w
     writeFileSync(join(fake, 'commondir'), `${join(main, '.git')}\n`)
     writeFileSync(join(fake, 'gitdir'), `${join(worktree, '.git')}\n`)
     writeFileSync(join(fake, 'index'), 'an index of elsewhere')
-    writeFileSync(join(worktree, '.git'), `gitdir: ${fake}\n`)
+    pointAt(worktree, fake)
 
     const seen = await checkpointOf(main, worktree)
 
