@@ -38,7 +38,7 @@ import { START_ITEMS, newStep } from './delivery-form-options.ts'
 const LABEL = 'text-sm font-medium'
 
 /** A select with its visible label above it, as the other forms of the settings have them. */
-function Labelled<Value extends string>({
+export function Labelled<Value extends string>({
   label,
   value,
   items,
@@ -530,7 +530,7 @@ function KindFields({
 const FIRST = ':first'
 
 /** Where a new step goes: its moment when it has one to choose, and the step it follows there. */
-function PlaceFields({
+export function PlaceFields({
   draft,
   adding,
   onChange,
