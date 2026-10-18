@@ -13,7 +13,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { Effect, Exit, Predicate, Result } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
@@ -32,6 +34,7 @@ import {
   fixtureOpenedBy,
 } from '../src/main/fixture-profile.ts'
 import { buildingOf } from '../src/engine/building/builder.ts'
+import { DATABASE_FILE } from '../src/engine/migrate.ts'
 import { proofsRead } from '../src/engine/building/proofs.ts'
 import { listColdReads } from '../src/engine/planning/cold-read-store.ts'
 import { freezeReadiness } from '../src/engine/planning/freeze.ts'
@@ -59,16 +62,28 @@ const places = () => {
 /** The normal profile of every build, for a test that does not name its own: a folder of the test's. */
 const NORMAL = [join(temporaryFolder('fixtures-normal'), 'Hemera')]
 
+/**
+ * The home every build and every reading of the suite runs on: its own, so what the machine's home
+ * configuration does while the suite runs never stops the engine's Git (#483).
+ */
+const HOME = temporaryFolder('fixtures-home')
+
+/** What an engine of the suite opened on a fixture's profile is handed: the suite's home. */
+const SUITE_PARTS = { tools: { home: HOME } }
+
 const built = (
   group: string,
   root: string,
   rebuild = false,
   normalProfiles: ReadonlyArray<string> = NORMAL,
-) => buildFixture({ root, group, rebuild, log: () => undefined, normalProfiles })
+) => buildFixture({ root, group, rebuild, log: () => undefined, normalProfiles, home: HOME })
 
 /** What a fixture's profile holds, as the services answer it, without the ids they draw. */
 const stateOf = (profile: string) =>
-  commandsEngine(profile)(({ profile: started }) =>
+  commandsEngine(
+    profile,
+    SUITE_PARTS,
+  )(({ profile: started }) =>
     started.use(
       Effect.gen(function* () {
         const projects = yield* listProjects
@@ -328,6 +343,29 @@ describe('A fixture that could not be built says why where the test prints it (#
   })
 })
 
+describe('A fixture is built and read against the home the suite hands it (#483)', () => {
+  test('the Git guard of a build keeps the suite’s home, never the machine’s', async () => {
+    const { root } = places()
+    const home = temporaryFolder('fixtures-own-home')
+    writeFileSync(join(home, '.gitconfig'), '[user]\n\tname = t\n')
+    const fixture = await buildFixture({
+      root,
+      group: 'planning',
+      rebuild: false,
+      log: () => undefined,
+      normalProfiles: NORMAL,
+      home,
+    })
+    const database = new DatabaseSync(join(fixture.profile, DATABASE_FILE))
+    const row = database.prepare("SELECT shapes FROM git_baselines WHERE id = '~'").get()
+    database.close()
+    expect(String(row?.['shapes'])).toContain(JSON.stringify(join(home, '.gitconfig')).slice(1, -1))
+    expect(String(row?.['shapes'])).not.toContain(
+      JSON.stringify(join(homedir(), '.gitconfig')).slice(1, -1),
+    )
+  })
+})
+
 describe('Each group reaches its state from an empty base, checked through the services', () => {
   test('empty: the first launch, no project', async () => {
     const { root } = places()
@@ -362,7 +400,7 @@ describe('Each group reaches its state from an empty base, checked through the s
 
 /** Reads a fixture's profile through the services, once. */
 const readIn = <A, E>(profile: string, program: Effect.Effect<A, E, EngineServices>) =>
-  commandsEngine(profile)(({ profile: started }) => started.use(program))
+  commandsEngine(profile, SUITE_PARTS)(({ profile: started }) => started.use(program))
 
 /** The one mission of a fixture's one project. */
 const onlyMission = Effect.gen(function* () {

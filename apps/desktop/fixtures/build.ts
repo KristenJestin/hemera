@@ -98,6 +98,11 @@ export interface FixtureAsk {
   readonly log: (line: string) => void
   /** The profiles no fixture may be or hold; this machine's otherwise. */
   readonly normalProfiles?: ReadonlyArray<string>
+  /**
+   * The home the engine reads while it builds (its Git guard's, its tools'): a suite's own, so
+   * nothing the machine's home configuration does reaches the build; the user's otherwise.
+   */
+  readonly home?: string
 }
 
 /** Refuses, with the sentence, what a check refuses. */
@@ -143,26 +148,28 @@ const buildState = (
   work: string,
   env: BuiltFixture['env'],
   log: FixtureAsk['log'],
+  home: FixtureAsk['home'],
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const fakes = yield* suiteAgent
       // The role of the session an agent is started for, read once the Profile is open.
       let roleOf = (_sessionId: string): Effect.Effect<string | null> => Effect.succeed(null)
+      const parts = {
+        backupFolders: BACKUP_FOLDERS,
+        reconciliationSteps: RECONCILIATION_STEPS,
+        gh: { path: env['PATH'] ?? '', env },
+        forge: { env },
+        sessions: {
+          ...scriptedAgents(fakes, group.scripts ?? {}, (sessionId) => roleOf(sessionId)),
+          // A new mission starts its Planner on its own, as in the application.
+          plannerStarts: true,
+        },
+        ticketSync: { schedules: false },
+      }
       const started = yield* startProfile(
         { dataFolder: profile, version: VERSION, migrations: MIGRATIONS },
-        {
-          backupFolders: BACKUP_FOLDERS,
-          reconciliationSteps: RECONCILIATION_STEPS,
-          gh: { path: env['PATH'] ?? '', env },
-          forge: { env },
-          sessions: {
-            ...scriptedAgents(fakes, group.scripts ?? {}, (sessionId) => roleOf(sessionId)),
-            // A new mission starts its Planner on its own, as in the application.
-            plannerStarts: true,
-          },
-          ticketSync: { schedules: false },
-        },
+        home === undefined ? parts : { ...parts, tools: { home } },
         log,
       )
       roleOf = (sessionId) =>
@@ -255,7 +262,14 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   const engineLog = join(folder, BUILD_LOG)
   const started = Date.now()
   await Effect.runPromise(
-    buildState(group, profile, work, env, (line) => appendFileSync(engineLog, `${line}\n`)),
+    buildState(
+      group,
+      profile,
+      work,
+      env,
+      (line) => appendFileSync(engineLog, `${line}\n`),
+      asked.home,
+    ),
   ).catch((failure: Error) => {
     throw notBuilt(group.name, engineLog, failure)
   })
