@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useCallback, useState } from 'react'
 
 import { AgentSection } from './agent-sections.tsx'
 import type { Link } from './link.ts'
@@ -32,12 +32,21 @@ export function ProjectSettingsRoute({
   onSetUpLaunched,
 }: ProjectSettingsRouteProps): ReactNode {
   const ticketProblem = useTicketProblem(link, engineReady, projectId)
+  /** What is wrong in the Delivery rules, said by their glyph in the list. */
+  const [deliveryProblem, setDeliveryProblem] = useState<string | undefined>(undefined)
+  const onDeliveryProblem = useCallback(
+    (problem: string | undefined) => setDeliveryProblem(problem),
+    [],
+  )
   const [settingsData, settings] = useSettings(link, engineReady, projectId)
   /** How many times the Project's models by role were changed in its settings. */
   const [roleChanges, setRoleChanges] = useState(0)
   // Read each time the settings show, change Project or models by role.
   const offer = useSetupOffer(link, engineReady, projectId, `${projectId} ${String(roleChanges)}`)
   const launch = launches.of(projectId)
+  const problems = new Map<string, string>()
+  if (ticketProblem !== undefined) problems.set('tickets', ticketProblem)
+  if (deliveryProblem !== undefined) problems.set('delivery', deliveryProblem)
   const catalogue = settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
   return (
     <SettingsPage
@@ -45,7 +54,7 @@ export function ProjectSettingsRoute({
       settings={settings}
       tools={tools}
       section={section}
-      problems={ticketProblem === undefined ? undefined : new Map([['tickets', ticketProblem]])}
+      problems={problems}
       ticketSection={(id, showForm) => (
         <TicketSection
           section={id}
@@ -56,6 +65,9 @@ export function ProjectSettingsRoute({
           catalogue={catalogue}
           show={showForm}
           copy={tools.copy}
+          // A section the route names was opened by a link: a need's, a notification's.
+          linked={section === id}
+          onProblem={onDeliveryProblem}
         />
       )}
       setUp={{

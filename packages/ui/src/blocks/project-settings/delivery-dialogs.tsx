@@ -5,7 +5,7 @@ import type { SettingsForm } from '../../surfaces/project-settings/project-setti
 import { CLEANUP_KINDS, RECIPE_KINDS } from './delivery-form-options.ts'
 import type { Drafts } from './delivery-drafts.ts'
 import { withCleanup, withPushIn } from './delivery-edits.ts'
-import { CANDIDATES, DELIVERY_COMMANDS, filled, templateRefusal } from './delivery-fixtures.ts'
+import { CANDIDATES, DELIVERY_COMMANDS } from './delivery-fixtures.ts'
 import {
   PushForm,
   type PushDraft,
@@ -24,6 +24,7 @@ import {
   MOMENT_WORDS,
 } from './delivery-model.ts'
 import type { DeliveryTarget } from './delivery-rules.tsx'
+import { filled, templateRefusal } from './delivery-words.ts'
 import type { FormFootProps } from './parts.tsx'
 
 /**
