@@ -11,7 +11,7 @@
  * Review the way the end of a Building leaves it, the user's feedback written on it.
  */
 
-import { realpathSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -19,6 +19,7 @@ import {
   ChosenAnswer,
   CLARIFY,
   KEEP_IN_ROUND,
+  PermissionAnswer,
   SESSION_STATES,
   START_A_MISSION,
   TOOLS,
@@ -38,11 +39,14 @@ import { judgeManual, proofsRead } from '../src/engine/building/proofs.ts'
 import { addRequirement } from '../src/engine/living-spec/store.ts'
 import { missionFolder } from '../src/engine/memory/files.ts'
 import { Secrets } from '../src/engine/secrets.ts'
+import { ToolAccess } from '../src/engine/tools/access.ts'
 import { getMission, moveIn, moveMission } from '../src/engine/missions.ts'
 import { answerQuestion } from '../src/engine/planning/calls.ts'
 import { inputsOf, openQuestions, wavesOf } from '../src/engine/planning/questions.ts'
 import { RETRY } from '../src/engine/building/end.ts'
+import { STOPPED_AT_THE_END } from '../src/engine/building/helper-store.ts'
 import { answerNeed } from '../src/engine/needs.ts'
+import { everyTaskHolds } from '../src/engine/permissions/requests.ts'
 import { Review, type FeedbackAsked } from '../src/engine/review/feedback.ts'
 import { Rounds } from '../src/engine/review/rounds.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
@@ -50,11 +54,14 @@ import { ROLES_REGISTERED, roleNamed } from '../src/engine/sessions/roles.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
 import { createStart } from '../src/engine/start/field.ts'
 import { Database } from '../src/engine/storage/database.ts'
+import { type Verdict, Verdicts } from '../src/engine/tools/ports.ts'
 import {
   buildingLaunches,
   buildings,
   domainEvents,
   livingDomains,
+  needs,
+  permissionRequests,
   proofRuns,
   sessionDeliveries,
   specProofs,
@@ -67,7 +74,7 @@ import {
 } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { READING, grantOf, says } from './building-world.ts'
-import { builderOf, launched } from './builder-world.ts'
+import { builderOf, buildingNow, launched } from './builder-world.ts'
 import { HELPER, held, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { ALLOW, callTool, verdictsSaying } from './tools-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -139,6 +146,8 @@ const rounding = (
     /** Where the Fix is held once committed, before its Planner opens. */
     readonly fixed?: Effect.Effect<void>
     readonly ignores?: boolean
+    /** The verdicts on the calls, when not every call is allowed. */
+    readonly verdicts?: Layer.Layer<Verdicts>
   } = {},
 ) => {
   const answering = held()
@@ -168,7 +177,11 @@ const rounding = (
         }
   const engine = sessionsEngine(options.folder ?? data, script, {
     roles: [HELPER],
-    tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+    tools: {
+      home: work,
+      verdicts: options.verdicts ?? verdictsSaying(() => ALLOW).layer,
+      taskStates: everyTaskHolds,
+    },
     review: { fixed: options.fixed },
     building: {
       hold: options.hold,
@@ -2288,4 +2301,154 @@ describe('The Planner in round mode', () => {
       '## Round N (your brief says "Building · round N")',
     )
   })
+})
+
+/**
+ * #315: a call the user allowed is acted on by Hemera, long after its agent asked. The end of a
+ * Building stops its whole tree, and the mission's next Building (a round's) is a fresh Builder:
+ * what the user allowed for the ended tree must never run in it.
+ */
+describe('A later Building runs no approval of an ended tree', () => {
+  /** A file the first Builder asks to write, and one the round's Builder does. */
+  const EARLIER = 'earlier.ts'
+  const LATER = 'later.ts'
+
+  test(
+    'a call the user allowed for a lineage of the ended tree is still refused in the round’s Building, and a call of the round’s Builder runs',
+    SLOW,
+    async () => {
+      // Hemera's check of the allowed `earlier.ts` call holds until the test lets it go, so it acts
+      // on it only once the round's Building has its own Builder.
+      const act = Deferred.makeUnsafe<void>()
+      const verdicts = Layer.succeed(Verdicts, {
+        judge: (asked) =>
+          Effect.succeed<Verdict>(
+            asked.tool === 'fs_write' &&
+              [EARLIER, LATER].some((file) => asked.path?.named.endsWith(file))
+              ? { verdict: 'ask', reason: 'a file no task names', by: 'suite' }
+              : ALLOW,
+          ),
+        refusal: (asked) =>
+          asked.path?.named.endsWith(EARLIER) === true
+            ? Effect.as(Deferred.await(act), null)
+            : Effect.succeed(null),
+      })
+      const { world, run } = rounding({ verdicts })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(work)
+            const missionId = mission.id
+            const first = yield* builderOf(missionId)
+            const api = (yield* buildingNow(missionId)).repositories[0]?.folder ?? ''
+            yield* builtAll(first.grantId)
+            const asked = yield* using(first.grantId, 'fs_write', {
+              repository: 'api',
+              path: EARLIER,
+              content: 'export const earlier = true\n',
+            })
+            // The first Building's real end, held at its refresh on the question.
+            yield* documented(world, missionId)
+            yield* reviewedBoth(world, missionId)
+            const database = yield* Database
+            const request = (file: string) =>
+              Effect.map(
+                database
+                  .select()
+                  .from(permissionRequests)
+                  .where(eq(permissionRequests.missionId, missionId)),
+                (rows) => rows.find((row) => row.call.includes(file)),
+              )
+            yield* until(
+              Effect.gen(function* () {
+                const view = yield* buildingNow(missionId)
+                return view.phase === 'refresh' && (yield* getMission(missionId)).needs.length > 0
+              }),
+              LONG,
+            )
+            const earlier = yield* request(EARLIER)
+            if (earlier === undefined) return yield* Effect.die(new Error('no request'))
+            yield* answerNeed({
+              id: earlier.needId,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* inStage(missionId, 'review')
+            const ended = yield* buildingOf(missionId)
+            // The round: its Building has a Builder of its own.
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            const round = yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, '')
+            // Hemera has not acted on the allowed call yet, and the round's Builder working again
+            // cleared the end's mark: only the ended session itself stands in its way.
+            const waiting = {
+              state: (yield* request(EARLIER))?.state,
+              exiting: yield* ToolAccess.use((access) => access.isExiting(missionId)),
+            }
+            // Hemera now acts on the call the user allowed for the ended tree.
+            yield* Deferred.succeed(act, undefined)
+            yield* until(
+              Effect.map(request(EARLIER), (row) => row?.state === 'ended'),
+              LONG,
+            )
+            const refused = yield* request(EARLIER)
+            const [expired] = yield* database
+              .select()
+              .from(needs)
+              .where(eq(needs.id, earlier.needId))
+            const wroteEarlier = existsSync(join(api, EARLIER))
+            // The round's Builder asks too; the user allows it, and it runs.
+            const second = yield* using(builder.grantId, 'fs_write', {
+              repository: 'api',
+              path: LATER,
+              content: 'export const later = true\n',
+            })
+            const later = yield* request(LATER)
+            if (later === undefined) return yield* Effect.die(new Error('no request of the round'))
+            yield* answerNeed({
+              id: later.needId,
+              answer: PermissionAnswer.make({ choice: 'allow-once' }),
+              key: crypto.randomUUID(),
+            })
+            yield* until(
+              Effect.map(request(LATER), (row) => row?.state === 'ended'),
+              LONG,
+            )
+            return {
+              asked,
+              second,
+              waiting,
+              rounds: { first: ended?.buildingId, round: round.buildingId },
+              lineages: { first: first.session.lineage, round: builder.session.lineage },
+              refused,
+              expired,
+              wroteEarlier,
+              later: yield* request(LATER),
+              wroteLater: existsSync(join(api, LATER)),
+            }
+          }),
+        ),
+      )
+      expect(seen.asked.text).toContain('request #1')
+      expect(seen.second.text).toContain('request #2')
+      expect(seen.waiting).toEqual({ state: 'running', exiting: false })
+      // The ended tree's call: not executed, and said to be stopped by the end of its Building.
+      expect(seen.refused).toMatchObject({ state: 'ended', result: 'not-executed' })
+      expect(seen.refused?.resultText).toBe(
+        `Request #1 (fs_write) was not executed: ${STOPPED_AT_THE_END}.`,
+      )
+      expect(seen.expired).toMatchObject({ state: 'expired', endedReason: STOPPED_AT_THE_END })
+      expect(seen.wroteEarlier).toBe(false)
+      // The round's Builder's: done.
+      expect(seen.later).toMatchObject({ state: 'ended', result: 'done' })
+      expect(seen.wroteLater).toBe(true)
+      // And it is a Building and a Builder of their own.
+      expect(seen.rounds.round).not.toBe(seen.rounds.first)
+      expect(seen.lineages.round).not.toBe(seen.lineages.first)
+    },
+  )
 })
