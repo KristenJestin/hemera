@@ -124,6 +124,8 @@ const rounding = (
     readonly resumed?: boolean
     readonly folder?: string
     readonly hold?: BuilderHold
+    /** Where the Fix is held once committed, before its Planner opens. */
+    readonly fixed?: Effect.Effect<void>
   } = {},
 ) => {
   const holds = new Map<number, ReturnType<typeof held>>()
@@ -146,6 +148,7 @@ const rounding = (
   const engine = sessionsEngine(options.folder ?? data, script, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+    review: { fixed: options.fixed },
     building: {
       hold: options.hold,
       outside: { compareEveryMillis: 3_600_000, baseEveryMillis: 3_600_000 },
@@ -1397,6 +1400,41 @@ describe('A stop and a restart', () => {
       )
       // Its own lineage, resumed: what it wrote and was told stays with it.
       expect(seen.planner.lineage).toBe(left.lineage)
+    },
+  )
+
+  test(
+    'a stop between Fix and its Planner opens the Planner in round mode at the next start',
+    SLOW,
+    async () => {
+      const reached = Deferred.makeUnsafe<void>()
+      const first = rounding({
+        fixed: Effect.andThen(Deferred.succeed(reached, undefined), Effect.never),
+      })
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed()
+            yield* written(missionId, remark('The CSV has no header row.'))
+            yield* Effect.forkChild(fix(missionId))
+            yield* Deferred.await(reached)
+            return {
+              missionId,
+              planners: (yield* liveOf(missionId)).filter((row) => row.role === 'round-planner'),
+            }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.map(roundPlannerOf(left.missionId), (planner) => planner.session),
+        ),
+      )
+      expect(left.planners).toEqual([])
+      expect(seen.role).toBe('round-planner')
     },
   )
 

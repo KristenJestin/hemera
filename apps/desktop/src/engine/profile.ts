@@ -285,7 +285,13 @@ export interface ProfileParts {
   /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
   readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** Where a suite holds Review's feedback (#341, see `ReviewHold`); never held otherwise. */
-  readonly review?: { readonly hold?: ReviewHold | undefined } | undefined
+  readonly review?:
+    | {
+        readonly hold?: ReviewHold | undefined
+        /** Where a suite holds a round's Fix once committed, before its Planner opens (#468). */
+        readonly fixed?: Effect.Effect<void> | undefined
+      }
+    | undefined
   /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
   readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
@@ -753,7 +759,7 @@ export const startProfile = (
       checkpoints,
       diffs,
       // The rounds over Review's feedback (#468), which the window reaches too.
-      roundsLayer({ log }).pipe(
+      roundsLayer({ log, fixed: parts.review?.fixed }).pipe(
         Layer.provideMerge(
           reviewLayer({ log, hold: parts.review?.hold }).pipe(
             Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),

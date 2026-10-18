@@ -148,6 +148,8 @@ export class Rounds extends Context.Service<Rounds, RoundsService>()('Rounds') {
 
 export interface RoundsSettings {
   readonly log: Log
+  /** Where a suite holds a Fix once committed, before its Planner opens; never otherwise. */
+  readonly fixed?: Effect.Effect<void> | undefined
 }
 
 /** Why a Fix is refused when nothing in the collecting round waits for one. */
@@ -433,6 +435,7 @@ export const roundsLayer = (settings: RoundsSettings) =>
               }),
             ),
           )
+          yield* settings.fixed ?? Effect.void
           yield* ensureGriller(missionId)
         })
 

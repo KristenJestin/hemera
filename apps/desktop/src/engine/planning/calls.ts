@@ -7,7 +7,6 @@
 import { Effect, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
-import { getMission, runStops } from '../missions.ts'
 import { SpecBoard } from './board.ts'
 import { type InputsDelivery, prepareDeliveries } from './handover.ts'
 import { recordAnswer, recordWaiting } from './questions.ts'
@@ -37,10 +36,7 @@ export const answerQuestion = (
   given: { readonly optionId?: string | undefined; readonly text?: string | undefined },
 ) =>
   Effect.gen(function* () {
-    if (!(yield* recordAnswer(missionId, questionId, given))) return
-    // A conflict of a round answered "cancel" cancelled the mission (#468): its stops run now.
-    if ((yield* getMission(missionId)).stage === 'cancelled') return yield* runStops(missionId)
-    yield* deliverInputs(missionId)
+    if (yield* recordAnswer(missionId, questionId, given)) yield* deliverInputs(missionId)
   })
 
 /** The user says a question waits on someone; the Planner is told. */
