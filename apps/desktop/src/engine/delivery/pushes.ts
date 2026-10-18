@@ -14,10 +14,12 @@
  *   commit's tree must equal the checkpoint's, or the Workspace changed meanwhile: tried once more
  *   from a new checkpoint. Never an amend, never `--no-verify`. An untracked file in a sensitive
  *   place (A5's list) stops it first, with a decision need: push it anyway, or keep it out.
- * - **The push** (`push`): `git push <remote> refs/heads/<branch>:refs/heads/<branch>` to the
- *   repository's delivery remote, never forced, through the engine's own Git in the user's
- *   environment (the agents' is the one where pushing is neutralised). No `-u`: the upstream is
- *   recorded here, so the repository's configuration is never written.
+ * - **The push** (`push`): `git push <remote> <commit>:refs/heads/<branch>` to the repository's
+ *   delivery remote, the branch the Workspace recorded, never forced, through the engine's own Git
+ *   in the user's environment (the agents' is the one where pushing is neutralised). No `-u`: the
+ *   upstream is recorded here, so the repository's configuration is never written.
+ * - **The branch.** Nothing is committed unless the worktree's HEAD names the branch the
+ *   Workspace recorded: an agent's `git symbolic-ref` stops the sequence with an error need.
  * - **The pull request** (`pull-request`): an open one from the branch into the base is found
  *   first, and is the mission's; otherwise one is opened from the templates and the reviewers. Its
  *   description is written once.
@@ -541,10 +543,31 @@ export const pushesLayer = (settings: PushesSettings) => {
             : Effect.succeed(row),
         )
 
+      /** Stops, committing and pushing nothing, unless the worktree's HEAD is the mission's branch. */
+      const onBranch = (one: Run) =>
+        Effect.gen(function* () {
+          const ref = `refs/heads/${one.branch}`
+          const named = (yield* git(one.place.folder, ['symbolic-ref', '--quiet', 'HEAD']).pipe(
+            Effect.orElseSucceed(() => ''),
+          )).trim()
+          if (named === ref) return
+          const until = 'Hemera commits and pushes nothing until it is back on it.'
+          const output =
+            named === ''
+              ? `The HEAD of ${one.name} is detached, not on the mission’s branch ${one.branch}: ${until}`
+              : `The HEAD of ${one.name} names ${named.replace(/^refs\/heads\//, '')}, not the mission’s branch ${one.branch}: ${until}`
+          return yield* stopped(
+            'failed',
+            output,
+            errorNeed(output, [{ what: 'git symbolic-ref HEAD', output }]),
+          )
+        })
+
       const commitStep = (one: Run) =>
         Effect.gen(function* () {
           const { folder } = one.place
           const missionId = one.mission.id
+          yield* onBranch(one)
           for (const key of ['user.name', 'user.email'] as const) {
             if ((yield* configOf(folder, key)) === null) {
               return yield* stopped(
@@ -685,7 +708,12 @@ export const pushesLayer = (settings: PushesSettings) => {
             const output = `${one.name} has no delivery remote to push to.`
             return yield* stopped('failed', output, errorNeed(output, []))
           }
-          const head = yield* headOf(folder).pipe(Effect.mapError(failedWith('git rev-parse HEAD')))
+          const ref = `refs/heads/${one.branch}`
+          // The branch's commit, not HEAD's: what is pushed is the mission's branch, whatever HEAD
+          // names.
+          const head = (yield* git(folder, ['rev-parse', '--verify', '--quiet', ref]).pipe(
+            Effect.mapError(failedWith(`git rev-parse ${ref}`)),
+          )).trim()
           const there = yield* remoteHeadOf(folder, remote, one.branch).pipe(
             Effect.orElseSucceed(() => null),
           )
@@ -718,12 +746,11 @@ export const pushesLayer = (settings: PushesSettings) => {
             commit: head,
           })
           yield* hold('pushing', one.name)
-          const ref = `refs/heads/${one.branch}`
           // Never forced: no `--force`, no `+` on the refspec; no `-u`, the upstream is kept here.
-          const what = `git push ${remote} ${ref}:${ref}`
+          const what = `git push ${remote} ${head}:${ref}`
           const result = yield* git(
             folder,
-            ['push', '--porcelain', remote, `${ref}:${ref}`],
+            ['push', '--porcelain', remote, `${head}:${ref}`],
             'work',
           ).pipe(Effect.result)
           const after = yield* remoteHeadOf(folder, remote, one.branch).pipe(Effect.result)
@@ -1010,16 +1037,13 @@ export const pushesLayer = (settings: PushesSettings) => {
             if (repository === undefined) {
               return yield* stopped('failed', `${row.repository} is no longer in the Project.`)
             }
-            const branch = (yield* git(place.folder, [
-              'symbolic-ref',
-              '--quiet',
-              '--short',
-              'HEAD',
-            ]).pipe(Effect.orElseSucceed(() => ''))).trim()
-            if (branch === '') {
+            // The mission's branch as its Workspace recorded it, never what the worktree's HEAD
+            // names now: an agent may point HEAD at another branch (`git symbolic-ref`).
+            const branch = yield* diffs.branch(missionId)
+            if (branch === null) {
               return yield* stopped(
                 'failed',
-                `${row.repository} is on no branch: there is nothing to push.`,
+                `The Workspace of ${row.repository} is on no branch: there is nothing to push.`,
               )
             }
             const one: Run = {

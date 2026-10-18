@@ -865,6 +865,91 @@ describe('The push', () => {
     SLOW,
   )
 
+  test.each([
+    {
+      how: 'pointed at main by git symbolic-ref',
+      move: (api: string) => git(api, 'symbolic-ref', 'HEAD', `refs/heads/${DEFAULT_BASE_BRANCH}`),
+      back: (api: string, branch: string) =>
+        git(api, 'symbolic-ref', 'HEAD', `refs/heads/${branch}`),
+      said: /names main, not the mission’s branch/,
+    },
+    {
+      how: 'renamed by git branch -m',
+      move: (api: string, branch: string) => git(api, 'branch', '-m', branch, 'renamed'),
+      back: (api: string, branch: string) => git(api, 'branch', '-m', 'renamed', branch),
+      said: /names renamed, not the mission’s branch/,
+    },
+    {
+      how: 'detached by git update-ref --no-deref',
+      move: (api: string) => git(api, 'update-ref', '--no-deref', 'HEAD', 'HEAD'),
+      back: (api: string, branch: string) =>
+        git(api, 'symbolic-ref', 'HEAD', `refs/heads/${branch}`),
+      said: /is detached, not on the mission’s branch/,
+    },
+  ])(
+    'a HEAD an agent $how: nothing is committed or pushed, the error need says why; back on the branch, Retry pushes it',
+    async ({ move, back, said }) => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* launchedOnForge()
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            const base = `refs/heads/${DEFAULT_BASE_BRANCH}`
+            const before = {
+              main: git(mission.api, 'rev-parse', base),
+              remoteMain: remoteHead('api', DEFAULT_BASE_BRANCH),
+            }
+            // None of these is refused to an agent (the gate refuses checkout, switch and reset).
+            move(mission.api, mission.branch)
+            yield* moved(mission.missionId, 'endBuilding')
+            yield* untilState(mission.missionId, 'api', 'failed')
+            const need = yield* needOf(mission.missionId, 'Error')
+            const database = yield* Database
+            const commits = yield* database
+              .select({ state: effectfulActions.state })
+              .from(effectfulActions)
+              .where(eq(effectfulActions.kind, 'delivery.commit'))
+            const during = {
+              main: git(mission.api, 'rev-parse', base),
+              remoteMain: remoteHead('api', DEFAULT_BASE_BRANCH),
+              remoteBranch: remoteHead('api', mission.branch),
+              remoteRenamed: remoteHead('api', 'renamed'),
+              commits: commits.length,
+            }
+            back(mission.api, mission.branch)
+            yield* chosen(need, 'Retry')
+            yield* untilState(mission.missionId, 'api', 'done')
+            return {
+              before,
+              during,
+              need,
+              main: git(mission.api, 'rev-parse', base),
+              head: git(mission.api, 'rev-parse', `refs/heads/${mission.branch}`),
+              branch: mission.branch,
+            }
+          }),
+        ),
+      )
+      expect(seen.during).toEqual({
+        ...seen.before,
+        remoteBranch: null,
+        remoteRenamed: null,
+        commits: 0,
+      })
+      const fields = seen.need.fields
+      if (!Predicate.isTagged(fields, 'Error')) throw new Error('not an error need')
+      expect(fields.failed).toMatch(said)
+      expect(fields.failed).toContain(seen.branch)
+      expect(fields.proposals).toEqual(['Retry'])
+      expect(seen.main).toBe(seen.before.main)
+      expect(remoteHead('api', DEFAULT_BASE_BRANCH)).toBe(seen.before.remoteMain)
+      expect(remoteHead('api', seen.branch)).toBe(seen.head)
+    },
+    SLOW,
+  )
+
   test(
     'one repository failing does not stop the other',
     async () => {
