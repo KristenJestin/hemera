@@ -1412,3 +1412,32 @@ describe('A submodule’s own Git folder shapes the engine’s Git like the repo
     expect(shown(result.needs[0])).toContain('~/acme/.git/modules/shared/config')
   })
 })
+
+describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
+  test('an upstream pointed at another repository, taken without asking, never moves the engine’s fetch: it fetches the remote it names', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        const origin = remote(main, join(work, 'acme.git'))
+        yield* engineStatus(main)
+        // The remote moves on, from another clone.
+        const clone = join(work, 'clone')
+        git(work, 'clone', '-q', '-b', 'trunk', origin, clone)
+        git(clone, 'commit', '-q', '--allow-empty', '-m', 'later')
+        git(clone, 'push', '-q', 'origin', 'trunk')
+        // The branch's upstream now names another repository: an everyday entry, taken as it is.
+        const elsewhere = repository(join(work, 'elsewhere'))
+        git(elsewhere, 'commit', '-q', '--allow-empty', '-m', 'elsewhere')
+        git(main, 'config', 'branch.trunk.remote', elsewhere)
+        git(main, 'config', 'branch.trunk.merge', 'refs/heads/trunk')
+        yield* Git.use((service) => service.fetchBranch(main, 'origin', 'trunk'))
+        return {
+          fetched: git(main, 'rev-parse', 'refs/remotes/origin/trunk'),
+          later: git(origin, 'rev-parse', 'refs/heads/trunk'),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(result.fetched).toBe(result.later)
+    expect(result.needs).toEqual([])
+  })
+})
