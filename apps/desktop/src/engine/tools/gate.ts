@@ -554,6 +554,7 @@ const targetOf = (grant: Grant, decoded: Decoded, home: string) =>
     )
     return Result.succeed<JudgedPath | null>({
       named: named.path,
+      from: base.success,
       resolved: resolved.path,
       inside: resolved.inside,
       certain: resolved.certain,
