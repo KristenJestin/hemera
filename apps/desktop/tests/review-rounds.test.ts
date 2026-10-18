@@ -28,7 +28,7 @@ import {
 } from '@hemera/core/domain'
 import { FeedbackUser, type FeedbackView } from '@hemera/ipc'
 import { and, asc, eq } from 'drizzle-orm'
-import { Deferred, Effect, Layer, type Schema } from 'effect'
+import { Deferred, Effect, Layer, Predicate, type Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
@@ -1398,7 +1398,7 @@ describe('A Builder that does not answer', () => {
       expect(asked(left.told)).toHaveLength(2)
       expect(left.needs).toHaveLength(1)
       const fields = left.needs[0]?.fields
-      expect(fields?._tag === 'Error' ? fields.failed : '').toBe(
+      expect(fields !== undefined && Predicate.isTagged(fields, 'Error') ? fields.failed : '').toBe(
         `The Builder ended its turn twice without answering ${left.one} with feedback_answer: Retry tells it again.`,
       )
       // The restart said nothing more: only the Retry told the Builder again.
@@ -1557,7 +1557,7 @@ describe('The Spec’s proofs after a round', () => {
               first: ended?.buildingId,
               round: round.buildingId,
               runs: yield* runsOf(round.buildingId, 'R1.S2'),
-              proofs: (proofs?.scenarios ?? []).map((one) => [one.scenario, one.state]),
+              proofs: (proofs?.scenarios ?? []).map((view) => [view.scenario, view.state]),
               judged: judged.state,
             }
           }),
