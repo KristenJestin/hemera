@@ -370,7 +370,9 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             const named = /^~(?:$|[\\/])/.test(call.path.named)
               ? join(home, call.path.named.slice(1))
               : call.path.named
-            const written = isAbsolute(named) ? resolve(named) : resolve(root, named)
+            const written = isAbsolute(named)
+              ? resolve(named)
+              : resolve(call.path.from ?? root, named)
             yield* pointAt(written, {
               path: call.path.resolved,
               inside: call.path.inside,
