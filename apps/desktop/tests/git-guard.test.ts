@@ -410,6 +410,27 @@ wait()
   })
 })
 
+describe('A hold says in the engine’s lines what changed, and how (#483)', () => {
+  test('a change to ~/.gitconfig is said with its path and its kinds before and after', async () => {
+    writeFileSync(join(work, '.gitconfig'), '[user]\n\tname = t\n')
+    const said = await commandsEngine(data, { tools: { home: work } })((started) =>
+      started.profile.use(
+        Effect.gen(function* () {
+          const { main } = yield* acmeWithMission(work)
+          repository(main)
+          yield* engineStatus(main)
+          rmSync(join(work, '.gitconfig'))
+          mkdirSync(join(work, '.gitconfig'))
+          const status = yield* engineStatus(main)
+          return { status, lines: started.lines.filter((line) => line.includes('Git guard')) }
+        }),
+      ),
+    )
+    expect(said.status).toContain('Hemera stopped its Git')
+    expect(said.lines).toContain(`the Git guard holds ~: ${join(work, '.gitconfig')} file → folder`)
+  })
+})
+
 describe('A command still running is watched until it ends (#457)', () => {
   test('a hook a running command wrote stops the engine’s next Git call before the command ends', async () => {
     const result = await withBuilder(({ builder, main }) =>
