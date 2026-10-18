@@ -950,6 +950,8 @@ export const buildingProofs = (parts: ProofParts) => {
   /**
    * Writes every automated scenario's test and support files into the Workspace (CT-37), once: a
    * Building whose proofs were written writes nothing again. Each conflict is handed to the Builder.
+   * A round's Building writes only its own: a proof it carries has its test in the Workspace
+   * already, kept as the user left it in Review and said so (#485).
    */
   const writeProofs = (building: BuildingRow) =>
     Effect.gen(function* () {
@@ -959,15 +961,26 @@ export const buildingProofs = (parts: ProofParts) => {
       const rows = (yield* scenarioProofsIn(database, building.id)).filter(
         (row) => modeOf(row) === 'automated',
       )
+      const own =
+        building.round === null
+          ? null
+          : (yield* roundScenariosIn(database, building.missionId, building.round)).map(
+              (one) => one.id,
+            )
       const written: Array<{ repository: string; path: string; status: 'A' | 'M' }> = []
       const conflicts: Array<{ scenario: string; said: string; versions: string }> = []
       const scenarios: string[] = []
+      const kept: string[] = []
       for (const row of rows) {
         const proof = yield* proofOf(building.missionId, row.scenario)
         if (proof === null) continue
         const files = filesOf(proof)
         const placed: Array<{ file: (typeof files)[number]; placed: Placed }> = []
         for (const file of files) placed.push({ file, placed: yield* placeFile(building, file) })
+        if (own !== null && !own.includes(row.scenario)) {
+          if (placed.some((one) => one.placed.kind !== 'there')) kept.push(row.scenario)
+          continue
+        }
         const conflict = placed.find((one) => one.placed.kind === 'conflict')
         if (conflict !== undefined && conflict.placed.kind === 'conflict') {
           conflicts.push({
@@ -1025,6 +1038,9 @@ export const buildingProofs = (parts: ProofParts) => {
                 scenarios,
                 conflicts: conflicts.map((one) => one.scenario),
               }),
+              ...(kept.length === 0
+                ? []
+                : [buildingEvent(building.missionId, 'building.proofs_kept', { scenarios: kept })]),
             ],
           }
         }),
