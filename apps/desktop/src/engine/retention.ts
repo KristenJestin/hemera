@@ -177,6 +177,11 @@ export const TABLE_CLASSES = {
   review_feedback: 'permanent',
   review_feedback_versions: 'permanent',
   review_feedback_images: 'permanent',
+  // A round of Review (#468): its points, scenarios, tasks and decisions, kept like its feedback.
+  round_points: 'permanent',
+  round_scenarios: 'permanent',
+  round_tasks: 'permanent',
+  round_decisions: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

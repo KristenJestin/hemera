@@ -13,6 +13,7 @@ import type { DiscussionItem } from '@hemera/ipc'
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { Effect } from 'effect'
 
+import { plannerRoleIn } from '../review/round-store.ts'
 import { storeDeliveryIn } from '../sessions/deliveries.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
@@ -195,7 +196,8 @@ export const prepareDeliveriesIn = (transaction: EngineTransaction, missionId: s
       // Every kind here is a lowercase word: a refusal would be a defect.
       const id = yield* storeDeliveryIn(transaction, {
         owner: { kind: 'mission', missionId },
-        target: { role: 'planner' },
+        // While a Review round is grilled, its Planner in round mode takes them (#468).
+        target: { role: yield* plannerRoleIn(transaction, missionId) },
         kind,
         body,
       }).pipe(Effect.catchTag('DeliveryKindRefused', Effect.die))
@@ -246,7 +248,7 @@ export const queuedForPlanner = (missionId: string) =>
           eq(sessionDeliveries.ownerKind, 'mission'),
           eq(sessionDeliveries.ownerId, missionId),
           isNull(sessionDeliveries.targetLineage),
-          eq(sessionDeliveries.targetRole, 'planner'),
+          inArray(sessionDeliveries.targetRole, ['planner', 'round-planner']),
           eq(sessionDeliveries.state, 'queued'),
         ),
       )

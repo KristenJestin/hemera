@@ -24,6 +24,7 @@ import { BUILDER_ROLE } from '../building/builder-role.ts'
 import { HELPER_ROLE, PROTOTYPER_ROLE } from '../building/helper-role.ts'
 import { DOCUMENTER_ROLE } from '../building/documenter-role.ts'
 import { CODE_REVIEWER_ROLE, SPEC_REVIEWER_ROLE } from '../building/review-role.ts'
+import { ROUND_PLANNER_ROLE } from '../review/round-role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
@@ -77,6 +78,11 @@ export interface RoleEntry {
    * service that owns them, in its own words, rather than by the sessions' (a helper, #145).
    */
   readonly toldToParentByOwner?: boolean | undefined
+  /**
+   * The role whose model setting its sessions take, when it has none of its own: the Planner in
+   * round mode takes the Planner's (#468), and Models by role shows no row of its own.
+   */
+  readonly modelOf?: string | undefined
 }
 
 export class RoleRegistry extends Context.Service<RoleRegistry, ReadonlyArray<RoleEntry>>()(
@@ -106,6 +112,7 @@ export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [
   DOCUMENTER_ROLE,
   SPEC_REVIEWER_ROLE,
   CODE_REVIEWER_ROLE,
+  ROUND_PLANNER_ROLE,
 ]
 
 /**
