@@ -64,7 +64,9 @@ const TOKEN = ['ghp', '_', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'].join('')
  * The pull requests of the fake forge, kept in a file beside it: `pr list` and `pr view` read them,
  * `pr create` adds one (its body read from the standard input). A pull request's head is the
  * branch's commit on the bare repository, read from its refs. A file `kill-after-create` makes the
- * next create die once it has created, as a CLI cut after the forge answered; holding
+ * next create print more than Hemera reads once it has created, so it is cut unanswered, as a CLI
+ * cut after the forge answered (a kill would do the same on Linux, but is no signal on Windows),
+ * the same on every system; holding
  * `and-lists-fail`, every list fails after it, as a forge that cannot be read, until the file
  * `lists-fail` is removed.
  */
@@ -134,7 +136,7 @@ module.exports = (cli, args) => {
         writeFileSync(join(__dirname, 'lists-fail'), '')
       }
       unlinkSync(kill)
-      return { kill: true }
+      return { flood: true }
     }
     return { stdout: created.url + '\n' }
   }
@@ -227,15 +229,41 @@ const recording =
     return real(folder, args, kind, options)
   }
 
-/** The pushes' Git reading the user's global configuration from `global`, and no system one. */
-const withoutUserConfig =
-  (global: string) =>
-  (real: GitBytesSpawn): GitBytesSpawn =>
-  (folder, args, kind, options) =>
-    real(folder, args, kind, {
-      ...options,
-      env: { ...options?.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' },
-    })
+/**
+ * What the machine's system configuration says of line endings, as `GIT_CONFIG_*` variables. Git
+ * for Windows sets `core.autocrlf` there: the Workspace was checked out with it, and a Git that
+ * read no system configuration at all would see every file changed.
+ */
+const systemLineEndings = (): Readonly<Record<string, string>> => {
+  const set = ['core.autocrlf', 'core.eol'].flatMap((key) => {
+    try {
+      return [[key, git(work, 'config', '--system', '--get', key)] as const]
+    } catch {
+      return []
+    }
+  })
+  return Object.fromEntries([
+    ['GIT_CONFIG_COUNT', String(set.length)],
+    ...set.flatMap(([key, value], at) => [
+      [`GIT_CONFIG_KEY_${at}`, key],
+      [`GIT_CONFIG_VALUE_${at}`, value],
+    ]),
+  ])
+}
+
+/**
+ * The pushes' Git reading the user's global configuration from `global`, and of the system one
+ * only its line endings: no identity the machine holds reaches it.
+ */
+const withoutUserConfig = (global: string) => {
+  const endings = systemLineEndings()
+  return (real: GitBytesSpawn): GitBytesSpawn =>
+    (folder, args, kind, options) =>
+      real(folder, args, kind, {
+        ...options,
+        env: { ...options?.env, ...endings, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' },
+      })
+}
 
 const engine = (
   options: {
@@ -1364,7 +1392,7 @@ describe('Retry and restart', () => {
           profile,
           Effect.gen(function* () {
             const mission = yield* launchedOnForge()
-            // The create reaches the forge, then its CLI dies before it answers, and the forge
+            // The create reaches the forge, then its CLI is cut before it answers, and the forge
             // cannot be read any more.
             writeFileSync(join(forge.folder, 'kill-after-create'), 'and-lists-fail')
             writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
@@ -1483,7 +1511,8 @@ describe('What stops a push', () => {
       expect(seen.files.includes('.env')).toBe(committed)
       expect(seen.files.includes('notes.ts')).toBe(true)
       expect(seen.status).toBe(committed ? '' : '?? .env')
-      expect(seen.ignore).toBe('*.log\n')
+      // The checkout's own line endings (CRLF under Git for Windows): nothing was appended.
+      expect(seen.ignore.replaceAll('\r\n', '\n')).toBe('*.log\n')
       // One commit, whose tree was the one expected: no attempt went wrong on the way.
       expect(seen.commits).toEqual(['done'])
     },

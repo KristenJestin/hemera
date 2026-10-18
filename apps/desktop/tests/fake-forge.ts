@@ -33,7 +33,8 @@ export interface FakeRule {
   /** Prints more than Hemera reads of one answer, then hangs: the call is cut for it. */
   readonly flood?: boolean
   /**
-   * A CommonJS module answering the call instead, `(cli, args) => ({ stdout, stderr, code, kill })`:
+   * A CommonJS module answering the call instead, `(cli, args) => ({ stdout, stderr, code, kill,
+   * flood })`:
    * a fake forge with a state of its own (R6's pull requests).
    */
   readonly program?: string
@@ -71,17 +72,7 @@ module.exports = (cli, args) => {
     process.stderr.write('fake ' + cli + ': no rule for ' + args.join(' ') + '\\n')
     process.exit(1)
   }
-  if (rule.program !== undefined) {
-    const answer = require(rule.program)(cli, args)
-    process.stdout.write(answer.stdout ?? '')
-    process.stderr.write(answer.stderr ?? '')
-    if (answer.kill) { process.kill(process.pid, 'SIGKILL'); return }
-    process.exitCode = answer.code ?? 0
-    return
-  }
-  if (rule.hang) { setInterval(() => {}, 1000); return }
-  if (rule.kill) { process.kill(process.pid, 'SIGKILL'); return }
-  if (rule.flood) {
+  const flood = () => {
     const line = 'x'.repeat(1024 * 1024) + '\\n'
     let left = 40
     const more = () => {
@@ -93,6 +84,18 @@ module.exports = (cli, args) => {
     }
     return more()
   }
+  if (rule.program !== undefined) {
+    const answer = require(rule.program)(cli, args)
+    if (answer.flood) return flood()
+    process.stdout.write(answer.stdout ?? '')
+    process.stderr.write(answer.stderr ?? '')
+    if (answer.kill) { process.kill(process.pid, 'SIGKILL'); return }
+    process.exitCode = answer.code ?? 0
+    return
+  }
+  if (rule.hang) { setInterval(() => {}, 1000); return }
+  if (rule.kill) { process.kill(process.pid, 'SIGKILL'); return }
+  if (rule.flood) return flood()
   // \`{call}\` is this call's number, for an answer that differs each time.
   const logged = readFileSync(process.env.FAKE_FORGE_LOG, 'utf8').split('\\n').filter(Boolean)
   const call = String(logged.length)
