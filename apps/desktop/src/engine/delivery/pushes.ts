@@ -12,12 +12,15 @@
  *   push pushes; then the whole working tree is committed (untracked non-ignored files included)
  *   with the commit template, as the user's Git identity, which Hemera reads and never sets. The
  *   commit's tree must equal the checkpoint's, or the Workspace changed meanwhile: tried once more
- *   from a new checkpoint. Never an amend, never `--no-verify`. An untracked file in a sensitive
- *   place (A5's list) stops it first, with a decision need: push it anyway, or keep it out.
+ *   from a new checkpoint. Never an amend, never `--no-verify`. A file in a sensitive place (A5's
+ *   list) the commit would add or change, untracked or staged, stops it first with a decision
+ *   need: push it anyway, or keep it out (unstaged, never deleted).
  * - **The push** (`push`): `git push <remote> <commit>:refs/heads/<branch>` to the repository's
  *   delivery remote, the branch the Workspace recorded, never forced, through the engine's own Git
  *   in the user's environment (the agents' is the one where pushing is neutralised). No `-u`: the
- *   upstream is recorded here, so the repository's configuration is never written.
+ *   upstream is recorded here, so the repository's configuration is never written. A file in a
+ *   sensitive place the branch's commits added or changed since the base asks first too; kept
+ *   out, it stops the push, since no history is rewritten.
  * - **The branch.** Nothing is committed unless the worktree's HEAD names the branch the
  *   Workspace recorded: an agent's `git symbolic-ref` stops the sequence with an error need.
  * - **The pull request** (`pull-request`): an open one from the branch into the base is found
@@ -148,6 +151,9 @@ export interface PushesSettings {
 const PUSH = 'Push'
 const NOT_NOW = 'Not now'
 const RETRY = 'Retry'
+/** A path Git reads as written, never as a pattern. */
+const literal = (path: string) => `:(literal)${path}`
+
 const PUSH_ANYWAY = 'Push them anyway'
 const KEEP_OUT = 'Keep them out'
 
@@ -301,10 +307,42 @@ export const pushesLayer = (settings: PushesSettings) => {
           git(folder, ['status', '--porcelain', '-z', '--untracked-files=all']),
           (out) => out !== '',
         )
-      const untrackedOf = (folder: string) =>
-        Effect.map(git(folder, ['ls-files', '--others', '--exclude-standard', '-z']), (out) =>
-          out.split('\0').filter((path) => path !== ''),
-        )
+      const pathsOf = (folder: string, args: ReadonlyArray<string>) =>
+        Effect.map(git(folder, args), (out) => out.split('\0').filter((path) => path !== ''))
+      /**
+       * What a commit of everything would add or change against HEAD: untracked, staged, or
+       * changed in the working tree; never what it deletes.
+       */
+      const committablePathsOf = (folder: string) =>
+        Effect.gen(function* () {
+          const untracked = yield* pathsOf(folder, [
+            'ls-files',
+            '--others',
+            '--exclude-standard',
+            '-z',
+          ])
+          const tracked = yield* pathsOf(folder, [
+            'diff',
+            '--name-only',
+            '-z',
+            '--no-renames',
+            '--diff-filter=d',
+            'HEAD',
+          ])
+          return [...new Set([...tracked, ...untracked])]
+        })
+      /** What the branch's commits added or changed since the Workspace's base. */
+      const committedPathsOf = (folder: string, base: string | null, head: string) =>
+        base === null
+          ? Effect.succeed([])
+          : pathsOf(folder, [
+              'diff',
+              '--name-only',
+              '-z',
+              '--no-renames',
+              '--diff-filter=d',
+              `${base}...${head}`,
+            ])
       /** The commit `refs/heads/<branch>` is at on the push URL of `remote`, or null. */
       const remoteHeadOf = (folder: string, remote: string, branch: string) =>
         Effect.gen(function* () {
@@ -339,11 +377,7 @@ export const pushesLayer = (settings: PushesSettings) => {
               yield* gitIn(folder, ['add', '--all'], env)
               const whole = yield* gitIn(folder, ['write-tree'], env)
               if (kept.length === 0) return { whole, kept: whole }
-              yield* gitIn(
-                folder,
-                ['rm', '--cached', '--quiet', '--ignore-unmatch', '--', ...kept],
-                env,
-              )
+              yield* gitIn(folder, ['reset', '--quiet', 'HEAD', '--', ...kept.map(literal)], env)
               return { whole, kept: yield* gitIn(folder, ['write-tree'], env) }
             }),
           (scratch) => Effect.sync(() => rmSync(scratch, { recursive: true, force: true })),
@@ -563,6 +597,57 @@ export const pushesLayer = (settings: PushesSettings) => {
           )
         })
 
+      /**
+       * Files in sensitive places this push would carry, asked once with a decision need: `fresh`
+       * the commit would add, `committed` the branch already holds. Answers what to keep out of
+       * the commit; kept out, a committed one stops the push, since no history is rewritten.
+       */
+      const screened = (one: Run, fresh: ReadonlyArray<string>, committed: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const sensitive = [...new Set([...fresh, ...committed])]
+          if (sensitive.length === 0) return []
+          const row = yield* reread(one)
+          const answered = Option.getOrElse(
+            readStrings(row.sensitive ?? ''),
+            (): ReadonlyArray<string> => [],
+          )
+          if (row.sensitiveAnswer === null || sensitive.some((path) => !answered.includes(path))) {
+            yield* setRow(row, { sensitive: JSON.stringify(sensitive), sensitiveAnswer: null })
+            const held = [
+              ...(fresh.length === 0 ? [] : [`files in sensitive places: ${fresh.join(', ')}`]),
+              ...(committed.length === 0
+                ? []
+                : [
+                    `files in sensitive places already committed on the branch: ${committed.join(', ')}`,
+                  ]),
+            ]
+            return yield* stopped(
+              'waiting',
+              `Files in sensitive places: ${sensitive.join(', ')}.`,
+              DecisionFields.make({
+                question: `${one.name} holds ${held.join('; and ')}. Push them with the rest of the Workspace?`,
+                options: [PUSH_ANYWAY, KEEP_OUT],
+                recommended: {
+                  option: KEEP_OUT,
+                  reason: `Such a file often holds a secret. Kept out, it stays uncommitted and nothing is added to .gitignore.${committed.length === 0 ? '' : ' One already committed cannot be kept out: the push stops instead.'}`,
+                },
+              }),
+            )
+          }
+          if (row.sensitiveAnswer === 'push') return []
+          if (committed.length > 0) {
+            // Asked again at the Retry, once the branch's commits are changed or the answer is.
+            yield* setRow(row, { sensitiveAnswer: null })
+            const output = `${committed.join(', ')} ${committed.length === 1 ? 'is' : 'are'} already committed on the branch: Hemera rewrites no history, so nothing is pushed. Take ${committed.length === 1 ? 'it' : 'them'} out of the branch’s commits, then Retry.`
+            return yield* stopped(
+              'failed',
+              output,
+              errorNeed(output, [{ what: 'git push', output }]),
+            )
+          }
+          return fresh
+        })
+
       const commitStep = (one: Run) =>
         Effect.gen(function* () {
           const { folder } = one.place
@@ -589,33 +674,14 @@ export const pushesLayer = (settings: PushesSettings) => {
             return
           }
           yield* settleLeft(missionId, 'delivery.commit', one.name, 'failed')
-          const untracked = yield* untrackedOf(folder)
           const where = { home: homedir(), platform: process.platform }
-          const sensitive = untracked.filter((path) => sensitivePlace(path, where) !== null)
-          const answered = Option.getOrElse(
-            readStrings(row.sensitive ?? ''),
-            (): ReadonlyArray<string> => [],
+          const kept = yield* screened(
+            one,
+            (yield* committablePathsOf(folder)).filter(
+              (path) => sensitivePlace(path, where) !== null,
+            ),
+            [],
           )
-          if (
-            sensitive.length > 0 &&
-            (row.sensitiveAnswer === null || sensitive.some((path) => !answered.includes(path)))
-          ) {
-            yield* setRow(row, { sensitive: JSON.stringify(sensitive), sensitiveAnswer: null })
-            return yield* stopped(
-              'waiting',
-              `Untracked files in sensitive places: ${sensitive.join(', ')}.`,
-              DecisionFields.make({
-                question: `${one.name} holds files Git does not track in sensitive places: ${sensitive.join(', ')}. Push them with the rest of the Workspace?`,
-                options: [PUSH_ANYWAY, KEEP_OUT],
-                recommended: {
-                  option: KEEP_OUT,
-                  reason:
-                    'Such a file often holds a secret. Kept out, it stays uncommitted and nothing is added to .gitignore.',
-                },
-              }),
-            )
-          }
-          const kept = row.sensitiveAnswer === 'keep' ? sensitive : []
           const changedOut = 'The Workspace changed while it was being committed.'
           for (const attempt of [1, 2]) {
             // A checkpoint's tree holds a stand-in for a sensitive file it withholds (#140): with
@@ -658,12 +724,12 @@ export const pushesLayer = (settings: PushesSettings) => {
             })
             yield* hold('committing', one.name)
             const message = one.render(one.entry.commitTemplate)
-            const added =
-              kept.length === 0
-                ? ['add', '--all']
-                : ['add', '--all', '--', '.', ...kept.map((path) => `:(exclude,literal)${path}`)]
+            // Kept out: unstaged, even when an agent staged it, and never deleted.
             const committed = yield* Effect.all([
-              git(folder, added, 'work'),
+              git(folder, ['add', '--all'], 'work'),
+              ...(kept.length === 0
+                ? []
+                : [git(folder, ['reset', '--quiet', 'HEAD', '--', ...kept.map(literal)], 'work')]),
               git(folder, ['commit', '--quiet', '-m', message], 'work'),
             ]).pipe(Effect.result)
             if (Result.isFailure(committed)) {
@@ -737,6 +803,14 @@ export const pushesLayer = (settings: PushesSettings) => {
             if (row.commit !== head) yield* setRow(row, pushed(), [event])
             return
           }
+          const where = { home: homedir(), platform: process.platform }
+          yield* screened(
+            one,
+            [],
+            (yield* committedPathsOf(folder, one.place.baseCommit, head)).filter(
+              (path) => sensitivePlace(path, where) !== null,
+            ),
+          )
           yield* settleLeft(missionId, 'delivery.push', one.name, 'failed')
           const row = yield* reread(one)
           const id = yield* begin(missionId, 'delivery.push', {

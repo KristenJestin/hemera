@@ -1437,11 +1437,13 @@ describe('What stops a push', () => {
   )
 
   test.each([
-    ['Keep them out', false],
-    ['Push them anyway', true],
+    ['an untracked', 'Keep them out', false],
+    ['an untracked', 'Push them anyway', true],
+    ['a staged', 'Keep them out', false],
+    ['a staged', 'Push them anyway', true],
   ] as const)(
-    'an untracked .env stops the push with the decision need; “%s”',
-    async (option, committed) => {
+    '%s .env stops the push with the decision need; “%s”',
+    async (how, option, committed) => {
       const { run } = engine()
       const seen = await run(({ profile }) =>
         within(
@@ -1450,6 +1452,8 @@ describe('What stops a push', () => {
             const mission = yield* launchedOnForge()
             writeFileSync(join(mission.api, '.env'), 'API_KEY=1\n')
             writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            // An agent's `git add -A`: the gate refuses no add.
+            if (how === 'a staged') git(mission.api, 'add', '-A')
             yield* moved(mission.missionId, 'endBuilding')
             const need = yield* needOf(mission.missionId, 'Decision')
             const before = remoteHead('api', mission.branch)
@@ -1482,6 +1486,56 @@ describe('What stops a push', () => {
       expect(seen.ignore).toBe('*.log\n')
       // One commit, whose tree was the one expected: no attempt went wrong on the way.
       expect(seen.commits).toEqual(['done'])
+    },
+    SLOW,
+  )
+
+  test.each([
+    ['Keep them out', false],
+    ['Push them anyway', true],
+  ] as const)(
+    'a .env an agent committed on the branch stops the push with the decision need; “%s”',
+    async (option, pushed) => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* launchedOnForge()
+            writeFileSync(join(mission.api, '.env'), 'API_KEY=1\n')
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            git(mission.api, 'add', '-A')
+            git(mission.api, 'commit', '-q', '-m', 'notes')
+            yield* moved(mission.missionId, 'endBuilding')
+            const need = yield* needOf(mission.missionId, 'Decision')
+            const before = remoteHead('api', mission.branch)
+            yield* chosen(need, option)
+            yield* untilState(mission.missionId, 'api', pushed ? 'done' : 'failed')
+            const failed = pushed ? null : yield* needOf(mission.missionId, 'Error')
+            return {
+              need,
+              failed,
+              before,
+              head: git(mission.api, 'rev-parse', 'HEAD'),
+              branch: mission.branch,
+              files: git(mission.api, 'show', '--name-only', '--format=', 'HEAD').split('\n'),
+            }
+          }),
+        ),
+      )
+      const fields = seen.need.fields
+      if (!Predicate.isTagged(fields, 'Decision')) throw new Error('not a decision')
+      expect(fields.question).toMatch(/already committed on the branch: \.env/)
+      expect(fields.options).toEqual(['Push them anyway', 'Keep them out'])
+      expect(seen.before).toBeNull()
+      // The agent's commit is kept as it is: Hemera rewrites no history.
+      expect(seen.files).toContain('.env')
+      expect(remoteHead('api', seen.branch)).toBe(pushed ? seen.head : null)
+      if (pushed) return
+      const failed = seen.failed?.fields
+      if (!Predicate.isTagged(failed, 'Error')) throw new Error('not an error need')
+      expect(failed.failed).toMatch(/\.env is already committed on the branch/)
+      expect(failed.failed).toMatch(/rewrites no history/)
     },
     SLOW,
   )
