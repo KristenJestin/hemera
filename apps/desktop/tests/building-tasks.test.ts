@@ -916,6 +916,9 @@ describe('The end and Cancel', () => {
           yield* until(
             Effect.map(buildingOf(first.mission.id), (view) => view?.state === 'cancelled'),
           )
+          yield* until(
+            Effect.map(getMission(first.mission.id), (one) => one.unstopped.length === 0),
+          )
           const live = yield* sessionsIn(['starting', 'working', 'idle'], {
             kind: 'mission',
             missionId: first.mission.id,
