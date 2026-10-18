@@ -53,7 +53,7 @@ import {
   validRed,
 } from '@hemera/core/domain'
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, ne } from 'drizzle-orm'
 import { Effect, Option, Predicate, Result, Semaphore } from 'effect'
 import { realpath } from 'node:fs/promises'
 import { join, relative } from 'node:path'
@@ -79,7 +79,9 @@ import { Database, type EngineTransaction, refusedWhile } from '../storage/datab
 import {
   buildingAttempts,
   buildingDecisions,
+  buildings,
   missions,
+  proofRuns,
   roundScenarios,
   scenarioProofs,
   specProofs,
@@ -649,11 +651,67 @@ export const buildingProofs = (parts: ProofParts) => {
 
   // ---- The start.
 
+  /**
+   * The proofs of the Building before a round's, carried into it with their runs, states, verdicts
+   * and trees (CT-38): the Spec's and the earlier rounds' proofs stay the mission's. A green run on
+   * a tree that is no longer the current one is to run again, a verdict by hand given on one is to
+   * verify again; the round's change makes them so as any change does. Answers how many it carried.
+   */
+  const carriedIn = (transaction: EngineTransaction, building: BuildingRow) =>
+    Effect.gen(function* () {
+      const [before] = yield* transaction
+        .select({ id: buildings.id })
+        .from(buildings)
+        .where(and(eq(buildings.missionId, building.missionId), ne(buildings.id, building.id)))
+        .orderBy(desc(buildings.startedAt))
+        .limit(1)
+        .pipe(Effect.mapError(refusedWhile('reading the Building before the round')))
+      if (before === undefined) return 0
+      const rows = yield* scenarioProofsIn(transaction, before.id)
+      const runs = yield* proofRunsIn(transaction, before.id)
+      const current = yield* currentTreesIn(transaction, building.missionId)
+      const ids = new Map(runs.map((run) => [run.id, crypto.randomUUID()]))
+      for (const run of runs) {
+        yield* transaction
+          .insert(proofRuns)
+          .values({ ...run, id: ids.get(run.id) ?? run.id, buildingId: building.id })
+          .pipe(Effect.mapError(refusedWhile('carrying the proof runs')))
+      }
+      const idOf = (id: string | null) => (id === null ? null : (ids.get(id) ?? null))
+      for (const row of rows) {
+        const green = runs.find((run) => run.id === row.greenRunId)
+        const state = stateOf(row)
+        const stale =
+          (state === 'green' &&
+            (green === undefined || !upToDate(readTrees(green.trees), current))) ||
+          state === 'held'
+        const again =
+          (state === 'validated' || state === 'refused') && !upToDate(readTrees(row.trees), current)
+        yield* transaction
+          .insert(scenarioProofs)
+          .values({
+            ...row,
+            buildingId: building.id,
+            state: stale ? 'to_rerun' : again ? 'to_verify' : row.state,
+            redRunId: idOf(row.redRunId),
+            greenRunId: idOf(row.greenRunId),
+            heldRunId: null,
+            needId: null,
+            updatedAt: now(),
+          })
+          .onConflictDoNothing()
+          .pipe(Effect.mapError(refusedWhile('carrying the proofs')))
+      }
+      return rows.length
+    })
+
   /** Each scenario of the frozen Spec with its Proof block, in the Building's first transaction. */
   const setUpIn = (transaction: EngineTransaction, building: BuildingRow) =>
     Effect.gen(function* () {
-      // A round's Building proves its points' scenarios, red first as any (#468).
+      // A round's Building proves its points' scenarios, red first as any (#468), after the
+      // proofs it carries from the Building before it.
       if (building.round !== null) {
+        const carried = yield* carriedIn(transaction, building)
         const scenarios = yield* roundScenariosIn(transaction, building.missionId, building.round)
         for (const [rank, scenario] of scenarios.entries()) {
           if (scenario.proof === null) continue
@@ -664,7 +722,7 @@ export const buildingProofs = (parts: ProofParts) => {
               buildingId: building.id,
               scenario: scenario.id,
               requirement: scenario.point,
-              rank,
+              rank: carried + rank,
               mode: scenario.proof.mode,
               state: automated ? 'waiting_red' : 'to_verify',
               updatedAt: now(),
