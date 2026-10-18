@@ -101,6 +101,15 @@ export const fixedOutside = (
     yield* OutsideChanges.use((outside) => outside.compare(missionId, null))
   })
 
+/** A pre-launch check that failed stops the fixture with what it said, not the launch's refusal. */
+export const checkLaunchable = (check: {
+  readonly state: string
+  readonly verdict: { readonly said: string }
+}) =>
+  check.state === 'failed'
+    ? Effect.die(new Error(`the pre-launch check failed: ${check.verdict.said}`))
+    : Effect.void
+
 /** The export planned, then frozen, checked and launched by the user: Building, its reds recorded. */
 export const launchedExport = (world: { readonly work: string; readonly git: FixtureGit }) =>
   Effect.gen(function* () {
@@ -114,6 +123,7 @@ export const launchedExport = (world: { readonly work: string; readonly git: Fix
     )
     const check = yield* latestCheckOf(missionId)
     if (check === null) return yield* Effect.die(new Error('no pre-launch check'))
+    yield* checkLaunchable(check)
     yield* launchMission(missionId, check.id, 'launch')
     yield* reached(
       'Building',
