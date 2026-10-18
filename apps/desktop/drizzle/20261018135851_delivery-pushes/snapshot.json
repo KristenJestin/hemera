@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "9a493ee1-1475-4fdb-a4c3-1631185030c6",
-  "prevIds": [
-    "d485b8dc-7074-495f-9589-89376a46d413"
-  ],
+  "prevIds": ["d485b8dc-7074-495f-9589-89376a46d413"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -13599,13 +13597,9 @@
       "table": "writes_before_red"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13614,13 +13608,9 @@
       "table": "answers"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13629,13 +13619,9 @@
       "table": "attempt_writes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13644,13 +13630,9 @@
       "table": "base_moves"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13659,13 +13641,9 @@
       "table": "base_moves"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13674,13 +13652,9 @@
       "table": "building_activity"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13689,13 +13663,9 @@
       "table": "building_attempts"
     },
     {
-      "columns": [
-        "attempt_id"
-      ],
+      "columns": ["attempt_id"],
       "tableTo": "building_attempts",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13704,13 +13674,9 @@
       "table": "building_check_results"
     },
     {
-      "columns": [
-        "attempt_id"
-      ],
+      "columns": ["attempt_id"],
       "tableTo": "building_attempts",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13719,13 +13685,9 @@
       "table": "building_check_runs"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13734,13 +13696,9 @@
       "table": "building_claims"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13749,13 +13707,9 @@
       "table": "building_conflicts"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13764,13 +13718,9 @@
       "table": "building_decisions"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13779,13 +13729,9 @@
       "table": "building_launches"
     },
     {
-      "columns": [
-        "check_id"
-      ],
+      "columns": ["check_id"],
       "tableTo": "prelaunch_checks",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -13794,13 +13740,9 @@
       "table": "building_launches"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -13809,13 +13751,9 @@
       "table": "building_launches"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13824,13 +13762,9 @@
       "table": "building_tasks"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13839,13 +13773,9 @@
       "table": "building_unattributed"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13854,13 +13784,9 @@
       "table": "buildings"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -13869,13 +13795,9 @@
       "table": "buildings"
     },
     {
-      "columns": [
-        "review_checkpoint_id"
-      ],
+      "columns": ["review_checkpoint_id"],
       "tableTo": "checkpoints",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -13884,13 +13806,9 @@
       "table": "buildings"
     },
     {
-      "columns": [
-        "chat_id"
-      ],
+      "columns": ["chat_id"],
       "tableTo": "chats",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13899,13 +13817,9 @@
       "table": "chat_entries"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13914,13 +13828,9 @@
       "table": "chats"
     },
     {
-      "columns": [
-        "checkpoint_id"
-      ],
+      "columns": ["checkpoint_id"],
       "tableTo": "checkpoints",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13929,13 +13839,9 @@
       "table": "checkpoint_files"
     },
     {
-      "columns": [
-        "checkpoint_id"
-      ],
+      "columns": ["checkpoint_id"],
       "tableTo": "checkpoints",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13944,13 +13850,9 @@
       "table": "checkpoint_repositories"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13959,13 +13861,9 @@
       "table": "checkpoints"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13974,13 +13872,9 @@
       "table": "cold_read_findings"
     },
     {
-      "columns": [
-        "cold_read_id"
-      ],
+      "columns": ["cold_read_id"],
       "tableTo": "cold_reads",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -13989,13 +13883,9 @@
       "table": "cold_read_findings"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14004,13 +13894,9 @@
       "table": "cold_reads"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14019,13 +13905,9 @@
       "table": "command_runs"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14034,13 +13916,9 @@
       "table": "command_runs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14049,13 +13927,9 @@
       "table": "delivery_pushes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14064,13 +13938,9 @@
       "table": "delivery_rule_copies"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14079,13 +13949,9 @@
       "table": "delivery_rules"
     },
     {
-      "columns": [
-        "discussion_id"
-      ],
+      "columns": ["discussion_id"],
       "tableTo": "discussions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14094,13 +13960,9 @@
       "table": "discussion_messages"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14109,13 +13971,9 @@
       "table": "discussions"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14124,13 +13982,9 @@
       "table": "dismissed_services"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14139,13 +13993,9 @@
       "table": "documenter_passes"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14154,13 +14004,9 @@
       "table": "environment_variables"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14169,13 +14015,9 @@
       "table": "environment_variables"
     },
     {
-      "columns": [
-        "resource_id"
-      ],
+      "columns": ["resource_id"],
       "tableTo": "exclusive_resources",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14184,13 +14026,9 @@
       "table": "exclusive_resource_commands"
     },
     {
-      "columns": [
-        "command_id"
-      ],
+      "columns": ["command_id"],
       "tableTo": "project_commands",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14199,13 +14037,9 @@
       "table": "exclusive_resource_commands"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14214,13 +14048,9 @@
       "table": "exclusive_resources"
     },
     {
-      "columns": [
-        "reset_command_id"
-      ],
+      "columns": ["reset_command_id"],
       "tableTo": "project_commands",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -14229,13 +14059,9 @@
       "table": "exclusive_resources"
     },
     {
-      "columns": [
-        "need_id"
-      ],
+      "columns": ["need_id"],
       "tableTo": "needs",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14244,13 +14070,9 @@
       "table": "forge_needs"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14259,13 +14081,9 @@
       "table": "forge_needs"
     },
     {
-      "columns": [
-        "freeze_id"
-      ],
+      "columns": ["freeze_id"],
       "tableTo": "freezes",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14274,13 +14092,9 @@
       "table": "freeze_files"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14289,13 +14103,9 @@
       "table": "freezes"
     },
     {
-      "columns": [
-        "need_id"
-      ],
+      "columns": ["need_id"],
       "tableTo": "needs",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -14304,13 +14114,9 @@
       "table": "git_holds"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14319,13 +14125,9 @@
       "table": "helpers"
     },
     {
-      "columns": [
-        "provider_id"
-      ],
+      "columns": ["provider_id"],
       "tableTo": "ticket_providers",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14334,13 +14136,9 @@
       "table": "jira_tokens"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14349,13 +14147,9 @@
       "table": "living_domains"
     },
     {
-      "columns": [
-        "requirement_id"
-      ],
+      "columns": ["requirement_id"],
       "tableTo": "living_requirements",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14364,13 +14158,9 @@
       "table": "living_history"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14379,13 +14169,9 @@
       "table": "living_requirements"
     },
     {
-      "columns": [
-        "domain_id"
-      ],
+      "columns": ["domain_id"],
       "tableTo": "living_domains",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14394,13 +14180,9 @@
       "table": "living_requirements"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14409,13 +14191,9 @@
       "table": "living_runs"
     },
     {
-      "columns": [
-        "domain_id"
-      ],
+      "columns": ["domain_id"],
       "tableTo": "living_domains",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -14424,13 +14202,9 @@
       "table": "living_runs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14439,13 +14213,9 @@
       "table": "memory_evidence"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14454,13 +14224,9 @@
       "table": "memory_journal"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14469,13 +14235,9 @@
       "table": "memory_next"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14484,13 +14246,9 @@
       "table": "memory_notes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14499,13 +14257,9 @@
       "table": "memory_now_lines"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14514,13 +14268,9 @@
       "table": "mission_dependencies"
     },
     {
-      "columns": [
-        "depends_on"
-      ],
+      "columns": ["depends_on"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14529,13 +14279,9 @@
       "table": "mission_dependencies"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14544,13 +14290,9 @@
       "table": "mission_grants"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14559,13 +14301,9 @@
       "table": "mission_marks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14574,13 +14312,9 @@
       "table": "mission_recommendations"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14589,13 +14323,9 @@
       "table": "mission_spent"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14604,13 +14334,9 @@
       "table": "mission_stops"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14619,13 +14345,9 @@
       "table": "mission_tickets"
     },
     {
-      "columns": [
-        "provider_id"
-      ],
+      "columns": ["provider_id"],
       "tableTo": "ticket_providers",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -14634,13 +14356,9 @@
       "table": "mission_tickets"
     },
     {
-      "columns": [
-        "base_version_id"
-      ],
+      "columns": ["base_version_id"],
       "tableTo": "ticket_versions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -14649,13 +14367,9 @@
       "table": "mission_tickets"
     },
     {
-      "columns": [
-        "last_version_id"
-      ],
+      "columns": ["last_version_id"],
       "tableTo": "ticket_versions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -14664,13 +14378,9 @@
       "table": "mission_tickets"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14679,13 +14389,9 @@
       "table": "mission_validation_settings"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14694,13 +14400,9 @@
       "table": "missions"
     },
     {
-      "columns": [
-        "origin_id"
-      ],
+      "columns": ["origin_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -14709,13 +14411,9 @@
       "table": "missions"
     },
     {
-      "columns": [
-        "need_id"
-      ],
+      "columns": ["need_id"],
       "tableTo": "needs",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14724,13 +14422,9 @@
       "table": "need_deliveries"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14739,13 +14433,9 @@
       "table": "needs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14754,13 +14444,9 @@
       "table": "needs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14769,13 +14455,9 @@
       "table": "outside_changes"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14784,13 +14466,9 @@
       "table": "outside_changes"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14799,13 +14477,9 @@
       "table": "outside_watches"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14814,13 +14488,9 @@
       "table": "permission_requests"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14829,13 +14499,9 @@
       "table": "permission_requests"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14844,13 +14510,9 @@
       "table": "planning_inputs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14859,13 +14521,9 @@
       "table": "prelaunch_checks"
     },
     {
-      "columns": [
-        "probe_id"
-      ],
+      "columns": ["probe_id"],
       "tableTo": "probes",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14874,13 +14532,9 @@
       "table": "probe_files"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14889,13 +14543,9 @@
       "table": "probes"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -14904,13 +14554,9 @@
       "table": "probes"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14919,13 +14565,9 @@
       "table": "project_checks"
     },
     {
-      "columns": [
-        "command_id"
-      ],
+      "columns": ["command_id"],
       "tableTo": "project_commands",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14934,13 +14576,9 @@
       "table": "project_checks"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14949,13 +14587,9 @@
       "table": "project_commands"
     },
     {
-      "columns": [
-        "repository_id"
-      ],
+      "columns": ["repository_id"],
       "tableTo": "project_repositories",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14964,13 +14598,9 @@
       "table": "project_commands"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14979,13 +14609,9 @@
       "table": "project_doc_recipes"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -14994,13 +14620,9 @@
       "table": "project_never_entries"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15009,13 +14631,9 @@
       "table": "project_preparation_steps"
     },
     {
-      "columns": [
-        "repository_id"
-      ],
+      "columns": ["repository_id"],
       "tableTo": "project_repositories",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15024,13 +14642,9 @@
       "table": "project_preparation_steps"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15039,13 +14653,9 @@
       "table": "project_repositories"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15054,13 +14664,9 @@
       "table": "proof_runs"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15069,13 +14675,9 @@
       "table": "proof_runs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15084,13 +14686,9 @@
       "table": "proposed_answers"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15099,13 +14697,9 @@
       "table": "question_drafts"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15114,13 +14708,9 @@
       "table": "questions"
     },
     {
-      "columns": [
-        "helper_id"
-      ],
+      "columns": ["helper_id"],
       "tableTo": "helpers",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15129,13 +14719,9 @@
       "table": "queued_results"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15144,13 +14730,9 @@
       "table": "queued_results"
     },
     {
-      "columns": [
-        "repository_id"
-      ],
+      "columns": ["repository_id"],
       "tableTo": "project_repositories",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15159,13 +14741,9 @@
       "table": "repository_forges"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15174,13 +14752,9 @@
       "table": "repository_trees"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15189,13 +14763,9 @@
       "table": "resource_claims"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15204,13 +14774,9 @@
       "table": "resource_claims"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -15219,13 +14785,9 @@
       "table": "resource_claims"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15234,13 +14796,9 @@
       "table": "review_changed_after"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15249,13 +14807,9 @@
       "table": "review_checkpoints"
     },
     {
-      "columns": [
-        "checkpoint_id"
-      ],
+      "columns": ["checkpoint_id"],
       "tableTo": "checkpoints",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15264,13 +14818,9 @@
       "table": "review_checkpoints"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15279,13 +14829,9 @@
       "table": "review_feedback"
     },
     {
-      "columns": [
-        "feedback_id"
-      ],
+      "columns": ["feedback_id"],
       "tableTo": "review_feedback",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15294,13 +14840,9 @@
       "table": "review_feedback_images"
     },
     {
-      "columns": [
-        "evidence_id"
-      ],
+      "columns": ["evidence_id"],
       "tableTo": "memory_evidence",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15309,13 +14851,9 @@
       "table": "review_feedback_images"
     },
     {
-      "columns": [
-        "feedback_id"
-      ],
+      "columns": ["feedback_id"],
       "tableTo": "review_feedback",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15324,13 +14862,9 @@
       "table": "review_feedback_versions"
     },
     {
-      "columns": [
-        "pass_id"
-      ],
+      "columns": ["pass_id"],
       "tableTo": "review_passes",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15339,13 +14873,9 @@
       "table": "review_findings"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15354,13 +14884,9 @@
       "table": "review_findings"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15369,13 +14895,9 @@
       "table": "review_findings"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15384,13 +14906,9 @@
       "table": "review_passes"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15399,13 +14917,9 @@
       "table": "review_passes"
     },
     {
-      "columns": [
-        "checkpoint_id"
-      ],
+      "columns": ["checkpoint_id"],
       "tableTo": "checkpoints",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -15414,13 +14928,9 @@
       "table": "review_passes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15429,13 +14939,9 @@
       "table": "review_rounds"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15444,13 +14950,9 @@
       "table": "scenario_proofs"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15459,13 +14961,9 @@
       "table": "setup_cards"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15474,13 +14972,9 @@
       "table": "snapshot_changes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15489,13 +14983,9 @@
       "table": "snapshot_files"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15504,13 +14994,9 @@
       "table": "spec_changes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15519,13 +15005,9 @@
       "table": "spec_proofs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15534,13 +15016,9 @@
       "table": "spec_reads"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15549,13 +15027,9 @@
       "table": "spec_relies_on"
     },
     {
-      "columns": [
-        "depends_on"
-      ],
+      "columns": ["depends_on"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15564,13 +15038,9 @@
       "table": "spec_relies_on"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15579,13 +15049,9 @@
       "table": "spec_requirements"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15594,13 +15060,9 @@
       "table": "spec_scenarios"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15609,13 +15071,9 @@
       "table": "spec_sections"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15624,13 +15082,9 @@
       "table": "spec_tasks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15639,13 +15093,9 @@
       "table": "spec_visions"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15654,13 +15104,9 @@
       "table": "specs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15669,13 +15115,9 @@
       "table": "ticket_event_runs"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15684,13 +15126,9 @@
       "table": "ticket_events"
     },
     {
-      "columns": [
-        "before_version_id"
-      ],
+      "columns": ["before_version_id"],
       "tableTo": "ticket_versions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -15699,13 +15137,9 @@
       "table": "ticket_events"
     },
     {
-      "columns": [
-        "after_version_id"
-      ],
+      "columns": ["after_version_id"],
       "tableTo": "ticket_versions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -15714,13 +15148,9 @@
       "table": "ticket_events"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "ticket_event_runs",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -15729,13 +15159,9 @@
       "table": "ticket_events"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15744,13 +15170,9 @@
       "table": "ticket_providers"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15759,13 +15181,9 @@
       "table": "ticket_versions"
     },
     {
-      "columns": [
-        "provider_id"
-      ],
+      "columns": ["provider_id"],
       "tableTo": "ticket_providers",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -15774,13 +15192,9 @@
       "table": "ticket_versions"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15789,13 +15203,9 @@
       "table": "ticket_writes"
     },
     {
-      "columns": [
-        "provider_id"
-      ],
+      "columns": ["provider_id"],
       "tableTo": "ticket_providers",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -15804,13 +15214,9 @@
       "table": "ticket_writes"
     },
     {
-      "columns": [
-        "expected_version_id"
-      ],
+      "columns": ["expected_version_id"],
       "tableTo": "ticket_versions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -15819,13 +15225,9 @@
       "table": "ticket_writes"
     },
     {
-      "columns": [
-        "conflict_version_id"
-      ],
+      "columns": ["conflict_version_id"],
       "tableTo": "ticket_versions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -15834,13 +15236,9 @@
       "table": "ticket_writes"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "tableTo": "missions",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15849,13 +15247,9 @@
       "table": "waves"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15864,13 +15258,9 @@
       "table": "workspace_repositories"
     },
     {
-      "columns": [
-        "workspace_id"
-      ],
+      "columns": ["workspace_id"],
       "tableTo": "workspaces",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15879,13 +15269,9 @@
       "table": "workspace_steps"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15894,13 +15280,9 @@
       "table": "workspaces"
     },
     {
-      "columns": [
-        "building_id"
-      ],
+      "columns": ["building_id"],
       "tableTo": "buildings",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -15909,1224 +15291,910 @@
       "table": "writes_before_red"
     },
     {
-      "columns": [
-        "mission_id",
-        "question_id",
-        "version"
-      ],
+      "columns": ["mission_id", "question_id", "version"],
       "nameExplicit": false,
       "name": "answers_pk",
       "entityType": "pks",
       "table": "answers"
     },
     {
-      "columns": [
-        "building_id",
-        "started_at"
-      ],
+      "columns": ["building_id", "started_at"],
       "nameExplicit": false,
       "name": "building_activity_pk",
       "entityType": "pks",
       "table": "building_activity"
     },
     {
-      "columns": [
-        "attempt_id",
-        "name",
-        "place"
-      ],
+      "columns": ["attempt_id", "name", "place"],
       "nameExplicit": false,
       "name": "building_check_runs_pk",
       "entityType": "pks",
       "table": "building_check_runs"
     },
     {
-      "columns": [
-        "building_id",
-        "repository",
-        "path"
-      ],
+      "columns": ["building_id", "repository", "path"],
       "nameExplicit": false,
       "name": "building_claims_pk",
       "entityType": "pks",
       "table": "building_claims"
     },
     {
-      "columns": [
-        "building_id",
-        "id"
-      ],
+      "columns": ["building_id", "id"],
       "nameExplicit": false,
       "name": "building_tasks_pk",
       "entityType": "pks",
       "table": "building_tasks"
     },
     {
-      "columns": [
-        "building_id",
-        "repository",
-        "path"
-      ],
+      "columns": ["building_id", "repository", "path"],
       "nameExplicit": false,
       "name": "building_unattributed_pk",
       "entityType": "pks",
       "table": "building_unattributed"
     },
     {
-      "columns": [
-        "checkpoint_id",
-        "repository",
-        "path"
-      ],
+      "columns": ["checkpoint_id", "repository", "path"],
       "nameExplicit": false,
       "name": "checkpoint_files_pk",
       "entityType": "pks",
       "table": "checkpoint_files"
     },
     {
-      "columns": [
-        "checkpoint_id",
-        "repository"
-      ],
+      "columns": ["checkpoint_id", "repository"],
       "nameExplicit": false,
       "name": "checkpoint_repositories_pk",
       "entityType": "pks",
       "table": "checkpoint_repositories"
     },
     {
-      "columns": [
-        "mission_id",
-        "id"
-      ],
+      "columns": ["mission_id", "id"],
       "nameExplicit": false,
       "name": "cold_read_findings_pk",
       "entityType": "pks",
       "table": "cold_read_findings"
     },
     {
-      "columns": [
-        "mission_id",
-        "repository_id"
-      ],
+      "columns": ["mission_id", "repository_id"],
       "nameExplicit": false,
       "name": "delivery_pushes_pk",
       "entityType": "pks",
       "table": "delivery_pushes"
     },
     {
-      "columns": [
-        "mission_id",
-        "section"
-      ],
+      "columns": ["mission_id", "section"],
       "nameExplicit": false,
       "name": "delivery_rule_copies_pk",
       "entityType": "pks",
       "table": "delivery_rule_copies"
     },
     {
-      "columns": [
-        "mission_id",
-        "run_id"
-      ],
+      "columns": ["mission_id", "run_id"],
       "nameExplicit": false,
       "name": "dismissed_services_pk",
       "entityType": "pks",
       "table": "dismissed_services"
     },
     {
-      "columns": [
-        "resource_id",
-        "command_id"
-      ],
+      "columns": ["resource_id", "command_id"],
       "nameExplicit": false,
       "name": "exclusive_resource_commands_pk",
       "entityType": "pks",
       "table": "exclusive_resource_commands"
     },
     {
-      "columns": [
-        "freeze_id",
-        "repository",
-        "path"
-      ],
+      "columns": ["freeze_id", "repository", "path"],
       "nameExplicit": false,
       "name": "freeze_files_pk",
       "entityType": "pks",
       "table": "freeze_files"
     },
     {
-      "columns": [
-        "mission_id",
-        "counter"
-      ],
+      "columns": ["mission_id", "counter"],
       "nameExplicit": false,
       "name": "mission_spent_pk",
       "entityType": "pks",
       "table": "mission_spent"
     },
     {
-      "columns": [
-        "mission_id",
-        "version"
-      ],
+      "columns": ["mission_id", "version"],
       "nameExplicit": false,
       "name": "mission_validation_settings_pk",
       "entityType": "pks",
       "table": "mission_validation_settings"
     },
     {
-      "columns": [
-        "agent",
-        "model"
-      ],
+      "columns": ["agent", "model"],
       "nameExplicit": false,
       "name": "model_marks_pk",
       "entityType": "pks",
       "table": "model_marks"
     },
     {
-      "columns": [
-        "building_id",
-        "repository"
-      ],
+      "columns": ["building_id", "repository"],
       "nameExplicit": false,
       "name": "outside_watches_pk",
       "entityType": "pks",
       "table": "outside_watches"
     },
     {
-      "columns": [
-        "mission_id",
-        "id"
-      ],
+      "columns": ["mission_id", "id"],
       "nameExplicit": false,
       "name": "planning_inputs_pk",
       "entityType": "pks",
       "table": "planning_inputs"
     },
     {
-      "columns": [
-        "probe_id",
-        "repository",
-        "path"
-      ],
+      "columns": ["probe_id", "repository", "path"],
       "nameExplicit": false,
       "name": "probe_files_pk",
       "entityType": "pks",
       "table": "probe_files"
     },
     {
-      "columns": [
-        "mission_id",
-        "id"
-      ],
+      "columns": ["mission_id", "id"],
       "nameExplicit": false,
       "name": "questions_pk",
       "entityType": "pks",
       "table": "questions"
     },
     {
-      "columns": [
-        "mission_id",
-        "repository"
-      ],
+      "columns": ["mission_id", "repository"],
       "nameExplicit": false,
       "name": "repository_trees_pk",
       "entityType": "pks",
       "table": "repository_trees"
     },
     {
-      "columns": [
-        "building_id",
-        "repository",
-        "path"
-      ],
+      "columns": ["building_id", "repository", "path"],
       "nameExplicit": false,
       "name": "review_changed_after_pk",
       "entityType": "pks",
       "table": "review_changed_after"
     },
     {
-      "columns": [
-        "mission_id",
-        "round"
-      ],
+      "columns": ["mission_id", "round"],
       "nameExplicit": false,
       "name": "review_checkpoints_pk",
       "entityType": "pks",
       "table": "review_checkpoints"
     },
     {
-      "columns": [
-        "feedback_id",
-        "position"
-      ],
+      "columns": ["feedback_id", "position"],
       "nameExplicit": false,
       "name": "review_feedback_images_pk",
       "entityType": "pks",
       "table": "review_feedback_images"
     },
     {
-      "columns": [
-        "feedback_id",
-        "version"
-      ],
+      "columns": ["feedback_id", "version"],
       "nameExplicit": false,
       "name": "review_feedback_versions_pk",
       "entityType": "pks",
       "table": "review_feedback_versions"
     },
     {
-      "columns": [
-        "mission_id",
-        "number"
-      ],
+      "columns": ["mission_id", "number"],
       "nameExplicit": false,
       "name": "review_rounds_pk",
       "entityType": "pks",
       "table": "review_rounds"
     },
     {
-      "columns": [
-        "level",
-        "scope_id",
-        "role"
-      ],
+      "columns": ["level", "scope_id", "role"],
       "nameExplicit": false,
       "name": "role_models_pk",
       "entityType": "pks",
       "table": "role_models"
     },
     {
-      "columns": [
-        "building_id",
-        "scenario"
-      ],
+      "columns": ["building_id", "scenario"],
       "nameExplicit": false,
       "name": "scenario_proofs_pk",
       "entityType": "pks",
       "table": "scenario_proofs"
     },
     {
-      "columns": [
-        "mission_id",
-        "repository",
-        "from_tree",
-        "to_tree",
-        "path"
-      ],
+      "columns": ["mission_id", "repository", "from_tree", "to_tree", "path"],
       "nameExplicit": false,
       "name": "snapshot_changes_pk",
       "entityType": "pks",
       "table": "snapshot_changes"
     },
     {
-      "columns": [
-        "mission_id",
-        "repository",
-        "tree",
-        "path"
-      ],
+      "columns": ["mission_id", "repository", "tree", "path"],
       "nameExplicit": false,
       "name": "snapshot_files_pk",
       "entityType": "pks",
       "table": "snapshot_files"
     },
     {
-      "columns": [
-        "mission_id",
-        "scenario_id"
-      ],
+      "columns": ["mission_id", "scenario_id"],
       "nameExplicit": false,
       "name": "spec_proofs_pk",
       "entityType": "pks",
       "table": "spec_proofs"
     },
     {
-      "columns": [
-        "mission_id",
-        "requirement_id",
-        "depends_on",
-        "their_requirement"
-      ],
+      "columns": ["mission_id", "requirement_id", "depends_on", "their_requirement"],
       "nameExplicit": false,
       "name": "spec_relies_on_pk",
       "entityType": "pks",
       "table": "spec_relies_on"
     },
     {
-      "columns": [
-        "mission_id",
-        "id"
-      ],
+      "columns": ["mission_id", "id"],
       "nameExplicit": false,
       "name": "spec_requirements_pk",
       "entityType": "pks",
       "table": "spec_requirements"
     },
     {
-      "columns": [
-        "mission_id",
-        "id"
-      ],
+      "columns": ["mission_id", "id"],
       "nameExplicit": false,
       "name": "spec_scenarios_pk",
       "entityType": "pks",
       "table": "spec_scenarios"
     },
     {
-      "columns": [
-        "mission_id",
-        "name"
-      ],
+      "columns": ["mission_id", "name"],
       "nameExplicit": false,
       "name": "spec_sections_pk",
       "entityType": "pks",
       "table": "spec_sections"
     },
     {
-      "columns": [
-        "mission_id",
-        "id"
-      ],
+      "columns": ["mission_id", "id"],
       "nameExplicit": false,
       "name": "spec_tasks_pk",
       "entityType": "pks",
       "table": "spec_tasks"
     },
     {
-      "columns": [
-        "mission_id",
-        "number"
-      ],
+      "columns": ["mission_id", "number"],
       "nameExplicit": false,
       "name": "waves_pk",
       "entityType": "pks",
       "table": "waves"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "agent_sessions_pk",
       "table": "agent_sessions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "key"
-      ],
+      "columns": ["key"],
       "nameExplicit": false,
       "name": "app_preferences_pk",
       "table": "app_preferences",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "attempt_writes_pk",
       "table": "attempt_writes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "base_moves_pk",
       "table": "base_moves",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "building_attempts_pk",
       "table": "building_attempts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "building_check_results_pk",
       "table": "building_check_results",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "building_conflicts_pk",
       "table": "building_conflicts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "building_decisions_pk",
       "table": "building_decisions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "building_launches_pk",
       "table": "building_launches",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "buildings_pk",
       "table": "buildings",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "chat_entries_pk",
       "table": "chat_entries",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "chats_pk",
       "table": "chats",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "checkpoints_pk",
       "table": "checkpoints",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "cold_reads_pk",
       "table": "cold_reads",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "command_runs_pk",
       "table": "command_runs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "project_id"
-      ],
+      "columns": ["project_id"],
       "nameExplicit": false,
       "name": "delivery_rules_pk",
       "table": "delivery_rules",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "discussion_messages_pk",
       "table": "discussion_messages",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "discussions_pk",
       "table": "discussions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "documenter_passes_pk",
       "table": "documenter_passes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "domain_events_pk",
       "table": "domain_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "effectful_actions_pk",
       "table": "effectful_actions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "environment_variables_pk",
       "table": "environment_variables",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "exclusive_resources_pk",
       "table": "exclusive_resources",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sha256"
-      ],
+      "columns": ["sha256"],
       "nameExplicit": false,
       "name": "file_contents_pk",
       "table": "file_contents",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "need_id"
-      ],
+      "columns": ["need_id"],
       "nameExplicit": false,
       "name": "forge_needs_pk",
       "table": "forge_needs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "freezes_pk",
       "table": "freezes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "git_baselines_pk",
       "table": "git_baselines",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "git_holds_pk",
       "table": "git_holds",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "helpers_pk",
       "table": "helpers",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "provider_id"
-      ],
+      "columns": ["provider_id"],
       "nameExplicit": false,
       "name": "jira_tokens_pk",
       "table": "jira_tokens",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "living_domains_pk",
       "table": "living_domains",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "living_history_pk",
       "table": "living_history",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "living_requirements_pk",
       "table": "living_requirements",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "living_runs_pk",
       "table": "living_runs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "memory_evidence_pk",
       "table": "memory_evidence",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "memory_journal_pk",
       "table": "memory_journal",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "nameExplicit": false,
       "name": "memory_next_pk",
       "table": "memory_next",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "memory_notes_pk",
       "table": "memory_notes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "mission_dependencies_pk",
       "table": "mission_dependencies",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "mission_grants_pk",
       "table": "mission_grants",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "mission_marks_pk",
       "table": "mission_marks",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "nameExplicit": false,
       "name": "mission_recommendations_pk",
       "table": "mission_recommendations",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "nameExplicit": false,
       "name": "mission_tickets_pk",
       "table": "mission_tickets",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "missions_pk",
       "table": "missions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "need_id"
-      ],
+      "columns": ["need_id"],
       "nameExplicit": false,
       "name": "need_deliveries_pk",
       "table": "need_deliveries",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "needs_pk",
       "table": "needs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "outside_changes_pk",
       "table": "outside_changes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "permission_requests_pk",
       "table": "permission_requests",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "prelaunch_checks_pk",
       "table": "prelaunch_checks",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sha256"
-      ],
+      "columns": ["sha256"],
       "nameExplicit": false,
       "name": "probe_contents_pk",
       "table": "probe_contents",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "probes_pk",
       "table": "probes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "row"
-      ],
+      "columns": ["row"],
       "nameExplicit": false,
       "name": "profile_pk",
       "table": "profile",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_checks_pk",
       "table": "project_checks",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_commands_pk",
       "table": "project_commands",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_doc_recipes_pk",
       "table": "project_doc_recipes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_never_entries_pk",
       "table": "project_never_entries",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_preparation_steps_pk",
       "table": "project_preparation_steps",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "project_repositories_pk",
       "table": "project_repositories",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "name"
-      ],
+      "columns": ["name"],
       "nameExplicit": false,
       "name": "projection_cursors_pk",
       "table": "projection_cursors",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "projects_pk",
       "table": "projects",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "proof_runs_pk",
       "table": "proof_runs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "proposed_answers_pk",
       "table": "proposed_answers",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "question_drafts_pk",
       "table": "question_drafts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "request_id"
-      ],
+      "columns": ["request_id"],
       "nameExplicit": false,
       "name": "queued_deliveries_pk",
       "table": "queued_deliveries",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "helper_id"
-      ],
+      "columns": ["helper_id"],
       "nameExplicit": false,
       "name": "queued_results_pk",
       "table": "queued_results",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "repository_id"
-      ],
+      "columns": ["repository_id"],
       "nameExplicit": false,
       "name": "repository_forges_pk",
       "table": "repository_forges",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "resource_claims_pk",
       "table": "resource_claims",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "review_feedback_pk",
       "table": "review_feedback",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "review_findings_pk",
       "table": "review_findings",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "review_passes_pk",
       "table": "review_passes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "work_item"
-      ],
+      "columns": ["work_item"],
       "nameExplicit": false,
       "name": "runner_leases_pk",
       "table": "runner_leases",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "session_deliveries_pk",
       "table": "session_deliveries",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "need_id"
-      ],
+      "columns": ["need_id"],
       "nameExplicit": false,
       "name": "session_needs_pk",
       "table": "session_needs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "session_threads_pk",
       "table": "session_threads",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "session_id"
-      ],
+      "columns": ["session_id"],
       "nameExplicit": false,
       "name": "session_usage_pk",
       "table": "session_usage",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "setup_cards_pk",
       "table": "setup_cards",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "spec_changes_pk",
       "table": "spec_changes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "nameExplicit": false,
       "name": "spec_reads_pk",
       "table": "spec_reads",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "spec_visions_pk",
       "table": "spec_visions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "mission_id"
-      ],
+      "columns": ["mission_id"],
       "nameExplicit": false,
       "name": "specs_pk",
       "table": "specs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "supervised_processes_pk",
       "table": "supervised_processes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "task_id"
-      ],
+      "columns": ["task_id"],
       "nameExplicit": false,
       "name": "task_attempts_pk",
       "table": "task_attempts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ticket_event_runs_pk",
       "table": "ticket_event_runs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ticket_events_pk",
       "table": "ticket_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ticket_providers_pk",
       "table": "ticket_providers",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ticket_versions_pk",
       "table": "ticket_versions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ticket_writes_pk",
       "table": "ticket_writes",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "tool_calls_pk",
       "table": "tool_calls",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspace_repositories_pk",
       "table": "workspace_repositories",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspace_steps_pk",
       "table": "workspace_steps",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "workspaces_pk",
       "table": "workspaces",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "writes_before_red_pk",
       "table": "writes_before_red",
@@ -18439,220 +17507,154 @@
       "table": "writes_before_red"
     },
     {
-      "columns": [
-        "mission_id",
-        "number"
-      ],
+      "columns": ["mission_id", "number"],
       "nameExplicit": true,
       "name": "cold_read_number_in_mission",
       "entityType": "uniques",
       "table": "cold_reads"
     },
     {
-      "columns": [
-        "building_id",
-        "number"
-      ],
+      "columns": ["building_id", "number"],
       "nameExplicit": true,
       "name": "documenter_pass_number_in_building",
       "entityType": "uniques",
       "table": "documenter_passes"
     },
     {
-      "columns": [
-        "project_id",
-        "key"
-      ],
+      "columns": ["project_id", "key"],
       "nameExplicit": true,
       "name": "resource_once_in_project",
       "entityType": "uniques",
       "table": "exclusive_resources"
     },
     {
-      "columns": [
-        "mission_id",
-        "number"
-      ],
+      "columns": ["mission_id", "number"],
       "nameExplicit": true,
       "name": "helper_number_in_mission",
       "entityType": "uniques",
       "table": "helpers"
     },
     {
-      "columns": [
-        "mission_id",
-        "number"
-      ],
+      "columns": ["mission_id", "number"],
       "nameExplicit": true,
       "name": "note_number_once",
       "entityType": "uniques",
       "table": "memory_notes"
     },
     {
-      "columns": [
-        "mission_id",
-        "session_id"
-      ],
+      "columns": ["mission_id", "session_id"],
       "nameExplicit": true,
       "name": "now_line_once",
       "entityType": "uniques",
       "table": "memory_now_lines"
     },
     {
-      "columns": [
-        "mission_id",
-        "identity"
-      ],
+      "columns": ["mission_id", "identity"],
       "nameExplicit": true,
       "name": "mark_once_on_mission",
       "entityType": "uniques",
       "table": "mission_marks"
     },
     {
-      "columns": [
-        "mission_id",
-        "stopper"
-      ],
+      "columns": ["mission_id", "stopper"],
       "nameExplicit": true,
       "name": "stop_once",
       "entityType": "uniques",
       "table": "mission_stops"
     },
     {
-      "columns": [
-        "key_prefix",
-        "key_number"
-      ],
+      "columns": ["key_prefix", "key_number"],
       "nameExplicit": true,
       "name": "mission_key_once",
       "entityType": "uniques",
       "table": "missions"
     },
     {
-      "columns": [
-        "owner_kind",
-        "owner_id",
-        "number"
-      ],
+      "columns": ["owner_kind", "owner_id", "number"],
       "nameExplicit": true,
       "name": "request_number_once",
       "entityType": "uniques",
       "table": "permission_requests"
     },
     {
-      "columns": [
-        "owner_kind",
-        "owner_id",
-        "call_key"
-      ],
+      "columns": ["owner_kind", "owner_id", "call_key"],
       "nameExplicit": true,
       "name": "request_key_once",
       "entityType": "uniques",
       "table": "permission_requests"
     },
     {
-      "columns": [
-        "mission_id",
-        "number"
-      ],
+      "columns": ["mission_id", "number"],
       "nameExplicit": true,
       "name": "probe_number_in_mission",
       "entityType": "uniques",
       "table": "probes"
     },
     {
-      "columns": [
-        "project_id",
-        "name"
-      ],
+      "columns": ["project_id", "name"],
       "nameExplicit": true,
       "name": "check_name_once_in_project",
       "entityType": "uniques",
       "table": "project_checks"
     },
     {
-      "columns": [
-        "project_id",
-        "name"
-      ],
+      "columns": ["project_id", "name"],
       "nameExplicit": true,
       "name": "command_name_once_in_project",
       "entityType": "uniques",
       "table": "project_commands"
     },
     {
-      "columns": [
-        "project_id",
-        "path"
-      ],
+      "columns": ["project_id", "path"],
       "nameExplicit": true,
       "name": "repository_once_in_project",
       "entityType": "uniques",
       "table": "project_repositories"
     },
     {
-      "columns": [
-        "key",
-        "mission_id"
-      ],
+      "columns": ["key", "mission_id"],
       "nameExplicit": true,
       "name": "claim_once_per_mission",
       "entityType": "uniques",
       "table": "resource_claims"
     },
     {
-      "columns": [
-        "session_id",
-        "path"
-      ],
+      "columns": ["session_id", "path"],
       "nameExplicit": true,
       "name": "file_once_in_session",
       "entityType": "uniques",
       "table": "session_files"
     },
     {
-      "columns": [
-        "workspace_id",
-        "repository_id"
-      ],
+      "columns": ["workspace_id", "repository_id"],
       "nameExplicit": true,
       "name": "repository_once_in_workspace",
       "entityType": "uniques",
       "table": "workspace_repositories"
     },
     {
-      "columns": [
-        "workspace_id",
-        "position"
-      ],
+      "columns": ["workspace_id", "position"],
       "nameExplicit": true,
       "name": "step_once_in_workspace",
       "entityType": "uniques",
       "table": "workspace_steps"
     },
     {
-      "columns": [
-        "project_id",
-        "name"
-      ],
+      "columns": ["project_id", "name"],
       "nameExplicit": true,
       "name": "workspace_name_once_in_project",
       "entityType": "uniques",
       "table": "workspaces"
     },
     {
-      "columns": [
-        "seq"
-      ],
+      "columns": ["seq"],
       "nameExplicit": false,
       "name": "living_requirements_seq_unique",
       "entityType": "uniques",
       "table": "living_requirements"
     },
     {
-      "columns": [
-        "lineage"
-      ],
+      "columns": ["lineage"],
       "nameExplicit": false,
       "name": "living_runs_lineage_unique",
       "entityType": "uniques",
