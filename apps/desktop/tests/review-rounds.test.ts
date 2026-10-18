@@ -12,9 +12,11 @@
  */
 
 import { realpathSync } from 'node:fs'
+import { join } from 'node:path'
 
 import {
   CANCEL_MISSION_TOO,
+  ChosenAnswer,
   CLARIFY,
   KEEP_IN_ROUND,
   SESSION_STATES,
@@ -32,11 +34,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { type BuilderHold, buildingOf } from '../src/engine/building/builder.ts'
 import { TaskChecks } from '../src/engine/building/checks.ts'
+import { judgeManual, proofsRead } from '../src/engine/building/proofs.ts'
 import { addRequirement } from '../src/engine/living-spec/store.ts'
+import { missionFolder } from '../src/engine/memory/files.ts'
 import { Secrets } from '../src/engine/secrets.ts'
 import { getMission, moveIn, moveMission } from '../src/engine/missions.ts'
 import { answerQuestion } from '../src/engine/planning/calls.ts'
 import { inputsOf, openQuestions, wavesOf } from '../src/engine/planning/questions.ts'
+import { RETRY } from '../src/engine/building/end.ts'
+import { answerNeed } from '../src/engine/needs.ts'
 import { Review, type FeedbackAsked } from '../src/engine/review/feedback.ts'
 import { Rounds } from '../src/engine/review/rounds.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
@@ -49,6 +55,7 @@ import {
   buildings,
   domainEvents,
   livingDomains,
+  proofRuns,
   sessionDeliveries,
   specProofs,
   specRequirements,
@@ -115,9 +122,14 @@ const livingInvoices = (projectId: string) =>
 /** Whether an agent's first prompt is one the test drives through its grant: it answers at once. */
 const DRIVEN = ['## Builder · ', '## Planner · ']
 
+/** How the end of a round names the sources left to answer to its Builder. */
+const ANSWERS_ASKED = 'The round does not end while a source has no answer'
+
 /**
  * The engine over `folder`: the cold read reads (unless `resumed`), the Builders and the round's
- * Planner answer every prompt, every other agent holds its turn until the test lets it go.
+ * Planner answer every prompt, every other agent holds its turn until the test lets it go. A
+ * Builder told to answer its sources holds that turn while the test answers them through its
+ * grant, unless it `ignores` them: then it ends that turn at once, answering nothing.
  */
 const rounding = (
   options: {
@@ -126,8 +138,10 @@ const rounding = (
     readonly hold?: BuilderHold
     /** Where the Fix is held once committed, before its Planner opens. */
     readonly fixed?: Effect.Effect<void>
+    readonly ignores?: boolean
   } = {},
 ) => {
+  const answering = held()
   const holds = new Map<number, ReturnType<typeof held>>()
   const holdOf = (index: number) => {
     const found = holds.get(index) ?? held()
@@ -138,12 +152,19 @@ const rounding = (
     const first = text(engine.world.agents[index]?.answers.prompts[0] ?? [])
     return DRIVEN.some((heading) => first.includes(heading))
   }
+  const asked = (index: number) =>
+    text(engine.world.agents[index]?.answers.prompts.at(-1) ?? []).includes(ANSWERS_ASKED)
   const script = (index: number): FakeScript =>
     index === 0 && options.resumed !== true
       ? READING
       : {
           steps: [says('Working.')],
-          between: () => (driven(index) ? Promise.resolve() : holdOf(index).promise),
+          between: () =>
+            !driven(index)
+              ? holdOf(index).promise
+              : options.ignores !== true && asked(index)
+                ? answering.promise
+                : Promise.resolve(),
         }
   const engine = sessionsEngine(options.folder ?? data, script, {
     roles: [HELPER],
@@ -162,6 +183,7 @@ const rounding = (
     },
     run: <A, E>(program: Parameters<typeof engine.run<A, E>>[0]) =>
       engine.run(program).finally(() => {
+        answering.release()
         for (const one of holds.values()) one.release()
       }),
   }
@@ -964,6 +986,20 @@ const roundBuilderOf = (missionId: string, before: string, replaced = '') =>
     return { session, grantId: yield* grantOf(session.id) }
   })
 
+/** A grant to the round's Builder holding the turn it was told to answer in. */
+const toldBuilderOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const told = Effect.map(
+      sessionsIn(['working'], { kind: 'mission', missionId }),
+      (rows) => rows.find((row) => row.role === 'builder') ?? null,
+    )
+    yield* until(
+      Effect.map(told, (found) => found !== null),
+      LONG,
+    )
+    return yield* grantOf((yield* told)?.id ?? '')
+  })
+
 /** What was delivered to the mission's Builder, as `kind: body`. */
 const toBuilder = (missionId: string) =>
   Effect.gen(function* () {
@@ -1293,6 +1329,257 @@ describe('The way back to Review', () => {
   )
 })
 
+describe('A Builder that does not answer', () => {
+  test(
+    'a round’s Builder that ends its turn twice without answering a source is told again, then the user is asked; a restart keeps the need, and its Retry tells the Builder again',
+    SLOW,
+    async () => {
+      const first = rounding({ ignores: true })
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* until(
+              Effect.map(getMission(missionId), (mission) => mission.needs.length > 0),
+              LONG,
+            )
+            return {
+              missionId,
+              one: one.id,
+              builder: builder.session.id,
+              needs: (yield* getMission(missionId)).needs,
+              told: yield* toBuilder(missionId),
+              phase: (yield* buildingOf(missionId))?.phase,
+            }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const [need] = (yield* getMission(left.missionId)).needs
+            yield* answerNeed({
+              id: need?.id ?? '',
+              answer: ChosenAnswer.make({ option: RETRY }),
+              key: 'retry-answers',
+            })
+            yield* until(
+              Effect.map(
+                toBuilder(left.missionId),
+                (told) => told.filter((line) => line.startsWith('answers:')).length > 2,
+              ),
+              LONG,
+            )
+            yield* used(yield* toldBuilderOf(left.missionId), 'feedback_answer', {
+              source: left.one,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(after.world, left.missionId)
+            return {
+              told: yield* toBuilder(left.missionId),
+              rounds: yield* roundsOf(left.missionId),
+            }
+          }),
+        ),
+      )
+      const asked = (told: ReadonlyArray<string>) =>
+        told.filter((line) => line.startsWith('answers:'))
+      expect(left.phase).toBe('answers')
+      expect(asked(left.told)).toHaveLength(2)
+      expect(left.needs).toHaveLength(1)
+      const fields = left.needs[0]?.fields
+      expect(fields?._tag === 'Error' ? fields.failed : '').toBe(
+        `The Builder ended its turn twice without answering ${left.one} with feedback_answer: Retry tells it again.`,
+      )
+      // The restart said nothing more: only the Retry told the Builder again.
+      expect(asked(seen.told)).toHaveLength(3)
+      expect(seen.rounds).toEqual([[1, 'answered']])
+    },
+  )
+})
+
+/** The test of the Markdown export: it fails until `export.ts` holds `markdown`. */
+const MARKDOWN_TEST = [
+  "import { test } from 'node:test'",
+  "import assert from 'node:assert/strict'",
+  "import { existsSync, readFileSync } from 'node:fs'",
+  '',
+  "test('the scenario holds', () => {",
+  "  const file = new URL('../export.ts', import.meta.url)",
+  "  assert.ok(existsSync(file) && readFileSync(file, 'utf8').includes('markdown'), 'no markdown')",
+  '})',
+  '',
+].join('\n')
+
+/** The Spec's R1.S2 proven by an automated test; R1.S1 and R1.S3 verified by hand. */
+const SPEC_PROOFS = () => ({
+  'R1.S2': {
+    mode: 'automated',
+    actions: ['Run the test'],
+    starting_data: 'None.',
+    expected: 'The assertion of the test holds.',
+    test: {
+      repository: 'api',
+      path: 'tests/export.test.mjs',
+      code: MARKDOWN_TEST,
+      insertion: 'new_file',
+      command: `"${process.execPath}" --test --test-reporter=tap tests/export.test.mjs`,
+    },
+    seen_today: false,
+  },
+})
+
+/** The first Builder runs every task of the plan to its end: T2 writes the Markdown export. */
+const builtAll = (grantId: string) =>
+  Effect.gen(function* () {
+    for (const task of ['T1', 'T2', 'T4', 'T3']) {
+      yield* used(grantId, 'task_start', { task })
+      if (task === 'T2') {
+        yield* used(grantId, 'fs_write', {
+          repository: 'api',
+          path: 'export.ts',
+          content: 'export const markdown = true\n',
+        })
+      }
+      yield* used(grantId, 'task_finished', { task, summary: `${task} built.` })
+    }
+  })
+
+/** The runs of a scenario's proof in a Building, as `phase: classification`. */
+const runsOf = (buildingId: string, scenario: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    return (yield* database
+      .select()
+      .from(proofRuns)
+      .where(and(eq(proofRuns.buildingId, buildingId), eq(proofRuns.scenario, scenario)))
+      .orderBy(asc(proofRuns.at))).map((run) => `${run.phase}: ${run.classification}`)
+  })
+
+describe('The feedback’s images', () => {
+  test(
+    'the Planner in round mode reads a feedback’s image by its path as an image; a role not listed reads no image there',
+    SLOW,
+    async () => {
+      const { run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, key } = yield* reviewed()
+            const image = yield* Review.use((review) =>
+              review.imageAdd(missionId, 'no-header.png', PNG),
+            )
+            yield* written(missionId, {
+              ...remark('The CSV has no header row.'),
+              images: [image.evidenceId],
+            })
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            const path = join(missionFolder(data, key), 'evidence', `${image.sha256}.png`)
+            const folder = yield* workspaceOf(missionId)
+            const helper = yield* Sessions.use((sessions) =>
+              sessions.open({
+                owner: { kind: 'mission', missionId },
+                role: 'helper',
+                folder,
+                requestedBy: 'agent',
+              }),
+            )
+            return {
+              planner: yield* callTool(planner.grantId, 'fs_read', { path }),
+              helper: yield* callTool(yield* grantOf(helper.id), 'fs_read', { path }),
+            }
+          }),
+        ),
+      )
+      expect(seen.planner).toMatchObject({
+        ok: true,
+        image: { mimeType: 'image/png', data: PNG.toString('base64') },
+      })
+      expect(seen.helper.image).toBeUndefined()
+    },
+  )
+})
+
+describe('The Spec’s proofs after a round', () => {
+  test(
+    'after a real end of the first Building and a round, the Spec’s automated proof is run again on the round’s tree, and a Spec proof by hand is still judged in Review',
+    SLOW,
+    async () => {
+      const { world, run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              SPEC_PROOFS,
+            )
+            const missionId = mission.id
+            const first = yield* builderOf(missionId)
+            yield* proofIn(missionId, 'R1.S2', 'red_recorded')
+            yield* builtAll(first.grantId)
+            yield* documented(world, missionId)
+            yield* reviewedBoth(world, missionId)
+            yield* inStage(missionId, 'review')
+            const ended = yield* buildingOf(missionId)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            const round = yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, first.session.lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: one.id,
+              text: 'The export now writes a header row first.',
+            })
+            yield* throughEnd(world, missionId, 2)
+            const proofs = yield* proofsRead(missionId)
+            const judged = yield* judgeManual(missionId, 'R1.S1', 'validated', null)
+            return {
+              first: ended?.buildingId,
+              round: round.buildingId,
+              runs: yield* runsOf(round.buildingId, 'R1.S2'),
+              proofs: (proofs?.scenarios ?? []).map((one) => [one.scenario, one.state]),
+              judged: judged.state,
+            }
+          }),
+        ),
+      )
+      expect(seen.round).not.toBe(seen.first)
+      // The first Building's runs are carried, and the round changed `api`: the Spec's green ran
+      // again on the round's tree, green.
+      expect(seen.runs).toEqual(['red: assertion_failed', 'green: passed', 'rerun: passed'])
+      expect(seen.proofs).toEqual(
+        expect.arrayContaining([
+          ['R1.S1', 'to_verify'],
+          ['R1.S2', 'green'],
+          ['R1.S3', 'to_verify'],
+          ['R1.1.S1', 'to_verify'],
+        ]),
+      )
+      expect(seen.judged).toBe('validated')
+    },
+  )
+})
+
 /** The end of a round's Building: its documenter and both reviewers report, the mission is back. */
 const throughEnd = (world: Held, missionId: string, count = 1) =>
   Effect.gen(function* () {
@@ -1579,8 +1866,7 @@ describe('A stop and a restart', () => {
               ),
               LONG,
             )
-            const builder = yield* roundBuilderOf(left.missionId, '', left.builder)
-            yield* used(builder.grantId, 'feedback_answer', {
+            yield* used(yield* toldBuilderOf(left.missionId), 'feedback_answer', {
               source: left.one,
               text: 'The header row is written first.',
             })
