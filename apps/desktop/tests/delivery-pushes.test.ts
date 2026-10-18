@@ -227,14 +227,14 @@ const recording =
     return real(folder, args, kind, options)
   }
 
-/** The pushes' Git where the user's global and system configuration say nothing (no identity). */
+/** The pushes' Git reading the user's global configuration from `global`, and no system one. */
 const withoutUserConfig =
-  (empty: string) =>
+  (global: string) =>
   (real: GitBytesSpawn): GitBytesSpawn =>
   (folder, args, kind, options) =>
     real(folder, args, kind, {
       ...options,
-      env: { ...options?.env, GIT_CONFIG_GLOBAL: empty, GIT_CONFIG_NOSYSTEM: '1' },
+      env: { ...options?.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' },
     })
 
 const engine = (
@@ -309,7 +309,7 @@ const withApiTemplates =
  * Acme with `api` and `web`, each on its bare remote under the forge's name, the user's identity in
  * their configuration and `*.log` ignored.
  */
-const acmeOnForge = (at: string) =>
+const acmeOnForge = (identity: boolean) => (at: string) =>
   Effect.gen(function* () {
     const main = join(at, 'acme')
     const folders = ['api', 'web'].map((name) => {
@@ -327,8 +327,10 @@ const acmeOnForge = (at: string) =>
       const named = `https://${HOST}/acme/${name}.git`
       git(folder, 'remote', 'set-url', 'origin', named)
       git(folder, 'config', `url.${bare.replaceAll('\\', '/')}.pushInsteadOf`, named)
-      git(folder, 'config', 'user.name', 'Ada Lovelace')
-      git(folder, 'config', 'user.email', 'ada@example.com')
+      if (identity) {
+        git(folder, 'config', 'user.name', 'Ada Lovelace')
+        git(folder, 'config', 'user.email', 'ada@example.com')
+      }
       return folder
     })
     const project = yield* createProject({
@@ -367,14 +369,14 @@ const onForge = (rules: DeliveryRulesDraft | null) => (projectId: string) =>
   }).pipe(Effect.orDie)
 
 /** Acme's mission launched over `api` and `web`, Building, and its Workspace's folders. */
-const launchedOnForge = (rules: DeliveryRulesDraft | null = rulesWith()) =>
+const launchedOnForge = (rules: DeliveryRulesDraft | null = rulesWith(), identity = true) =>
   Effect.gen(function* () {
     const { mission, project } = yield* launched(
       work,
       onForge(rules),
       'It touches api and web, nothing else.',
       undefined,
-      acmeOnForge,
+      acmeOnForge(identity),
     )
     const database = yield* Database
     const [launch] = yield* database
@@ -836,6 +838,34 @@ describe('The push', () => {
   )
 
   test(
+    'an upstream an agent pointed at another path does not change where Hemera pushes',
+    async () => {
+      const elsewhere = join(work, 'remotes', 'elsewhere.git')
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* launchedOnForge()
+            mkdirSync(elsewhere, { recursive: true })
+            git(elsewhere, 'init', '-q', '--bare')
+            // What `git push -u` or an agent writes: the branch's upstream, at another path.
+            git(mission.api, 'config', `branch.${mission.branch}.remote`, elsewhere)
+            git(mission.api, 'config', `branch.${mission.branch}.merge`, 'refs/heads/other')
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            yield* moved(mission.missionId, 'endBuilding')
+            yield* untilState(mission.missionId, 'api', 'done')
+            return { head: git(mission.api, 'rev-parse', 'HEAD'), branch: mission.branch }
+          }),
+        ),
+      )
+      expect(remoteHead('api', seen.branch)).toBe(seen.head)
+      expect(git(work, 'ls-remote', elsewhere)).toBe('')
+    },
+    SLOW,
+  )
+
+  test(
     'one repository failing does not stop the other',
     async () => {
       const { run } = engine()
@@ -1186,6 +1216,60 @@ describe('Retry and restart', () => {
     SLOW,
   )
 
+  test.each(['commit', 'push'] as const)(
+    'a restart after git %s ran, its outcome unwritten: found done, not done again',
+    async (word) => {
+      const calls: GitCalls = []
+      const reached = Effect.runSync(Deferred.make<void>())
+      // The engine stops as Git returns, before the outcome is written.
+      const cutAfter =
+        (real: GitBytesSpawn): GitBytesSpawn =>
+        (folder, args, kind, options) => {
+          calls.push(args)
+          const ran = real(folder, args, kind, options)
+          return args[0] === word
+            ? ran.pipe(
+                Effect.andThen(Deferred.succeed(reached, undefined)),
+                Effect.andThen(Effect.never),
+              )
+            : ran
+        }
+      const { run } = engine({ git: cutAfter })
+      const mission = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const launchedOne = yield* launchedOnForge()
+            writeFileSync(join(launchedOne.api, 'notes.ts'), 'export const notes = 1\n')
+            yield* moved(launchedOne.missionId, 'endBuilding')
+            yield* Deferred.await(reached)
+            return launchedOne
+          }),
+        ),
+      )
+      const { run: again } = engine({ git: recording(calls) })
+      const actions = await again(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* untilState(mission.missionId, 'api', 'done')
+            const database = yield* Database
+            return yield* database
+              .select({ kind: effectfulActions.kind, state: effectfulActions.state })
+              .from(effectfulActions)
+              .where(eq(effectfulActions.kind, `delivery.${word}`))
+          }),
+        ),
+      )
+      expect(actions).toEqual([{ kind: `delivery.${word}`, state: 'done' }])
+      expect(calls.filter((args) => args[0] === word)).toHaveLength(1)
+      expect(commitsSinceBase(mission.api)).toHaveLength(1)
+      expect(remoteHead('api', mission.branch)).toBe(git(mission.api, 'rev-parse', 'HEAD'))
+      expect(forge.creates()).toBe(1)
+    },
+    SLOW,
+  )
+
   test(
     'a create whose outcome is unknown is checked by a find before any new create; unread, it stays indeterminate',
     async () => {
@@ -1215,6 +1299,8 @@ describe('Retry and restart', () => {
               unread,
               createsUnread,
               done: repositoryOf(yield* pushesOf(mission.missionId), 'api'),
+              // Each Retry withdrew the need it answered: none is left once it is done.
+              errors: (yield* pendingOf(mission.missionId, 'Error')).length,
             }
           }),
         ),
@@ -1225,6 +1311,7 @@ describe('Retry and restart', () => {
       expect(seen.createsUnread).toBe(1)
       expect(forge.creates()).toBe(1)
       expect(seen.done?.pullRequest?.number).toBe(1)
+      expect(seen.errors).toBe(0)
     },
     SLOW,
   )
@@ -1234,20 +1321,20 @@ describe('What stops a push', () => {
   test(
     'a missing user.email gives the environment need with the command; once set, Retry pushes',
     async () => {
-      const empty = join(work, 'empty.gitconfig')
-      writeFileSync(empty, '')
-      const { run } = engine({ git: withoutUserConfig(empty) })
+      // The user's global configuration, as Git reads it for the pushes: a name, no email.
+      const global = join(work, 'user.gitconfig')
+      writeFileSync(global, '[user]\n\tname = Ada Lovelace\n')
+      const { run } = engine({ git: withoutUserConfig(global) })
       const seen = await run(({ profile }) =>
         within(
           profile,
           Effect.gen(function* () {
-            const mission = yield* launchedOnForge()
-            git(join(work, 'acme', 'api'), 'config', '--unset', 'user.email')
+            const mission = yield* launchedOnForge(rulesWith(), false)
             writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
             yield* moved(mission.missionId, 'endBuilding')
             const need = yield* needOf(mission.missionId, 'Environment')
             const before = remoteHead('api', mission.branch)
-            git(join(work, 'acme', 'api'), 'config', 'user.email', 'ada@example.com')
+            writeFileSync(global, '[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n')
             yield* retryNeed(need.id)
             yield* untilState(mission.missionId, 'api', 'done')
             return { need, before, head: git(mission.api, 'rev-parse', 'HEAD'), mission }
@@ -1259,7 +1346,7 @@ describe('What stops a push', () => {
       expect(fields.action).toBe('git config --global user.email "you@example.com"')
       expect(seen.before).toBeNull()
       expect(remoteHead('api', seen.mission.branch)).toBe(seen.head)
-      expect(commitsSinceBase(seen.mission.api)[0]).toMatch(/\|ada@example\.com$/)
+      expect(commitsSinceBase(seen.mission.api)[0]).toMatch(/\|Ada Lovelace\|ada@example\.com$/)
     },
     SLOW,
   )
