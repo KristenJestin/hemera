@@ -279,7 +279,11 @@ describe('What a fingerprint costs (#457)', () => {
     const main = repository(join(work, 'acme'))
     const nested = join(work, 'nested')
     writeFileSync(nested, '[core]\n\tname = value\n')
-    writeFileSync(join(main, '.git', 'hooks', 'shared.cfg'), `[include]\n\tpath = ${nested}\n`)
+    // Written with forward slashes: a backslash in a config value is an escape, `\a` none Git reads.
+    writeFileSync(
+      join(main, '.git', 'hooks', 'shared.cfg'),
+      `[include]\n\tpath = ${nested.replaceAll('\\', '/')}\n`,
+    )
     git(main, 'config', 'include.path', 'hooks/shared.cfg')
     await new Promise((resolved) => setTimeout(resolved, 2_500))
     shapesOf([main], home)
