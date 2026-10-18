@@ -64,6 +64,12 @@ export interface Shape {
   readonly text: string | null
   /** Whether the home's configuration reaches it: it shapes every repository, not one. */
   readonly everywhere: boolean
+  /**
+   * For a configuration only, never a hook or an attributes file: the digest of its entries but
+   * those a user's everyday Git writes on its own and that run nothing (`EVERYDAY`). Null for any
+   * other file, and for a configuration Git would not read whole.
+   */
+  readonly steady: string | null
 }
 
 /** The fingerprint: every file that shapes the engine's Git there, by its path. */
@@ -96,6 +102,7 @@ const shapeOf = (kind: Shape['kind'], digest: string, text: string | null = null
   digest,
   text,
   everywhere: false,
+  steady: null,
 })
 
 /** How long a file must have stood unchanged before its stat stands for its bytes. */
@@ -119,10 +126,17 @@ const hashed = new Map<
   }
 >()
 
-/** What a configuration file of this digest includes and where it sets the hooks, parsed once. */
+/**
+ * What a configuration file of this digest includes, where it sets the hooks, and its steady
+ * digest, parsed once.
+ */
 const configNames = new Map<
   string,
-  { readonly includes: ReadonlyArray<string>; readonly hooksPaths: ReadonlyArray<string> }
+  {
+    readonly includes: ReadonlyArray<string>
+    readonly hooksPaths: ReadonlyArray<string>
+    readonly steady: string | null
+  }
 >()
 
 /** What a fingerprint reads of a path's stat. */
@@ -281,7 +295,10 @@ export function shapesOf(
 ): Shapes {
   const shapes = new Map<string, Shape>()
   const bytes = new Map<string, Buffer>()
+  /** The files read as something other than a configuration: hooks, attributes, excludes. */
+  const plain = new Set<string>()
   const add = (path: string, everywhere = false, trusted = false): void => {
+    if (trusted) plain.add(path)
     const known = shapes.get(path)
     if (known !== undefined) {
       if (everywhere && !known.everywhere) shapes.set(path, { ...known, everywhere })
@@ -336,8 +353,10 @@ export function shapesOf(
       add(join(common, name))
       configs.push(join(common, name))
     }
-    add(join(common, 'info', 'attributes'))
-    add(join(common, 'info', 'exclude'))
+    for (const name of ['attributes', 'exclude']) {
+      add(join(common, 'info', name))
+      plain.add(join(common, 'info', name))
+    }
     walk(join(common, 'hooks'), false)
     const worktrees = join(common, 'worktrees')
     for (const name of namesIn(worktrees)) {
@@ -364,6 +383,7 @@ export function shapesOf(
   const homeConfigs = [join(home.home, '.gitconfig'), join(home.configHome, 'git', 'config')]
   for (const path of homeConfigs) add(path, true)
   add(join(home.configHome, 'git', 'attributes'), true)
+  plain.add(join(home.configHome, 'git', 'attributes'))
   // Every include, from the file that names it, as deep as Git goes; the home's first.
   const queue = [
     ...homeConfigs.map((path) => ({ path, depth: 0, everywhere: true })),
@@ -372,6 +392,7 @@ export function shapesOf(
   const followed = new Set<string>()
   const read: Array<{ readonly hooksPaths: ReadonlyArray<string>; readonly everywhere: boolean }> =
     []
+  const steadies = new Map<string, string | null>()
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
     const seen = `${String(next.everywhere)}\0${next.path}`
     if (followed.has(seen)) continue
@@ -385,11 +406,12 @@ export function shapesOf(
         'utf8',
       )
       if (text === undefined) continue
-      names = { includes: includesOf(text), hooksPaths: hooksPathsOf(text) }
+      names = { includes: includesOf(text), hooksPaths: hooksPathsOf(text), steady: steadyOf(text) }
       if (configNames.size >= REMEMBERED) configNames.clear()
       configNames.set(shape.digest, names)
     }
     read.push({ hooksPaths: names.hooksPaths, everywhere: next.everywhere })
+    steadies.set(next.path, names.steady)
     for (const named of names.includes) {
       const path = named.startsWith('~/')
         ? join(home.home, named.slice(2))
@@ -410,6 +432,11 @@ export function shapesOf(
       else if (isAbsolute(named)) walk(resolve(named), everywhere)
       else for (const top of tops) walk(resolve(top, named), false)
     }
+  }
+  // A file read as a configuration and as nothing else has its steady digest.
+  for (const [path, steady] of steadies) {
+    const shape = shapes.get(path)
+    if (shape !== undefined && !plain.has(path)) shapes.set(path, { ...shape, steady })
   }
   return shapes
 }
@@ -543,6 +570,31 @@ export function onlyWorktreeFormat(was: string, now: string): boolean {
   return before.length === after.length && before.every((one, at) => one === after[at])
 }
 
+/**
+ * The entries a user's everyday Git writes into a configuration on its own, by section, and that
+ * run nothing: a branch's upstream (`checkout --track`, `branch -u`, `push -u`, a worktree's branch
+ * made from a remote one) and a submodule's address and activation (`submodule add`, `init`,
+ * `deinit`). A submodule's `update`, which may name a program, is not one of them.
+ */
+const EVERYDAY: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['branch', new Set(['remote', 'merge'])],
+  ['submodule', new Set(['url', 'active'])],
+])
+
+/**
+ * The digest of a configuration's entries but the everyday ones, in order: two texts with the same
+ * one differ only by what everyday Git writes. Null where Git would not read the text whole: what it
+ * would make of the rest is not judged.
+ */
+function steadyOf(text: string): string | null {
+  const { entries, whole } = configOf(text)
+  if (!whole) return null
+  const kept = entries.filter(
+    (entry) => entry.subsection === null || EVERYDAY.get(entry.section)?.has(entry.key) !== true,
+  )
+  return sha256(Buffer.from(JSON.stringify(kept)))
+}
+
 /** One entry of a Git configuration: its section and key lowercased, the subsection as written. */
 interface ConfigEntry {
   readonly section: string
@@ -553,6 +605,16 @@ interface ConfigEntry {
 
 /** Every entry of a Git configuration, in order, up to where Git would refuse the file. */
 function entriesOf(text: string): ReadonlyArray<ConfigEntry> {
+  return configOf(text).entries
+}
+
+/** The entries of a Git configuration up to where Git would refuse it, and whether it read whole. */
+interface ConfigRead {
+  readonly entries: ReadonlyArray<ConfigEntry>
+  readonly whole: boolean
+}
+
+function configOf(text: string): ConfigRead {
   const source = text.replaceAll('\r\n', '\n')
   const found: ConfigEntry[] = []
   let at = source.startsWith('﻿') ? 1 : 0
@@ -622,35 +684,35 @@ function entriesOf(text: string): ReadonlyArray<ConfigEntry> {
         sub = dot < 0 ? null : name.slice(dot + 1).toLowerCase()
         continue
       }
-      if (!isSpace(source[at]) || name.includes('.')) return found
+      if (!isSpace(source[at]) || name.includes('.')) return { entries: found, whole: false }
       while (isSpace(source[at])) at += 1
-      if (source[at] !== '"') return found
+      if (source[at] !== '"') return { entries: found, whole: false }
       at += 1
       let named = ''
       while (at < source.length && source[at] !== '"') {
-        if (source[at] === '\n') return found
+        if (source[at] === '\n') return { entries: found, whole: false }
         if (source[at] === '\\') at += 1
         named += source[at] ?? ''
         at += 1
       }
-      if (source[at + 1] !== ']') return found
+      if (source[at + 1] !== ']') return { entries: found, whole: false }
       at += 2
       base = name.toLowerCase()
       sub = named
       continue
     }
-    if (!isAlpha(c)) return found
+    if (!isAlpha(c)) return { entries: found, whole: false }
     let key = ''
     for (; isKeyChar(source[at]); at += 1) key += source[at]
     while (isSpace(source[at])) at += 1
     let said: string | null = null
     if (at < source.length && source[at] !== '\n') {
-      if (source[at] !== '=') return found
+      if (source[at] !== '=') return { entries: found, whole: false }
       at += 1
       said = value()
-      if (said === null) return found
+      if (said === null) return { entries: found, whole: false }
     }
     found.push({ section: base, subsection: sub, key: key.toLowerCase(), value: said })
   }
-  return found
+  return { entries: found, whole: true }
 }

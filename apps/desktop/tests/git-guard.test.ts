@@ -1082,3 +1082,124 @@ describe('A snapshot store is watched like any repository (#457, round 4)', () =
     expect(reasonOf(result.needs[0])).toBe(NEUTRAL)
   })
 })
+
+describe('What a user’s everyday Git writes into a configuration asks nothing (#457, round 5)', () => {
+  /**
+   * A submodule added, an upstream a push sets, a branch tracking a remote one: each writes the
+   * repository's `config` (a submodule's address, a branch's upstream), and runs nothing. The
+   * remote is there before.
+   */
+  const everyday = (main: string) => {
+    const shared = repository(join(work, 'shared'))
+    git(main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', shared, 'shared')
+    git(main, 'commit', '-q', '-m', 'shared')
+    git(main, 'push', '-q', '-u', 'origin', 'trunk')
+    git(main, 'branch', '-q', '--track', 'side', 'origin/trunk')
+  }
+
+  test('a submodule the user adds, an upstream a push sets and a branch tracking a remote one ask nothing: the engine’s Git runs', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        remote(main, join(work, 'acme.git'))
+        const first = yield* engineStatus(main)
+        everyday(main)
+        return {
+          first,
+          config: readFileSync(join(main, '.git', 'config'), 'utf8'),
+          status: yield* engineStatus(main),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(result.first).toBe('ran')
+    expect(result.config).toContain('[submodule "shared"]')
+    expect(result.config).toContain('[branch "side"]')
+    expect(result.status).toBe('ran')
+    expect(result.needs).toEqual([])
+  })
+
+  test('the same everyday Git after a restart asks nothing either', async () => {
+    await withBuilder(({ main }) => {
+      remote(main, join(work, 'acme.git'))
+      return engineStatus(main)
+    })
+    const main = join(work, 'acme')
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        yield* sighted(main)
+        everyday(main)
+        return {
+          status: yield* engineStatus(main),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(reopened.status).toBe('ran')
+    expect(reopened.needs).toEqual([])
+  })
+
+  test('a worktree the engine adds on a branch made from a remote one, its upstream written into the config, asks nothing', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        remote(main, join(work, 'acme.git'))
+        yield* engineStatus(main)
+        yield* Git.use((service) =>
+          service.worktreeAdd(main, 'feature', join(work, 'acme-feature'), 'origin/trunk'),
+        )
+        return {
+          config: readFileSync(join(main, '.git', 'config'), 'utf8'),
+          status: yield* engineStatus(main),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(result.config).toContain('[branch "feature"]')
+    expect(result.status).toBe('ran')
+    expect(result.needs).toEqual([])
+  })
+
+  test('beside a submodule’s address, its update command (a program Git runs) still asks', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        remote(main, join(work, 'acme.git'))
+        yield* engineStatus(main)
+        everyday(main)
+        git(main, 'config', 'submodule.shared.update', '!sh ./update.sh')
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('update = !sh ./update.sh')
+  })
+
+  test('a hook the configuration also includes, changed only in a branch’s upstream, still asks', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        // Read as a configuration through the include, and run as a hook.
+        const hook = join(main, '.git', 'hooks', 'post-checkout')
+        writeFileSync(hook, '[branch "trunk"]\n\tmerge = refs/heads/trunk\n')
+        git(main, 'config', 'include.path', 'hooks/post-checkout')
+        yield* engineStatus(main)
+        writeFileSync(hook, '[branch "trunk"]\n\tmerge = $(touch gotcha)\n')
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/hooks/post-checkout')
+  })
+
+  test('a configuration Git cannot read whole, an upstream added to it, still asks', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        yield* engineStatus(main)
+        appendFileSync(
+          join(main, '.git', 'config'),
+          '[branch "side"]\n\tremote = origin\n\tmerge = "refs/heads/side\n[core]\n\thooksPath = h\n',
+        )
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/config')
+  })
+})

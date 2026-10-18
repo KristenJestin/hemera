@@ -194,10 +194,11 @@ type Errand =
   | { readonly kind: 'release'; readonly key: string; readonly withdraw: string | null }
   | { readonly kind: 'baseline'; readonly scope: Scope }
 
-/** What is kept of a file across restarts: its kind and digest, never its text. */
+/** What is kept of a file across restarts: its kind and digests, never its text. */
 const Kept = Schema.Struct({
   kind: Schema.Literals(['file', 'link', 'folder', 'over', 'other']),
   digest: Schema.String,
+  steady: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const readChanges = Schema.decodeUnknownOption(
   Schema.fromJsonString(
@@ -212,11 +213,20 @@ const readShapes = Schema.decodeUnknownOption(
 const readFolders = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
 const readAnswer = Schema.decodeUnknownOption(Answer)
 
-const keptOf = (shape: Shape | null) =>
-  shape === null ? null : { kind: shape.kind, digest: shape.digest }
+const keptOf = (shape: Shape | null): typeof Kept.Type | null =>
+  shape === null ? null : { kind: shape.kind, digest: shape.digest, steady: shape.steady }
+
+/** A file as kept across a restart: without its text, and with no steady digest in older records. */
+const unkept = (shape: typeof Kept.Type, everywhere: boolean): Shape => ({
+  kind: shape.kind,
+  digest: shape.digest,
+  steady: shape.steady ?? null,
+  text: null,
+  everywhere,
+})
 
 const restored = (shape: typeof Kept.Type | null, everywhere: boolean): Shape | null =>
-  shape === null ? null : { ...shape, text: null, everywhere }
+  shape === null ? null : unkept(shape, everywhere)
 
 const same = (one: Shape | null, other: Shape | null): boolean => one?.digest === other?.digest
 
@@ -401,12 +411,33 @@ export const engineGitGuard = (
       onlyWorktreeFormat(change.was.text, change.now.text)
 
     /**
+     * A configuration that changed only by what a user's everyday Git writes on its own and that
+     * runs nothing (a submodule's address, a branch's upstream): its steady digest is the same, and
+     * what it has now is taken into the baseline, whoever wrote it. Nothing is asked.
+     */
+    const everyday = (scope: Scope, now: Shapes): void => {
+      const taken = [...now].filter(([path, shape]) => {
+        const was = scope.baseline.get(path)
+        return (
+          was !== undefined &&
+          was.digest !== shape.digest &&
+          shape.steady !== null &&
+          was.steady === shape.steady
+        )
+      })
+      if (taken.length === 0) return
+      scope.baseline = new Map([...scope.baseline, ...taken])
+      keep(scope)
+    }
+
+    /**
      * Compares a scope with its baseline, and settles its hold with the files as they are now:
      * back as the baseline, it ends; allowed as shown, the shown state becomes the baseline; moved
      * on from what was shown, the question shows them as they are. Answers the files now.
      */
     const compare = (scope: Scope): Shapes => {
       const now = fingerprintOf(scope)
+      everyday(scope, now)
       // What an engine `worktree` call still going on adds or removes whole is its own, not asked.
       const calls = [...(flying.get(scope.key) ?? [])]
       const ofCalls = calls.flatMap((call) =>
@@ -589,6 +620,7 @@ export const engineGitGuard = (
           path,
           kind: shape.kind,
           digest: shape.digest,
+          steady: shape.steady,
         })),
       ),
     })
@@ -823,12 +855,7 @@ export const engineGitGuard = (
           home: everywhere,
           checkouts: new Set(checkouts),
           projectId: row.projectId,
-          baseline: new Map(
-            shapes.map(({ path, kind, digest }) => [
-              path,
-              { kind, digest, text: null, everywhere },
-            ]),
-          ),
+          baseline: new Map(shapes.map(({ path, ...shape }) => [path, unkept(shape, everywhere)])),
         })
       }
       const readHolds: Hold[] = []
