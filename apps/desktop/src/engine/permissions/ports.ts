@@ -1,20 +1,20 @@
 /**
  * The ports the order of decision calls and later tickets fill: the judge (Hemera Auto's Jev, or
- * the agent's own, `hemera-auto.ts`), the grants of "Allow for this mission" (`grants.ts`), the Project's "who
- * commits" rule (B4, R5), the folders of the data folder a mission's sessions may reach (CT-17),
+ * the agent's own, `hemera-auto.ts`), the grants of "Allow for this mission" (`grants.ts`), whether
+ * a mission's agents commit (#477), the folders of the data folder a mission's sessions may reach (CT-17),
  * and the turns of the agents' sessions, within which a judge's verdict may be reused.
  *
  * Their defaults never allow what they cannot judge: no judge (the call asks), no grant, no agent
- * that commits, and only the mission's own folder.
+ * that commits outside a step that asks it to, and only the mission's own folder.
  */
 
 import { evidenceExtension, missionKey } from '@hemera/core/domain'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import type { JudgeScores } from '@hemera/core/domain'
 import { Context, Effect, Layer } from 'effect'
 
 import { Database } from '../storage/database.ts'
-import { memoryEvidence, missions } from '../storage/schema.ts'
+import { effectfulActions, memoryEvidence, missions } from '../storage/schema.ts'
 import type { JudgedCall } from '../tools/ports.ts'
 
 /** How a judge rated a call, as its decision records it. */
@@ -71,16 +71,44 @@ export const noMissionGrants = Layer.succeed(MissionGrants, {
   allowing: () => Effect.succeed(null),
 })
 
-/** The Project's "who commits" rule, as far as agents are concerned. */
+/** Whether a mission's agents may run `git commit` now, as its delivery rules say (#477). */
 export class CommitRights extends Context.Service<
   CommitRights,
-  { readonly agentsCommit: (projectId: string) => Effect.Effect<boolean> }
+  { readonly agentsCommit: (missionId: string) => Effect.Effect<boolean> }
 >()('CommitRights') {}
 
-/** Until the rule exists (open question 26): no agent of a mission commits. */
-export const noAgentCommits = Layer.succeed(CommitRights, {
-  agentsCommit: () => Effect.succeed(false),
-})
+/** The action an After each task step records while it waits for an agent's commit. */
+export const AGENT_COMMIT = 'delivery.commit_by_agent'
+
+/**
+ * A mission's agents commit only while one of its After each task steps waits for an agent's
+ * commit (`commit-by-agent`): never before the step, never once it is done. A mission whose steps
+ * cannot be read commits nothing.
+ */
+export const stepCommitRights = Layer.effect(
+  CommitRights,
+  Effect.gen(function* () {
+    const database = yield* Database
+    return {
+      agentsCommit: (missionId) =>
+        database
+          .select({ id: effectfulActions.id })
+          .from(effectfulActions)
+          .where(
+            and(
+              eq(effectfulActions.kind, AGENT_COMMIT),
+              eq(effectfulActions.ownerKind, 'mission'),
+              eq(effectfulActions.ownerId, missionId),
+              inArray(effectfulActions.state, ['started', 'indeterminate']),
+            ),
+          )
+          .pipe(
+            Effect.map((rows) => rows.length > 0),
+            Effect.orElseSucceed(() => false),
+          ),
+    }
+  }),
+)
 
 /** The keys of the missions whose folders of the data folder a mission's sessions may reach. */
 export interface MissionFolders {

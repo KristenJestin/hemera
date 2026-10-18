@@ -54,9 +54,16 @@ import {
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
+import type { ForgePort } from '../forges/port.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
-import { type CancelIn, type MissionCancels, cancelMissionIn, runStops } from '../missions.ts'
+import {
+  type CancelIn,
+  type MissionActivity,
+  type MissionCancels,
+  cancelMissionIn,
+  runStops,
+} from '../missions.ts'
 import {
   DeliveryFailed,
   type NeedHandler,
@@ -105,7 +112,7 @@ import { readyLine, readySaid } from './builder-role.ts'
 import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
-import { buildingLoop, fileOf, runningOf } from './loop.ts'
+import { AFTER_TASK, buildingLoop, fileOf, runningOf } from './loop.ts'
 import {
   CANCEL_MISSION,
   END_WITHOUT,
@@ -199,6 +206,8 @@ const HEARTBEAT = '15 seconds'
 
 type Needs =
   | Database
+  | ForgePort
+  | MissionActivity
   | DomainEvents
   | Secrets
   | Sessions
@@ -1135,6 +1144,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 )
               : refusal(notAvailableSaid(task))
           }
+          // A step of an After each task stack waiting holds every next task back (#477).
+          const step = yield* loop.stepWaiting(building)
+          if (step !== null) {
+            return refusal(
+              `${task.id} waits: ${step}. Start it again once that is done: Hemera tells you.`,
+            )
+          }
           const holder = yield* holderIn(database, building.id, task)
           if (holder !== null) {
             yield* mutate('holding a task back', (transaction) =>
@@ -2033,7 +2049,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (outcome === null) return
-          if (outcome.decision.kind === 'commit') yield* commitsLeft(outcome.building)
+          if (outcome.decision.kind === 'commit' || outcome.decision.kind === AFTER_TASK)
+            yield* commitsLeft(outcome.building)
           // A question about the proofs the end waits on, ended unanswered: the end is judged
           // again, and asks again while they stay stuck.
           if (outcome.decision.kind === 'proofs_unproven') {
