@@ -10,9 +10,12 @@
 import {
   AnchorAsked,
   AnchorSide,
+  Delta,
   FeedbackKind,
   FeedbackState,
   LineRange,
+  ProofMode,
+  RoundPointKind,
   RoundState,
 } from '@hemera/core/domain'
 import { Schema } from 'effect'
@@ -143,6 +146,81 @@ export const ReviewStateView = Schema.Struct({
 })
 export type ReviewStateView = typeof ReviewStateView.Type
 
+/** A scenario of a round's point (#468): its proof's mode, and where its proof stands. */
+export const RoundScenarioView = Schema.Struct({
+  id: Schema.String,
+  when: Schema.String,
+  then: Schema.String,
+  mode: ProofMode,
+  /** The proof's state in the round's Building (`red_recorded`, `green`…); null before it. */
+  proof: Schema.NullOr(Schema.String),
+})
+export type RoundScenarioView = typeof RoundScenarioView.Type
+
+export const RoundDecisionView = Schema.Struct({
+  kind: Schema.Literals(['behaviour', 'point', 'clarify']),
+  point: Schema.NullOr(Schema.String),
+  feedbackId: Schema.NullOr(Schema.String),
+  choice: Schema.String,
+  alternatives: Schema.Array(Schema.String),
+  why: Schema.String,
+})
+export type RoundDecisionView = typeof RoundDecisionView.Type
+
+/** A point of a round: a requirement, its classification, its sources, scenarios and decisions. */
+export const RoundPointView = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  kind: RoundPointKind,
+  delta: Schema.NullOr(
+    Schema.Struct({ requirement: Schema.String, change: Delta, livingVersion: Schema.Number }),
+  ),
+  sources: Schema.Array(Schema.String),
+  scenarios: Schema.Array(RoundScenarioView),
+  decisions: Schema.Array(RoundDecisionView),
+  removed: Schema.Boolean,
+  removedReason: Schema.NullOr(Schema.String),
+})
+export type RoundPointView = typeof RoundPointView.Type
+
+/** A task of a round, folded as Planning's are: the agent's translation of the points. */
+export const RoundTaskView = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  result: Schema.String,
+  points: Schema.Array(Schema.String),
+  scenarios: Schema.Array(Schema.String),
+  /** Its state in the round's Building; null before it. */
+  state: Schema.NullOr(Schema.String),
+})
+export type RoundTaskView = typeof RoundTaskView.Type
+
+/** One round as a small Spec (#468): its points, tasks, decisions, questions and progress. */
+export const RoundDetailView = Schema.Struct({
+  missionId: Schema.String,
+  number: Schema.Number,
+  state: RoundState,
+  readyWhy: Schema.NullOr(Schema.String),
+  points: Schema.Array(RoundPointView),
+  tasks: Schema.Array(RoundTaskView),
+  decisions: Schema.Array(RoundDecisionView),
+  /** The ids of the questions its grilling asked. */
+  questions: Schema.Array(Schema.String),
+  progress: Schema.Struct({ done: Schema.Number, tasks: Schema.Number }),
+})
+export type RoundDetailView = typeof RoundDetailView.Type
+
+/** What the start field opens with for "Start a mission from this" (#468): nothing is created. */
+export const MissionFromSource = Schema.Struct({
+  feedbackId: Schema.String,
+  text: Schema.String,
+  /** The mission it is started from, stored as a link on both once created. */
+  origin: Schema.String,
+  /** `Started from ACME-12, round 2`. */
+  originSaid: Schema.String,
+})
+export type MissionFromSource = typeof MissionFromSource.Type
+
 /** An image kept for a feedback. */
 export const ImageAdded = Schema.Struct({
   evidenceId: Schema.String,
@@ -256,5 +334,20 @@ export const ReviewRpcs = RpcGroup.make(
     success: ReviewChange,
     error: failing(...always, UnknownMission),
     stream: true,
+  }),
+  Rpc.make('review.fix', {
+    payload: { missionId: Schema.String },
+    success: Schema.Void,
+    error: failing(...always, UnknownMission, FeedbackRefused),
+  }),
+  Rpc.make('review.round', {
+    payload: { missionId: Schema.String, number: Schema.Number },
+    success: RoundDetailView,
+    error: failing(...always, UnknownMission, FeedbackRefused),
+  }),
+  Rpc.make('review.startMissionFrom', {
+    payload: { feedbackId: Schema.String },
+    success: MissionFromSource,
+    error: failing(...onFeedback),
   }),
 )

@@ -473,6 +473,12 @@ const CONTENT = {
     },
   },
   review_report: NOTHING,
+  round_point_write: NOTHING,
+  round_point_remove: NOTHING,
+  round_tasks_write: NOTHING,
+  round_propose_mission: NOTHING,
+  round_ready: NOTHING,
+  feedback_answer: NOTHING,
   hemera_report: NOTHING,
   hemera_reports: NOTHING,
 } satisfies Record<ToolName, Hands>

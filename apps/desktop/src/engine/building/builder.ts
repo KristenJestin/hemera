@@ -32,9 +32,10 @@ import {
   amendmentProblems,
   amendmentSaid,
   readySet,
+  roundLabel,
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gt } from 'drizzle-orm'
 import {
   Cause,
   Context,
@@ -66,6 +67,7 @@ import {
 import { basesAt, liveIn, placeOf, planRows, targetProblem } from '../planning/plan.ts'
 import { Secrets } from '../secrets.ts'
 import type { Git } from '../git.ts'
+import { roundTasksIn } from '../review/round-store.ts'
 import { storeDeliveryIn } from '../sessions/deliveries.ts'
 import { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
@@ -326,7 +328,8 @@ export type BuilderHold = (
     | 'window'
     | 'settling'
     | 'settled'
-    | 'outside',
+    | 'outside'
+    | 'beginning',
 ) => Effect.Effect<void>
 
 /**
@@ -592,8 +595,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           yield* ToolAccess.use((access) => access.building(building.missionId))
           const owner = { kind: 'mission', missionId: building.missionId } as const
           if (yield* builderLive(building.missionId)) return 'live' as const
+          // Only a lineage of this Building resumes: a round's Builder is a fresh session (#468).
           const last = (yield* sessionsIn(['ended', 'failed', 'replaced'], owner))
-            .filter((one) => one.role === 'builder')
+            .filter((one) => one.role === 'builder' && one.createdAt >= building.startedAt)
             .toSorted((a, b) => b.epoch - a.epoch)[0]
           if (last !== undefined) {
             const resumed = yield* Sessions.use((sessions) => sessions.resume(last.id))
@@ -672,6 +676,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const database = yield* Database
           const active = yield* activeBuildingIn(database, missionId)
           if (active !== null) return yield* ensureBuilder(active)
+          // "Building · round N" (#468): a Building of its own, once, while the mission builds it.
+          const mission = yield* missionRowOf(missionId)
+          const round = mission !== null && mission.round > 0 ? mission.round : null
+          if (round !== null) {
+            if (mission?.stage !== 'building') return
+            const [had] = yield* database
+              .select({ id: buildings.id })
+              .from(buildings)
+              .where(and(eq(buildings.missionId, missionId), eq(buildings.round, round)))
+              .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+            if (had !== undefined) return
+            yield* hold('beginning')
+          }
           const [launch] = yield* database
             .select()
             .from(buildingLaunches)
@@ -707,11 +724,20 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               if ((yield* activeBuildingIn(transaction, missionId)) !== null) {
                 return { result: null, events: [] }
               }
+              // Started meanwhile by another hand: one Building per round.
+              if (round !== null) {
+                const [had] = yield* transaction
+                  .select({ id: buildings.id })
+                  .from(buildings)
+                  .where(and(eq(buildings.missionId, missionId), eq(buildings.round, round)))
+                  .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+                if (had !== undefined) return { result: null, events: [] }
+              }
               const row: BuildingRow = {
                 id,
                 missionId,
-                label: 'Building',
-                round: null,
+                label: round === null ? 'Building' : roundLabel(round),
+                round,
                 workspaceId: workspace.id,
                 bases: bases.write(taken),
                 phase: 'tasks',
@@ -728,7 +754,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 .insert(buildings)
                 .values(row)
                 .pipe(Effect.mapError(refusedWhile('starting the Building')))
-              const { tasks } = yield* planRows(transaction, missionId)
+              // A round's tasks build its points, as the Spec's build its requirements.
+              const tasks =
+                round === null
+                  ? (yield* planRows(transaction, missionId)).tasks
+                  : (yield* roundTasksIn(transaction, missionId, round)).map((one) => ({
+                      id: one.id,
+                      title: one.title,
+                      result: one.result,
+                      requirements: one.points,
+                      scenarios: one.scenarios,
+                      targets: one.targets,
+                      dependsOn: one.dependsOn,
+                    }))
               for (const [rank, task] of tasks.entries()) {
                 yield* transaction
                   .insert(buildingTasks)
@@ -736,7 +774,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                     buildingId: id,
                     id: task.id,
                     rank,
-                    origin: 'spec',
+                    origin: round === null ? 'spec' : 'round',
                     title: secrets.mask(task.title),
                     result: secrets.mask(task.result),
                     requirements: writeStrings(task.requirements),
@@ -758,6 +796,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   buildingEvent(missionId, 'building.started', {
                     buildingId: id,
                     label: row.label,
+                    round,
                     tasks: tasks.length,
                   }),
                   ...settledNow.events,
@@ -2076,11 +2115,38 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         )
 
+      const startOf = (missionId: string) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(begin(missionId)).pipe(
+          provided,
+          Effect.catchTag('SnapshotFailed', (failed) =>
+            Effect.andThen(
+              Snapshots.use((snapshots) => snapshots.failed(missionId, failed)).pipe(provided),
+              Effect.die(new Error(`the base snapshot could not be taken: ${failed.message}`)),
+            ),
+          ),
+          Effect.orDie,
+        )
+
+      /** A round's Building begun apart from the follower, which never waits on a start. */
+      const roundStarts = (missionId: string) =>
+        startOf(missionId).pipe(
+          Effect.catchCause((cause) =>
+            said(`the Building of a round did not start: ${String(cause)}`),
+          ),
+          Effect.forkIn(layerScope),
+          Effect.asVoid,
+        )
+
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       const follow = events.pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             const payload = event.payload ?? {}
+            // A round ready to build: "Building · round N" begins (#468).
+            if (event.type === 'review.round_building') yield* roundStarts(event.entityId)
             if (event.type === 'building.task_available' && payload['initial'] !== true) {
               const database = yield* Database
               const building = yield* activeBuildingIn(database, event.entityId)
@@ -2170,6 +2236,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       }).pipe(provided, Effect.orDie)
       const resume = Effect.gen(function* () {
         yield* Deferred.await(handedOver)
+        // A round made ready, its Building not begun before a stop: it begins now (#468).
+        const database = yield* Database
+        const rounds = yield* database
+          .select({ id: missions.id, round: missions.round })
+          .from(missions)
+          .where(and(eq(missions.stage, 'building'), gt(missions.round, 0)))
+          .pipe(Effect.mapError(refusedWhile('reading the missions')))
+        for (const one of rounds) {
+          const [had] = yield* database
+            .select({ id: buildings.id })
+            .from(buildings)
+            .where(and(eq(buildings.missionId, one.id), eq(buildings.round, one.round)))
+            .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+          if (had === undefined) yield* roundStarts(one.id)
+        }
         for (const building of yield* activeBuildings) {
           const checking = yield* mutate('resuming the Building', (transaction) =>
             Effect.gen(function* () {
@@ -2246,22 +2327,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         Effect.forkScoped,
       )
 
-      return {
-        start: (missionId: string) =>
-          Semaphore.withPermits(
-            lock,
-            1,
-          )(begin(missionId)).pipe(
-            provided,
-            Effect.catchTag('SnapshotFailed', (failed) =>
-              Effect.andThen(
-                Snapshots.use((snapshots) => snapshots.failed(missionId, failed)).pipe(provided),
-                Effect.die(new Error(`the base snapshot could not be taken: ${failed.message}`)),
-              ),
-            ),
-            Effect.orDie,
-          ),
-      }
+      return { start: startOf }
     }),
   )
   return { layer, handler, cut, restarted, handed }

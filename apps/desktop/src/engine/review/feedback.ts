@@ -949,6 +949,8 @@ export const reviewLayer = (settings: ReviewSettings) =>
             answer: null,
             createdAt: at,
             updatedAt: at,
+            said: null,
+            movedTo: null,
           }
           yield* transaction
             .insert(reviewFeedback)
@@ -1553,6 +1555,15 @@ export const reviewLayer = (settings: ReviewSettings) =>
       const handle = (event: DomainEvent) =>
         Effect.gen(function* () {
           if (event.type === 'proof.manual_refused') return yield* proofRemark(event)
+          // A round answered with nothing to build leaves the mission in Review (#468): its
+          // checkpoint is the one of the round it answered.
+          if (event.type === 'review.round_answered') {
+            return yield* recordCheckpoint(event.entityId).pipe(
+              Effect.catchCause((cause) =>
+                said(`the checkpoint of ${event.entityId} was not taken: ${String(cause)}`),
+              ),
+            )
+          }
           if (event.type !== 'mission.moved') return
           if (event.payload.to === 'review') {
             // Tried again, apart, while the mission stays in Review; the move out takes it at last.

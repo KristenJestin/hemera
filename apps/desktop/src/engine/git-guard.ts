@@ -331,6 +331,10 @@ const ownedByCall = (
   ]
 }
 
+/** A shape's kind as a hold's line says it: what could not be read keeps its reason. */
+const kindSaid = (shape: Shape | null): string =>
+  shape === null ? 'absent' : shape.kind === 'other' ? shape.digest : shape.kind
+
 /** The guard: its scopes and holds in memory, the spawns' check, and the records' writer. */
 export const engineGitGuard = (
   home: ShapeHome,
@@ -366,7 +370,18 @@ export const engineGitGuard = (
             false,
           )
 
-    const ask = (hold: Hold) => Queue.offerUnsafe(errands, { kind: 'ask', hold })
+    /**
+     * Each hold asked, said in the engine's lines: its scope, and each path with its kind before and
+     * after, an error's code where it could not be read, never what a file holds.
+     */
+    const ask = (hold: Hold) => {
+      for (const [path, change] of hold.changes) {
+        log(
+          `the Git guard holds ${hold.key}: ${path} ${kindSaid(change.was)} → ${kindSaid(change.shown)}`,
+        )
+      }
+      Queue.offerUnsafe(errands, { kind: 'ask', hold })
+    }
     const keep = (scope: Scope) => Queue.offerUnsafe(errands, { kind: 'baseline', scope })
 
     /** The hold ends: its record goes, and its question, still open, is withdrawn. */
