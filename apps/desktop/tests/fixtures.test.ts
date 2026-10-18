@@ -15,12 +15,12 @@ import {
 } from 'node:fs'
 import { delimiter, join } from 'node:path'
 
-import { Effect, Predicate, Result } from 'effect'
+import { Effect, Exit, Predicate, Result } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { EXPORT_TEST_PATH, MASKING_PLACES } from '../fixtures/agents.ts'
-import { FIXTURE_GROUPS, buildFixture, fixtureList } from '../fixtures/build.ts'
-import { reached } from '../fixtures/missions.ts'
+import { FIXTURE_GROUPS, buildFixture, fixtureList, notBuilt } from '../fixtures/build.ts'
+import { checkLaunchable, reached } from '../fixtures/missions.ts'
 import { FAKE_PAYMENTS_KEY } from '../fixtures/larkspur.ts'
 import { chatsOf, transcriptOf } from '../src/engine/chat/store.ts'
 import {
@@ -296,6 +296,35 @@ describe('The fixtures command', () => {
     const { root } = places()
     await expect(built('../outside', root)).rejects.toThrow(/no fixture group/)
     expect(existsSync(root)).toBe(false)
+  })
+})
+
+describe('A fixture that could not be built says why where the test prints it (#483)', () => {
+  test("the error holds the engine's last lines, not only where they are", () => {
+    const folder = temporaryFolder('fixtures-log')
+    const log = join(folder, 'build.log')
+    writeFileSync(log, Array.from({ length: 100 }, (_, at) => `line ${String(at + 1)}\n`).join(''))
+    const error = notBuilt('review-findings', log, new Error('the check failed'))
+    expect(error.message).toContain(log)
+    expect(error.message).toContain('line 61\nline 62')
+    expect(error.message).toContain('line 100')
+    expect(error.message).not.toContain('line 60\n')
+    expect(error.cause).toEqual(new Error('the check failed'))
+  })
+
+  test('a pre-launch check that failed stops the fixture with what it said', async () => {
+    const failed = { state: 'failed', verdict: { said: 'The base of api could not be read: held' } }
+    const exit = await Effect.runPromiseExit(checkLaunchable(failed))
+    expect(String(exit)).toContain(
+      'the pre-launch check failed: The base of api could not be read: held',
+    )
+    const done = { state: 'done', verdict: { said: 'Nothing moved since the Freeze: launch.' } }
+    expect(Exit.isSuccess(await Effect.runPromiseExit(checkLaunchable(done)))).toBe(true)
+  })
+
+  test('a build that wrote no line says so', () => {
+    const log = join(temporaryFolder('fixtures-log'), 'build.log')
+    expect(notBuilt('empty', log, new Error('stopped')).message).toContain('no line')
   })
 })
 

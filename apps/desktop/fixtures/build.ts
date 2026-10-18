@@ -28,6 +28,7 @@ import { Effect, Match, Result, Schema, SubscriptionRef } from 'effect'
 import { suiteAgent } from '../src/engine/agents/suite-agent.ts'
 import { startProfile } from '../src/engine/profile.ts'
 import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from '../src/engine/registries.ts'
+import { listNeeds } from '../src/engine/needs.ts'
 import { getSession } from '../src/engine/sessions/store.ts'
 import {
   FIXTURE_FORGE,
@@ -175,9 +176,42 @@ const buildState = (
           new Error(`the fixture's profile was refused: ${database.sentence}`),
         )
       }
-      yield* started.use(group.build({ work, git: fixtureGit(dirname(work)) }))
+      yield* started.use(
+        group.build({ work, git: fixtureGit(dirname(work)) }).pipe(
+          // What waits on the user when a build stops, a hold of the Git guard among them.
+          Effect.onError(() =>
+            Effect.flatMap(
+              Effect.orElseSucceed(listNeeds, () => []),
+              (groups) =>
+                Effect.sync(() => {
+                  for (const need of groups.flatMap((one) => one.needs)) {
+                    log(`open need ${need.state}: ${JSON.stringify(need.fields)}`)
+                  }
+                }),
+            ),
+          ),
+        ),
+      )
     }),
   )
+
+/** How many of the engine's last lines a failed build says. */
+const LINES_SAID = 40
+
+/**
+ * A build that failed, said with the engine's last lines: where the fixture is built (a CI
+ * runner's temporary folder) is gone once the test has failed.
+ */
+export const notBuilt = (group: string, engineLog: string, failure: Error): Error => {
+  const lines = existsSync(engineLog) ? readFileSync(engineLog, 'utf8').trimEnd().split('\n') : []
+  const said =
+    lines.length === 0 || lines[0] === ''
+      ? 'the engine wrote no line'
+      : `its last lines:\n${lines.slice(-LINES_SAID).join('\n')}`
+  return new Error(`${group} could not be built (the engine's lines: ${engineLog}); ${said}`, {
+    cause: failure,
+  })
+}
 
 export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   const group = FIXTURE_GROUPS.find((one) => one.name === asked.group)
@@ -223,9 +257,7 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   await Effect.runPromise(
     buildState(group, profile, work, env, (line) => appendFileSync(engineLog, `${line}\n`)),
   ).catch((failure: Error) => {
-    throw new Error(`${group.name} could not be built (the engine's lines: ${engineLog})`, {
-      cause: failure,
-    })
+    throw notBuilt(group.name, engineLog, failure)
   })
   asked.log(`built ${group.name} in ${String(Math.round((Date.now() - started) / 1000))} s`)
   return fixture(env)
