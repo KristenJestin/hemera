@@ -523,6 +523,16 @@ describe('No agent of a mission writes to a remote or to the history', () => {
       'no agent of a mission may run git commit in this Project',
     )
   })
+
+  test.each([
+    [['git', 'commit', '--amend', '-m', 'x'], 'git commit --amend'],
+    [['git', 'commit', '--amen', '--no-edit'], 'git commit --amend'],
+    [['git', 'commit', '--no-verify', '-m', 'x'], 'git commit --no-verify'],
+    [['git', 'commit', '--no-ver', '-m', 'x'], 'git commit --no-verify'],
+    [['git', 'commit', '-anm', 'x'], 'git commit --no-verify'],
+  ])('%j is refused even when agents may commit', (words, what) => {
+    expect(refusalOf(words, true)).toBe(`no agent of a mission may run ${what}`)
+  })
 })
 
 describe("A forge CLI's writes are refused, its reads are not", () => {

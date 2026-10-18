@@ -706,6 +706,10 @@ function gitSubcommand(args: ReadonlyArray<string>) {
   return { sub: (args[at] ?? '').toLowerCase(), rest: args.slice(at + 1) }
 }
 
+/** Whether a word is a long option, written whole or by a prefix of at least `least` characters. */
+const longOption = (word: string, option: string, least: number) =>
+  word.length >= least && option.startsWith(word.split('=')[0] ?? '')
+
 /** What a mission's agent may not do with Git, and why; null when it may. */
 function gitRefusal(args: ReadonlyArray<string>, mayCommit: boolean): string | null {
   const { sub, rest } = gitSubcommand(args)
@@ -727,7 +731,14 @@ function gitRefusal(args: ReadonlyArray<string>, mayCommit: boolean): string | n
         ? refused('branch -d')
         : null
     case 'commit':
-      return mayCommit ? null : 'no agent of a mission may run git commit in this Project'
+      if (!mayCommit) return 'no agent of a mission may run git commit in this Project'
+      // An agent's commit never rewrites the last one, nor skips the repository's hooks; Git takes
+      // a long option by any prefix that is not ambiguous.
+      if (rest.some((word) => longOption(word, '--amend', 4))) return refused('commit --amend')
+      if (rest.some((word) => longOption(word, '--no-verify', 6) || /^-[A-Za-z]*n/.test(word))) {
+        return refused('commit --no-verify')
+      }
+      return null
     default:
       return null
   }
