@@ -1281,6 +1281,9 @@ describe('A submodule’s own Git folder shapes the engine’s Git like the repo
         const outside = join(work, 'outside.git')
         git(work, 'clone', '-q', `--separate-git-dir=${outside}`, join(work, 'shared'), 'copy')
         appendFileSync(join(outside, 'config'), FILTER)
+        // Git for Windows marks the `.git` file hidden, and a hidden file cannot be opened to be
+        // replaced there: it is removed, then written again.
+        rmSync(join(main, 'shared', '.git'))
         writeFileSync(join(main, 'shared', '.git'), `gitdir: ${outside.replaceAll('\\', '/')}\n`)
         return { status: yield* engineStatus(main), needs: yield* asked }
       }),
