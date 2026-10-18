@@ -23,6 +23,7 @@ import { readProof } from '../planning/plan.ts'
 import { type Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
   buildingLaunches,
+  missions,
   questions,
   reviewFeedback,
   reviewRounds,
@@ -201,9 +202,26 @@ export const roundInState = (reader: Reader, missionId: string, state: RoundStat
       Effect.map((rows) => rows.at(-1)?.number ?? null),
     )
 
-/** The mission's round being grilled, or null. */
+/**
+ * The mission's round being grilled, or null: only while the mission is in Review, so a round a
+ * cancel left grilling is grilled no more.
+ */
 export const grillingRoundIn = (reader: Reader, missionId: string) =>
-  roundInState(reader, missionId, 'grilling')
+  reader
+    .select({ number: reviewRounds.number })
+    .from(reviewRounds)
+    .innerJoin(missions, eq(missions.id, reviewRounds.missionId))
+    .where(
+      and(
+        eq(reviewRounds.missionId, missionId),
+        eq(reviewRounds.state, 'grilling'),
+        eq(missions.stage, 'review'),
+      ),
+    )
+    .pipe(
+      Effect.mapError(refusedWhile('reading the rounds')),
+      Effect.map((rows) => rows.at(-1)?.number ?? null),
+    )
 
 /** The role a mission's Planner deliveries go to now: its Planner in round mode while a round is grilled. */
 export const plannerRoleIn = (reader: Reader, missionId: string) =>

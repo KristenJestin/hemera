@@ -19,25 +19,28 @@ import {
   KEEP_IN_ROUND,
   SESSION_STATES,
   START_A_MISSION,
+  TOOLS,
   TO_A_MISSION,
   WITHDRAW_FEEDBACK,
+  toolsOf,
 } from '@hemera/core/domain'
 import { FeedbackUser, type FeedbackView } from '@hemera/ipc'
 import { and, asc, eq } from 'drizzle-orm'
-import { Effect, Layer, type Schema } from 'effect'
+import { Deferred, Effect, Layer, type Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
-import { buildingOf } from '../src/engine/building/builder.ts'
+import { type BuilderHold, buildingOf } from '../src/engine/building/builder.ts'
 import { TaskChecks } from '../src/engine/building/checks.ts'
 import { addRequirement } from '../src/engine/living-spec/store.ts'
 import { Secrets } from '../src/engine/secrets.ts'
-import { getMission, moveIn } from '../src/engine/missions.ts'
+import { getMission, moveIn, moveMission } from '../src/engine/missions.ts'
 import { answerQuestion } from '../src/engine/planning/calls.ts'
 import { inputsOf, openQuestions, wavesOf } from '../src/engine/planning/questions.ts'
 import { Review, type FeedbackAsked } from '../src/engine/review/feedback.ts'
 import { Rounds } from '../src/engine/review/rounds.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
+import { ROLES_REGISTERED, roleNamed } from '../src/engine/sessions/roles.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
 import { createStart } from '../src/engine/start/field.ts'
 import { Database } from '../src/engine/storage/database.ts'
@@ -116,7 +119,13 @@ const DRIVEN = ['## Builder · ', '## Planner · ']
  * The engine over `folder`: the cold read reads (unless `resumed`), the Builders and the round's
  * Planner answer every prompt, every other agent holds its turn until the test lets it go.
  */
-const rounding = (options: { readonly resumed?: boolean; readonly folder?: string } = {}) => {
+const rounding = (
+  options: {
+    readonly resumed?: boolean
+    readonly folder?: string
+    readonly hold?: BuilderHold
+  } = {},
+) => {
   const holds = new Map<number, ReturnType<typeof held>>()
   const holdOf = (index: number) => {
     const found = holds.get(index) ?? held()
@@ -138,6 +147,7 @@ const rounding = (options: { readonly resumed?: boolean; readonly folder?: strin
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: {
+      hold: options.hold,
       outside: { compareEveryMillis: 3_600_000, baseEveryMillis: 3_600_000 },
       checks: Layer.succeed(TaskChecks, { run: () => Effect.succeed([]) }),
     },
@@ -203,12 +213,15 @@ const written = (missionId: string, asked: FeedbackAsked) =>
 
 const fix = (missionId: string) => Rounds.use((rounds) => rounds.fix(missionId))
 
-/** The round's Planner once its first turn ended, and a grant the test drives it with. */
-const roundPlannerOf = (missionId: string) =>
+/**
+ * The round's Planner once its first turn ended, and a grant the test drives it with; never the
+ * session `before` (one a restart replaces).
+ */
+const roundPlannerOf = (missionId: string, before = '') =>
   Effect.gen(function* () {
     const idle = Effect.map(
       sessionsIn(['idle'], { kind: 'mission', missionId }),
-      (rows) => rows.find((row) => row.role === 'round-planner') ?? null,
+      (rows) => rows.find((row) => row.role === 'round-planner' && row.id !== before) ?? null,
     )
     yield* until(
       Effect.map(idle, (found) => found !== null),
@@ -926,12 +939,18 @@ const builtHeader = (grantId: string) =>
     yield* used(grantId, 'task_finished', { task: 'R1.T1', summary: 'The header row is written.' })
   })
 
-/** The round's Builder: a fresh one, idle, not of `before`'s lineage, and a grant to drive it. */
-const roundBuilderOf = (missionId: string, before: string) =>
+/**
+ * The round's Builder: idle, not of `before`'s lineage, never the session `replaced` (one a restart
+ * replaces), and a grant to drive it.
+ */
+const roundBuilderOf = (missionId: string, before: string, replaced = '') =>
   Effect.gen(function* () {
     const idle = Effect.map(
       sessionsIn(['idle'], { kind: 'mission', missionId }),
-      (rows) => rows.find((row) => row.role === 'builder' && row.lineage !== before) ?? null,
+      (rows) =>
+        rows.find(
+          (row) => row.role === 'builder' && row.lineage !== before && row.id !== replaced,
+        ) ?? null,
     )
     yield* until(
       Effect.map(idle, (found) => found !== null),
@@ -1269,4 +1288,680 @@ describe('The way back to Review', () => {
       )
     },
   )
+})
+
+/** The end of a round's Building: its documenter and both reviewers report, the mission is back. */
+const throughEnd = (world: Held, missionId: string, count = 1) =>
+  Effect.gen(function* () {
+    yield* documented(world, missionId, count)
+    yield* reviewedBoth(world, missionId, count)
+    yield* inStage(missionId, 'review')
+  })
+
+/** The mission's sessions still running. */
+const liveOf = (missionId: string) =>
+  sessionsIn(['starting', 'working', 'idle', 'stuck'], { kind: 'mission', missionId })
+
+/** The rounds of the mission, as `[number, state]`. */
+const roundsOf = (missionId: string) =>
+  Effect.map(
+    Review.use((review) => review.state(missionId)),
+    (state) => state.rounds.map((one) => [one.number, one.state] as const),
+  )
+
+describe('A stop and a restart', () => {
+  test(
+    'a restart during grilling resumes without a human relaunch: the Planner in round mode is back with what it wrote, and the round goes on to "Building · round 1"',
+    SLOW,
+    async () => {
+      const first = rounding()
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const { grantId } = yield* roundPlannerOf(missionId)
+            yield* used(grantId, 'round_point_write', {
+              round: 1,
+              text: 'The CSV export starts with a header row naming each column.',
+              kind: 'corrective',
+              scenarios: [byHand('the user exports the invoices', 'the first line names them')],
+              decisions: [],
+              sources: [one.id],
+            })
+            return { missionId, planner: (yield* roundPlannerOf(missionId)).session.id }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { grantId } = yield* roundPlannerOf(left.missionId, left.planner)
+            const brief = text(
+              after.world.agents.find((agent) =>
+                text(agent.answers.prompts[0] ?? []).includes('## Planner · '),
+              )?.answers.prompts[0] ?? [],
+            )
+            const ready = yield* used(grantId, 'round_ready', {
+              why: 'One point, verified by hand.',
+            })
+            const view = yield* roundBuilding(left.missionId, 1)
+            return { brief, ready, view }
+          }),
+        ),
+      )
+      expect(seen.brief).toContain('Mode: round 1')
+      expect(seen.brief).toContain('R1.1')
+      expect(seen.ready).toContain('Building · round 1')
+      expect(seen.view.label).toBe('Building · round 1')
+    },
+  )
+
+  test(
+    'a Planner in round mode that stops while its round is grilled is brought back, and a stop leaves none past its grilling',
+    SLOW,
+    async () => {
+      const first = rounding()
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed()
+            yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* Sessions.use((sessions) => sessions.end(planner.session.lineage, 'it stopped'))
+            yield* until(
+              Effect.map(liveOf(missionId), (rows) =>
+                rows.some((row) => row.role === 'round-planner' && row.id !== planner.session.id),
+              ),
+              LONG,
+            )
+            return { missionId, lineage: planner.session.lineage }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const planner = yield* roundPlannerOf(left.missionId)
+            return { planner: planner.session }
+          }),
+        ),
+      )
+      // Its own lineage, resumed: what it wrote and was told stays with it.
+      expect(seen.planner.lineage).toBe(left.lineage)
+    },
+  )
+
+  test(
+    'a restart between round_ready and its Building begins "Building · round 1" at the next start, once',
+    SLOW,
+    async () => {
+      const reached = Deferred.makeUnsafe<void>()
+      const first = rounding({
+        hold: (at) =>
+          at === 'beginning'
+            ? Effect.andThen(Deferred.succeed(reached, undefined), Effect.never)
+            : Effect.void,
+      })
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* Deferred.await(reached)
+            const database = yield* Database
+            const rows = yield* database
+              .select({ round: buildings.round })
+              .from(buildings)
+              .where(eq(buildings.missionId, missionId))
+            return { missionId, lineage, rows, mission: yield* getMission(missionId) }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const view = yield* roundBuilding(left.missionId, 1)
+            const builder = yield* roundBuilderOf(left.missionId, left.lineage)
+            const database = yield* Database
+            return {
+              view,
+              builder: builder.session,
+              rows: yield* database
+                .select({ round: buildings.round })
+                .from(buildings)
+                .where(eq(buildings.missionId, left.missionId)),
+            }
+          }),
+        ),
+      )
+      expect(left.mission).toMatchObject({ stage: 'building', round: 1 })
+      expect(left.rows).toEqual([{ round: null }])
+      expect(seen.view.tasks.map((one) => one.id)).toEqual(['R1.T1'])
+      expect(seen.rows).toEqual([{ round: null }, { round: 1 }])
+    },
+  )
+
+  test(
+    'a restart during "Building · round 1" resumes its Building and its own Builder, which builds and answers to Review',
+    SLOW,
+    async () => {
+      const first = rounding()
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            const view = yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            return { missionId, one: one.id, buildingId: view.buildingId, round: builder.session }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const builder = yield* roundBuilderOf(left.missionId, '', left.round.id)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: left.one,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(after.world, left.missionId)
+            return {
+              builder: builder.session,
+              view: yield* buildingOf(left.missionId),
+              rounds: yield* roundsOf(left.missionId),
+            }
+          }),
+        ),
+      )
+      expect(seen.builder.lineage).toBe(left.round.lineage)
+      expect(seen.view?.buildingId).toBe(left.buildingId)
+      expect(seen.rounds).toEqual([[1, 'answered']])
+    },
+  )
+
+  test(
+    'a restart while the round’s end waits on an answer tells the Builder again, and the end goes on once it is given',
+    SLOW,
+    async () => {
+      const first = rounding()
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* until(
+              Effect.map(toBuilder(missionId), (told) =>
+                told.some((line) => line.startsWith('answers:')),
+              ),
+              LONG,
+            )
+            return { missionId, one: one.id, builder: builder.session.id }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* until(
+              Effect.map(
+                toBuilder(left.missionId),
+                (told) => told.filter((line) => line.startsWith('answers:')).length === 2,
+              ),
+              LONG,
+            )
+            const builder = yield* roundBuilderOf(left.missionId, '', left.builder)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: left.one,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(after.world, left.missionId)
+            return { rounds: yield* roundsOf(left.missionId) }
+          }),
+        ),
+      )
+      expect(seen.rounds).toEqual([[1, 'answered']])
+    },
+  )
+
+  test(
+    'a restart during the round’s automatic review runs the reviewers again and comes back to Review, the round answered',
+    SLOW,
+    async () => {
+      const first = rounding()
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: one.id,
+              text: 'The header row is written first.',
+            })
+            yield* documented(first.world, missionId)
+            yield* agentOf(first.world, missionId, 'code-reviewer')
+            return { missionId, phase: (yield* buildingOf(missionId))?.phase }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* reviewedBoth(after.world, left.missionId)
+            yield* inStage(left.missionId, 'review')
+            return {
+              rounds: yield* roundsOf(left.missionId),
+              state: yield* Review.use((review) => review.state(left.missionId)),
+            }
+          }),
+        ),
+      )
+      expect(left.phase).toBe('review')
+      expect(seen.rounds).toEqual([[1, 'answered']])
+      expect(seen.state.feedback.map((one) => one.state)).toEqual(['addressed'])
+    },
+  )
+})
+
+describe('More rounds', () => {
+  test(
+    'a round with no change, every feedback a question answered, is answered at once: the mission stays in Review with the round’s checkpoint, and the Planner ends',
+    SLOW,
+    async () => {
+      const { run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed()
+            // A remark that waits, answered as it goes with a new mission of its own.
+            const asked = yield* written(missionId, question('Why is the date in UTC?'))
+            const other = yield* written(missionId, remark('Send the invoices to the bank too.'))
+            yield* fix(missionId)
+            const { grantId } = yield* roundPlannerOf(missionId)
+            yield* used(grantId, 'feedback_answer', {
+              source: asked.id,
+              text: 'Every office reads the same day.',
+            })
+            yield* used(grantId, 'round_propose_mission', {
+              feedback: other.id,
+              reason: 'A bank is in no requirement of the Spec.',
+            })
+            const [proposed] = (yield* wavesOf(missionId)).flatMap((one) => one.questions).slice(-1)
+            yield* answerQuestion(missionId, proposed?.id ?? '', { optionId: 'A' })
+            yield* until(
+              Effect.map(inputsOf(missionId), (inputs) =>
+                inputs.some((one) => one.item === proposed?.id && one.state === 'delivered'),
+              ),
+              LONG,
+            )
+            const input = (yield* inputsOf(missionId)).find((one) => one.item === proposed?.id)
+            yield* used(grantId, 'input_integrated', {
+              id: input?.id ?? '',
+              where: { no_change: 'It leaves the round for a mission of its own.' },
+            })
+            const ready = yield* used(grantId, 'round_ready', { why: 'Nothing to build.' })
+            yield* until(
+              Effect.map(
+                Review.use((review) => review.state(missionId)),
+                (state) => state.checkpoints.some((one) => one.round === 1),
+              ),
+              LONG,
+            )
+            yield* until(
+              Effect.map(liveOf(missionId), (rows) => rows.length === 0),
+              LONG,
+            )
+            const database = yield* Database
+            return {
+              ready,
+              mission: yield* getMission(missionId),
+              rounds: yield* roundsOf(missionId),
+              buildings: yield* database
+                .select({ round: buildings.round })
+                .from(buildings)
+                .where(eq(buildings.missionId, missionId)),
+            }
+          }),
+        ),
+      )
+      expect(seen.ready).toContain('no point to build')
+      expect(seen.mission).toMatchObject({ stage: 'review', round: 1 })
+      expect(seen.rounds).toEqual([[1, 'answered']])
+      expect(seen.buildings).toEqual([{ round: null }])
+    },
+  )
+
+  test(
+    'two rounds in a row: the next Fix closes the answered round, and "Building · round 2" builds the second with a fresh Builder',
+    SLOW,
+    async () => {
+      const { world, run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const first = yield* roundPlannerOf(missionId)
+            yield* headerRound(first.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: one.id,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(world, missionId)
+            const two = yield* written(missionId, remark('The header names the currency too.'))
+            yield* fix(missionId)
+            const between = yield* roundsOf(missionId)
+            const second = yield* until(
+              Effect.map(liveOf(missionId), (rows) =>
+                rows.some(
+                  (row) =>
+                    row.role === 'round-planner' &&
+                    row.state === 'idle' &&
+                    row.lineage !== first.session.lineage,
+                ),
+              ),
+              LONG,
+            ).pipe(Effect.andThen(roundPlannerOf(missionId)))
+            yield* used(second.grantId, 'round_point_write', {
+              round: 2,
+              text: 'The header names the currency of the amounts.',
+              kind: 'corrective',
+              scenarios: [byHand('the user exports', 'the header says amount (EUR)')],
+              decisions: [],
+              sources: [two.id],
+            })
+            yield* used(second.grantId, 'round_tasks_write', {
+              round: 2,
+              tasks: [
+                {
+                  title: 'Name the currency',
+                  result: 'The header names the currency.',
+                  points: ['R2.1'],
+                  scenarios: ['R2.1.S1'],
+                  targets: [{ repository: 'api', path: 'invoices.ts', intent: 'change' }],
+                  depends_on: [],
+                },
+              ],
+            })
+            yield* used(second.grantId, 'round_ready', { why: 'One point.' })
+            const view = yield* roundBuilding(missionId, 2)
+            const next = yield* roundBuilderOf(missionId, builder.session.lineage)
+            const started = yield* using(next.grantId, 'task_start', { task: 'R2.T1' })
+            yield* used(next.grantId, 'fs_read', { repository: 'api', path: 'invoices.ts' })
+            yield* used(next.grantId, 'fs_write', {
+              repository: 'api',
+              path: 'invoices.ts',
+              content:
+                "export const header = 'number,date,amount (EUR)'\nexport const invoices = []\n",
+            })
+            yield* used(next.grantId, 'task_finished', { task: 'R2.T1', summary: 'Done.' })
+            yield* used(next.grantId, 'feedback_answer', {
+              source: two.id,
+              text: 'The header names the currency.',
+            })
+            yield* throughEnd(world, missionId, 2)
+            yield* until(
+              Effect.map(
+                Review.use((review) => review.state(missionId)),
+                (state) => state.checkpoints.some((checkpoint) => checkpoint.round === 2),
+              ),
+              LONG,
+            )
+            return {
+              between,
+              view,
+              started,
+              builders: [lineage, builder.session.lineage, next.session.lineage],
+              rounds: yield* roundsOf(missionId),
+              checkpoints: (yield* Review.use((review) => review.state(missionId))).checkpoints.map(
+                (checkpoint) => checkpoint.round,
+              ),
+              mission: yield* getMission(missionId),
+            }
+          }),
+        ),
+      )
+      expect(seen.between).toEqual([
+        [1, 'closed'],
+        [2, 'grilling'],
+      ])
+      expect(seen.view.label).toBe('Building · round 2')
+      expect(seen.started.ok).toBe(true)
+      expect(new Set(seen.builders).size).toBe(3)
+      expect(seen.rounds).toEqual([
+        [1, 'closed'],
+        [2, 'answered'],
+      ])
+      expect(seen.checkpoints).toEqual([0, 1, 2])
+      expect(seen.mission).toMatchObject({ stage: 'review', round: 2 })
+    },
+  )
+
+  test(
+    'a round cancelled while grilled stops its Planner, and the next start brings none back',
+    SLOW,
+    async () => {
+      const first = rounding()
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed()
+            yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            yield* roundPlannerOf(missionId)
+            yield* moveMission(missionId, 'cancel', 'user')
+            yield* until(
+              Effect.map(liveOf(missionId), (rows) => rows.length === 0),
+              LONG,
+            )
+            return { missionId }
+          }),
+        ),
+      )
+      const after = rounding({ resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            // The start's catch-up has run once the Memory is ready and the gate passed.
+            yield* until(
+              Effect.map(getMission(left.missionId), (mission) => mission.unstopped.length === 0),
+              LONG,
+            )
+            return {
+              mission: yield* getMission(left.missionId),
+              live: yield* liveOf(left.missionId),
+              rounds: yield* roundsOf(left.missionId),
+            }
+          }),
+        ),
+      )
+      expect(seen.mission.stage).toBe('cancelled')
+      expect(seen.live).toEqual([])
+      expect(seen.rounds).toEqual([[1, 'grilling']])
+    },
+  )
+
+  test(
+    'a round cancelled while it builds ends its Building as cancelled, and no agent runs',
+    SLOW,
+    async () => {
+      const { run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            yield* roundBuilderOf(missionId, lineage)
+            yield* moveMission(missionId, 'cancel', 'user')
+            yield* until(
+              Effect.map(liveOf(missionId), (rows) => rows.length === 0),
+              LONG,
+            )
+            return { view: yield* buildingOf(missionId), mission: yield* getMission(missionId) }
+          }),
+        ),
+      )
+      expect(seen.mission.stage).toBe('cancelled')
+      expect(seen.view).toMatchObject({ label: 'Building · round 1', state: 'cancelled' })
+    },
+  )
+
+  test(
+    'a feedback withdrawn while its round is grilled is told to the Planner; a point from it alone holds round_ready until it is removed',
+    SLOW,
+    async () => {
+      const { run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const { grantId } = yield* roundPlannerOf(missionId)
+            yield* used(grantId, 'round_point_write', {
+              round: 1,
+              text: 'The CSV export starts with a header row naming each column.',
+              kind: 'corrective',
+              scenarios: [byHand('the user exports', 'the first line names the columns')],
+              decisions: [],
+              sources: [one.id],
+            })
+            yield* Review.use((review) => review.feedbackWithdraw(one.id, USER))
+            const database = yield* Database
+            yield* until(
+              Effect.map(
+                database
+                  .select({ kind: sessionDeliveries.kind, body: sessionDeliveries.body })
+                  .from(sessionDeliveries)
+                  .where(eq(sessionDeliveries.targetRole, 'round-planner')),
+                (rows) => rows.some((row) => row.kind === 'withdrawn' && row.body.includes(one.id)),
+              ),
+              LONG,
+            )
+            const holding = yield* using(grantId, 'round_ready', { why: 'Done.' })
+            yield* used(grantId, 'round_point_remove', {
+              round: 1,
+              id: 'R1.1',
+              reason: 'Its remark was withdrawn.',
+            })
+            const ready = yield* used(grantId, 'round_ready', { why: 'Nothing left.' })
+            return { held: holding, ready, rounds: yield* roundsOf(missionId) }
+          }),
+        ),
+      )
+      expect(seen.held.ok).toBe(false)
+      expect(seen.held.text).toContain('R1.1 comes only from withdrawn feedback')
+      expect(seen.ready).toContain('no point to build')
+      expect(seen.rounds).toEqual([[1, 'answered']])
+    },
+  )
+
+  test(
+    'a source withdrawn while its round builds needs no answer: the end goes on without it',
+    SLOW,
+    async () => {
+      const { world, run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, lineage } = yield* reviewed()
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            const two = yield* written(missionId, remark('The exported CSV lacks column titles.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id, two.id])
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: one.id,
+              text: 'The header row is written first.',
+            })
+            yield* Review.use((review) => review.feedbackWithdraw(two.id, USER))
+            yield* throughEnd(world, missionId)
+            return { state: yield* Review.use((review) => review.state(missionId)) }
+          }),
+        ),
+      )
+      expect(seen.state.feedback.map((one) => one.state)).toEqual(['addressed', 'withdrawn'])
+      expect(seen.state.rounds.map((one) => one.state)).toEqual(['answered'])
+    },
+  )
+})
+
+describe('The Planner in round mode', () => {
+  test('it writes and runs nothing, is the main session of Review, and never counts in the cap', () => {
+    const entry = roleNamed(ROLES_REGISTERED, 'round-planner')
+    expect(entry).toMatchObject({
+      mainOf: 'review',
+      writes: false,
+      countsInCap: false,
+      readsMemory: true,
+    })
+    expect(
+      toolsOf('round-planner').filter(
+        (name) => TOOLS[name].effect === 'writes' || TOOLS[name].effect === 'runs',
+      ),
+    ).toEqual([])
+    expect(entry?.template).toContain('## Round mode (your brief says "Mode: round N")')
+    expect(roleNamed(ROLES_REGISTERED, 'planner')?.template).toContain('## Round mode')
+    expect(roleNamed(ROLES_REGISTERED, 'builder')?.template).toContain(
+      '## Round N (your brief says "Building · round N")',
+    )
+  })
 })

@@ -86,10 +86,12 @@ import {
   refusedWhile,
 } from '../storage/database.ts'
 import {
+  agentSessions,
   buildingTasks,
   buildings,
   domainEvents,
   missions,
+  needs,
   planningInputs,
   reviewFeedback,
   reviewRounds,
@@ -98,6 +100,7 @@ import {
   roundScenarios,
   roundTasks,
   scenarioProofs,
+  sessionNeeds,
   specRequirements,
   workspaceRepositories,
   workspaces,
@@ -269,6 +272,27 @@ export const roundsLayer = (settings: RoundsSettings) =>
             )
           }),
         )
+
+      /** Whether a need about a session of the mission's round Planner waits on the user. */
+      const plannerWaits = (missionId: string) =>
+        database
+          .select({ id: needs.id })
+          .from(sessionNeeds)
+          .innerJoin(needs, eq(needs.id, sessionNeeds.needId))
+          .innerJoin(agentSessions, eq(agentSessions.id, sessionNeeds.sessionId))
+          .where(
+            and(
+              eq(agentSessions.ownerKind, 'mission'),
+              eq(agentSessions.ownerId, missionId),
+              eq(agentSessions.role, 'round-planner'),
+              eq(needs.state, 'pending'),
+            ),
+          )
+          .limit(1)
+          .pipe(
+            Effect.mapError(refusedWhile('reading the Planner’s needs')),
+            Effect.map((rows) => rows.length > 0),
+          )
 
       /** The round's Planner ended once its grilling is over: the Builder is the main session. */
       const endGriller = (missionId: string, reason: string) =>
@@ -1379,6 +1403,14 @@ export const roundsLayer = (settings: RoundsSettings) =>
             const feedbackId = Option.getOrNull(readString(event.payload['originFeedback']))
             if (feedbackId !== null) yield* movedIn(event.entityId, feedbackId)
             return
+          }
+          // The round's Planner stopped while its round is grilled: brought back, unless a need
+          // about its session waits on the user, whose Retry starts it.
+          if (event.type === 'session.stopped' && event.payload['role'] === 'round-planner') {
+            const missionId = Option.getOrNull(readString(event.payload['missionId']))
+            if (missionId === null || (yield* grillingRoundIn(database, missionId)) === null) return
+            if (yield* plannerWaits(missionId)) return
+            return yield* ensureGriller(missionId)
           }
           if (event.type === 'review.round_building' || event.type === 'review.round_answered') {
             return yield* endGriller(event.entityId, 'the round’s grilling is over')
