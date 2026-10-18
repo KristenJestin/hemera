@@ -311,6 +311,7 @@ export type BuilderHold = (
     | 'placed'
     | 'test-reading'
     | 'test-read'
+    | 'red-ran'
     | 'greening'
     | 'greens-due'
     | 'handing'

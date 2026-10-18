@@ -12,6 +12,7 @@ import { Predicate } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
 import {
+  type GoModule,
   KEYS_CAP,
   NAME_CAP,
   REPORT_CAP,
@@ -22,6 +23,7 @@ import {
   addedTestNames,
   addedTests,
   foundReport,
+  goModulePath,
   keyLineFound,
   normalisedOutput,
   redPassed,
@@ -196,6 +198,17 @@ const run = (
   exitCode: number | null,
   testPath: string | null = 'tests/export.test.mjs',
 ) => classifyProofRun({ output, exitCode, testPath })
+
+/** Module `example.com/acme`, its `go.mod` at the repository's root: the Go outputs' module. */
+const ACME: GoModule = { path: 'example.com/acme', folder: '' }
+
+/** Whether a run is a valid red of a test of module `example.com/acme`. */
+const goRed = (
+  ran: Parameters<typeof validRed>[0],
+  testPath: string | null,
+  testNames: Parameters<typeof validRed>[2] = [],
+  keyLineMatched: boolean | null = null,
+) => validRed(ran, testPath, testNames, keyLineMatched, ACME)
 
 /**
  * How many times longer `read` takes on the input `make` builds at eight times the size: about 8
@@ -708,8 +721,8 @@ describe('A red read from the words of each runner', () => {
       patch: null,
     })
     expect(names).toEqual(['TestExportMarkdown'])
-    expect(validRed(run(GO_SCENARIO_FAILS, 1, path), path, names)).toBe(true)
-    expect(validRed(run(GO_SCENARIO_FAILS, 1, path), path, ['TestImportCsv'])).toBe(false)
+    expect(goRed(run(GO_SCENARIO_FAILS, 1, path), path, names)).toBe(true)
+    expect(goRed(run(GO_SCENARIO_FAILS, 1, path), path, ['TestImportCsv'])).toBe(false)
   })
 
   test('a Rust #[test] fn x failing is a red, by name', () => {
@@ -789,7 +802,7 @@ describe('A red read from the words of each runner', () => {
     ] as const) {
       const names = addedTestNames({ insertion: 'new_file', code, patch: null })
       expect(names.length).toBe(1)
-      expect(validRed(run(output, 1, path), path, names)).toBe(false)
+      expect(goRed(run(output, 1, path), path, names)).toBe(false)
     }
   })
 })
@@ -1039,14 +1052,14 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       'as markdown',
       'with header',
     ])
-    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestExport'])).toBe(true)
-    expect(validRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestImport'])).toBe(false)
+    expect(goRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestExport'])).toBe(true)
+    expect(goRed(run(GO_SUBTEST_FAILS, 1, path), path, ['TestImport'])).toBe(false)
   })
 
   test('a Go subtest the proof adds is read under the name Go prints, at any depth', () => {
     const path = 'export_test.go'
     const red = (subtest: string) =>
-      validRed(run(GO_SUBTEST_FAILS, 1, path), path, [
+      goRed(run(GO_SUBTEST_FAILS, 1, path), path, [
         { parent: 'TestExport', subtest, nesting: [], whole: false },
       ])
     expect(red('with header')).toBe(true)
@@ -1062,9 +1075,9 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       { parent: 'TestExport', subtest: 'as markdown', nesting: [], whole: false },
       { parent: 'TestExport', subtest: 'txt', nesting: [], whole: false },
     ])
-    expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, names)).toBe(false)
+    expect(goRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, names)).toBe(false)
     const csv = [{ parent: 'TestExport', subtest: 'csv', nesting: [], whole: false }]
-    expect(validRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, csv)).toBe(true)
+    expect(goRed(run(GO_OTHER_SUBTEST_FAILS, 1, path), path, csv)).toBe(true)
   })
 
   test('a subtest of the same name under another parent is not the red', () => {
@@ -1079,9 +1092,9 @@ describe('A red read from pytest parametrised tests and Go subtests', () => {
       'TestExport',
       { parent: 'TestExport', subtest: 'empty', nesting: [], whole: true },
     ])
-    expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, names)).toBe(false)
+    expect(goRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, names)).toBe(false)
     const imported = [{ parent: 'TestImport', subtest: 'empty', nesting: [], whole: false }]
-    expect(validRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, imported)).toBe(true)
+    expect(goRed(run(GO_OTHER_PARENT_FAILS, 1, path), path, imported)).toBe(true)
   })
 
   test('a slash in another runner’s line is not a separator: GET /users is not users, exports/markdown is not markdown', () => {
@@ -1265,13 +1278,15 @@ describe('A red read from the failing names #260 still missed', () => {
     }
   })
 
-  test('a gotestsum === FAIL: line is a red, by name; its SKIP lines and a build failure are not', () => {
+  test('a gotestsum === FAIL: line is a red, by name with the key line (#462); its SKIP lines and a build failure are not', () => {
     const output = captured('gotestsum')
     const path = 'export_test.go'
     expect(run(output, 1, path).classification).toBe('assertion_failed')
-    expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'])).toBe(true)
-    expect(validRed(run(output, 1, path), path, ['TestExportMarkdownSkipped'])).toBe(false)
-    expect(validRed(run(output, 1, path), path, ['TestOneIsOne'])).toBe(false)
+    // gotestsum names its package from the folder it ran in: uncertain, the key line decides.
+    expect(goRed(run(output, 1, path), path, ['TestExportMarkdown'])).toBe(false)
+    expect(goRed(run(output, 1, path), path, ['TestExportMarkdown'], true)).toBe(true)
+    expect(goRed(run(output, 1, path), path, ['TestExportMarkdownSkipped'])).toBe(false)
+    expect(goRed(run(output, 1, path), path, ['TestOneIsOne'])).toBe(false)
     const broken = run(captured('gotestsum-build-failed'), 1, path)
     expect(broken.classification).not.toBe('assertion_failed')
     expect(broken.failingLines.filter((line) => line.startsWith('==='))).toEqual([])
@@ -1586,8 +1601,8 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
       { parent: 'TestExport', subtest: 'empty', nesting: ['md'], whole: false },
     ])
     const empty = names.slice(1)
-    expect(validRed(run(GO_OTHER_BRANCH_FAILS, 1, path), path, empty)).toBe(false)
-    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, empty)).toBe(true)
+    expect(goRed(run(GO_OTHER_BRANCH_FAILS, 1, path), path, empty)).toBe(false)
+    expect(goRed(run(GO_BRANCH_FAILS, 1, path), path, empty)).toBe(true)
   })
 
   test('a Go subtest in a new file is read under its whole path, braces in strings and comments aside', () => {
@@ -1619,7 +1634,7 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
       { parent: 'TestExport', subtest: 'empty', nesting: [], whole: true },
     ])
     const red = (output: string, at: number) =>
-      validRed(run(output, 1, path), path, names.slice(at, at + 1))
+      goRed(run(output, 1, path), path, names.slice(at, at + 1))
     expect(red(GO_BRANCH_FAILS, 2)).toBe(true)
     expect(red(GO_OTHER_BRANCH_FAILS, 2)).toBe(false)
     expect(red(GO_OTHER_BRANCH_FAILS, 3)).toBe(true)
@@ -1631,9 +1646,9 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     const path = 'export_test.go'
     const names = addedTests({ insertion: 'addition', code: '', patch: GO_PARENTLESS_PATCH })
     expect(names).toEqual([{ parent: null, subtest: 'md', nesting: [], whole: false }])
-    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, true)).toBe(true)
-    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, false)).toBe(false)
-    expect(validRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(true)
+    expect(goRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(goRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(goRed(run(GO_PARENTLESS_FAILS, 1, path), path, names, null)).toBe(true)
     const helper = ['func check(t *testing.T) {', '\tt.Run("empty", nil)', '}'].join('\n')
     expect(addedTests({ insertion: 'new_file', code: helper, patch: null })).toEqual([
       { parent: null, subtest: 'empty', nesting: [], whole: true },
@@ -1651,9 +1666,9 @@ describe('A red read from the Go subtests and pytest ids #279 left', () => {
     const path = 'export_test.go'
     const names = addedTests({ insertion: 'addition', code: '', patch: GO_SUITE_PATCH })
     expect(names).toEqual([{ parent: null, subtest: 'empty', nesting: [], whole: true }])
-    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, null)).toBe(true)
-    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, false)).toBe(false)
-    expect(validRed(run(GO_SUITE_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(goRed(run(GO_SUITE_FAILS, 1, path), path, names, null)).toBe(true)
+    expect(goRed(run(GO_SUITE_FAILS, 1, path), path, names, false)).toBe(false)
+    expect(goRed(run(GO_SUITE_FAILS, 1, path), path, names, true)).toBe(true)
     expect(validRed(run(JUNIT_ASSERTION, 1), 'tests/export.test.mjs', names, true)).toBe(true)
   })
 
@@ -1774,8 +1789,8 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
       { parent: 'TestExport', subtest: 'inner', nesting: ['w'], whole: true },
     ])
     const inner = names.slice(2)
-    expect(validRed(run(GO_INNER_FAILS, 1, path), path, inner)).toBe(false)
-    expect(validRed(run(GO_WRAPPED_FAILS, 1, path), path, inner)).toBe(true)
+    expect(goRed(run(GO_INNER_FAILS, 1, path), path, inner)).toBe(false)
+    expect(goRed(run(GO_WRAPPED_FAILS, 1, path), path, inner)).toBe(true)
   })
 
   test('a t.Run in a comment names no subtest and sets no level', () => {
@@ -1796,8 +1811,8 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
       { parent: 'TestExport', subtest: 'empty', nesting: [null], whole: true },
     ])
     const subtests = names.slice(1)
-    expect(validRed(run(GO_CSV_FAILS, 1, path), path, subtests)).toBe(false)
-    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, subtests)).toBe(true)
+    expect(goRed(run(GO_CSV_FAILS, 1, path), path, subtests)).toBe(false)
+    expect(goRed(run(GO_BRANCH_FAILS, 1, path), path, subtests)).toBe(true)
   })
 
   test('a Go subtest’s level is read at its t.Run’s own brace, braces in their order on the line', () => {
@@ -1832,8 +1847,8 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
       expect(empty).toEqual([
         { parent: 'TestExport', subtest: 'empty', nesting: ['md'], whole: true },
       ])
-      expect(validRed(run(GO_OTHER_EMPTY_FAILS, 1, path), path, empty)).toBe(false)
-      expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, empty)).toBe(true)
+      expect(goRed(run(GO_OTHER_EMPTY_FAILS, 1, path), path, empty)).toBe(false)
+      expect(goRed(run(GO_BRANCH_FAILS, 1, path), path, empty)).toBe(true)
     }
   })
 
@@ -1842,9 +1857,9 @@ describe('A Go subtest’s nesting read at its own brace, and the pytest ids #29
     const names = addedTests({ insertion: 'addition', code: '', patch: GO_INSIDE_PATCH })
     expect(names).toEqual([{ parent: 'TestExport', subtest: 'empty', nesting: [], whole: false }])
     // A red whose key line differs is a red the user is asked about (red_mismatch), not refused.
-    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, false)).toBe(true)
-    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, true)).toBe(true)
-    expect(validRed(run(GO_BRANCH_FAILS, 1, path), path, names, null)).toBe(true)
+    expect(goRed(run(GO_BRANCH_FAILS, 1, path), path, names, false)).toBe(true)
+    expect(goRed(run(GO_BRANCH_FAILS, 1, path), path, names, true)).toBe(true)
+    expect(goRed(run(GO_BRANCH_FAILS, 1, path), path, names, null)).toBe(true)
   })
 
   test('a test under a describe name holding brackets, closed or not, is read by its name', () => {
@@ -1959,8 +1974,8 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
       'panic: runtime error: invalid memory address or nil pointer dereference [recovered]',
       'FAIL\texample.com/acme\t0.01s',
     ].join('\n')
-    expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'])).toBe(false)
-    expect(validRed(run(output, 1, path), path, ['TestOneIsOne'])).toBe(true)
+    expect(goRed(run(output, 1, path), path, ['TestExportMarkdown'])).toBe(false)
+    expect(goRed(run(output, 1, path), path, ['TestOneIsOne'])).toBe(true)
   })
 
   test('a name is not matched inside a longer name: saves is not never saves, exports is not exports (csv)', () => {
@@ -2006,9 +2021,9 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
     const output =
       '--- FAIL: TestE (0.00s)\n    --- FAIL: TestE/csv#01 (0.00s)\nFAIL\texample.com/acme\t0.01s\n'
     const subtest = { parent: 'TestE', subtest: 'csv', nesting: [], whole: true }
-    expect(validRed(run(output, 1, path), path, [subtest])).toBe(true)
+    expect(goRed(run(output, 1, path), path, [subtest])).toBe(true)
     const other = { parent: 'TestE', subtest: 'cs', nesting: [], whole: true }
-    expect(validRed(run(output, 1, path), path, [other])).toBe(false)
+    expect(goRed(run(output, 1, path), path, [other])).toBe(false)
   })
 
   test('a Rust run with the terse format is a red by its name, from the failure’s stdout', () => {
@@ -2067,7 +2082,7 @@ describe('A red read line by line and on the runner’s separators (#303)', () =
       '{"Action":"fail","Package":"example.com/acme","Test":"TestExportMarkdown","Elapsed":0}',
     ].join('\n')
     expect(run(output, 1, path).classification).not.toBe('assertion_failed')
-    expect(validRed(run(output, 1, path), path, ['TestExportMarkdown'], true)).toBe(false)
+    expect(goRed(run(output, 1, path), path, ['TestExportMarkdown'], true)).toBe(false)
   })
 })
 
@@ -2152,7 +2167,7 @@ describe('A red read from what a runner prints around the error (#303, round 2)'
 
   test('a Go testify assertion that failed in the test the proof adds is a red', () => {
     const path = 'export_test.go'
-    expect(validRed(run(GO_TESTIFY_FAILS, 1, path), path, ['TestExportMarkdown'])).toBe(true)
+    expect(goRed(run(GO_TESTIFY_FAILS, 1, path), path, ['TestExportMarkdown'])).toBe(true)
   })
 
   test('a pytest.raises or pytest.warns that did not raise or warn is a red', () => {
@@ -2448,8 +2463,8 @@ describe('A red read block by block, a test vetoed by any block that is no asser
     const path = 'export_test.go'
     const csv = { parent: 'TestExport', subtest: 'csv', nesting: [], whole: true }
     for (const output of [GO_PANIC_SUBTEST, GOTESTSUM_PANIC_SUBTEST]) {
-      expect(validRed(run(output, 1, path), path, ['TestExport'])).toBe(false)
-      expect(validRed(run(output, 1, path), path, [csv])).toBe(false)
+      expect(goRed(run(output, 1, path), path, ['TestExport'])).toBe(false)
+      expect(goRed(run(output, 1, path), path, [csv])).toBe(false)
     }
   })
 
@@ -2479,8 +2494,8 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       'FAIL',
       'FAIL\texample.com/acme\t0.01s',
     ].join('\n')
-    expect(validRed(run(next, 1, path), path, ['TestOneIsOne'])).toBe(true)
-    expect(validRed(run(next, 1, path), path, ['TestSaves'])).toBe(false)
+    expect(goRed(run(next, 1, path), path, ['TestOneIsOne'])).toBe(true)
+    expect(goRed(run(next, 1, path), path, ['TestSaves'])).toBe(false)
     const unordered = [
       '--- FAIL: TestOneIsOne (0.00s)',
       '    one_test.go:5: got 1, want 2',
@@ -2490,14 +2505,14 @@ describe('A red read block by block, a test vetoed by any block that is no asser
       'FAIL',
       'FAIL\texample.com/acme\t0.01s',
     ].join('\n')
-    expect(validRed(run(unordered, 1, path), path, ['TestOneIsOne'])).toBe(true)
+    expect(goRed(run(unordered, 1, path), path, ['TestOneIsOne'])).toBe(true)
     for (const output of [after, verbose]) {
-      expect(validRed(run(output, 1, path), path, ['TestSaves'])).toBe(false)
+      expect(goRed(run(output, 1, path), path, ['TestSaves'])).toBe(false)
       const asserted = output.replace(
         'dial tcp 127.0.0.1:5432: connect: connection refused',
         'got 0 rows, want 1',
       )
-      expect(validRed(run(asserted, 1, path), path, ['TestSaves'])).toBe(true)
+      expect(goRed(run(asserted, 1, path), path, ['TestSaves'])).toBe(true)
     }
   })
 
@@ -5244,10 +5259,10 @@ describe('A Go or Rust red is read within its package (#384)', () => {
   test('Go: a test failing in package pkg/a is not the red of a same-named test of package pkg/b', () => {
     const b = 'pkg/b/saves_test.go'
     expect(run(GO_TWO_PACKAGES, 1, b).classification).toBe('assertion_failed')
-    expect(validRed(run(GO_TWO_PACKAGES, 1, b), b, ['TestSaves'])).toBe(false)
-    expect(validRed(run(GO_TWO_PACKAGES, 1, b), b, ['TestSaves'], true)).toBe(true)
+    expect(goRed(run(GO_TWO_PACKAGES, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(goRed(run(GO_TWO_PACKAGES, 1, b), b, ['TestSaves'], true)).toBe(true)
     const a = 'pkg/a/saves_test.go'
-    expect(validRed(run(GO_TWO_PACKAGES, 1, a), a, ['TestSaves'])).toBe(true)
+    expect(goRed(run(GO_TWO_PACKAGES, 1, a), a, ['TestSaves'])).toBe(true)
   })
 
   test('Go: with go test -v, two packages each read in their own', () => {
@@ -5264,9 +5279,9 @@ describe('A Go or Rust red is read within its package (#384)', () => {
       'FAIL',
     ].join('\n')
     const b = 'pkg/b/saves_test.go'
-    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
     const a = 'pkg/a/saves_test.go'
-    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+    expect(goRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
   })
 
   test('Go: a subtest failing in package pkg/a is not the red of a same-named subtest of package pkg/b', () => {
@@ -5286,9 +5301,9 @@ describe('A Go or Rust red is read within its package (#384)', () => {
     }).filter((name) => Predicate.hasProperty(name, 'subtest'))
     expect(subtests).toHaveLength(1)
     const b = 'pkg/b/saves_test.go'
-    expect(validRed(run(output, 1, b), b, subtests)).toBe(false)
+    expect(goRed(run(output, 1, b), b, subtests)).toBe(false)
     const a = 'pkg/a/saves_test.go'
-    expect(validRed(run(output, 1, a), a, subtests)).toBe(true)
+    expect(goRed(run(output, 1, a), a, subtests)).toBe(true)
   })
 
   test("Go: a panic in package pkg/a does not refuse the assertion of package pkg/b's test of the same name", () => {
@@ -5305,10 +5320,10 @@ describe('A Go or Rust red is read within its package (#384)', () => {
       'FAIL',
     ].join('\n')
     const b = 'pkg/b/saves_test.go'
-    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(true)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'])).toBe(true)
   })
 
-  test("Go: gotestsum's package names the test's package", () => {
+  test("Go: gotestsum's package, a path from the folder it ran in, is uncertain (#462): the key line decides", () => {
     const output = [
       '✖  pkg/a (2ms)',
       '✓  pkg/b (1ms)',
@@ -5320,9 +5335,10 @@ describe('A Go or Rust red is read within its package (#384)', () => {
       'DONE 2 tests, 1 failure in 0.002s',
     ].join('\n')
     const b = 'pkg/b/saves_test.go'
-    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
     const a = 'pkg/a/saves_test.go'
-    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+    expect(goRed(run(output, 1, a), a, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, a), a, ['TestSaves'], true)).toBe(true)
   })
 
   test('Go: go test -json of two packages is not read: never a red by name', () => {
@@ -5332,48 +5348,51 @@ describe('A Go or Rust red is read within its package (#384)', () => {
       '{"Action":"pass","Package":"example.com/acme/pkg/b","Test":"TestSaves","Elapsed":0}',
     ].join('\n')
     const b = 'pkg/b/saves_test.go'
-    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
   })
 
   test('Go: a failure whose package line is missing (the output cut short) is uncertain: the key line decides', () => {
     const output = ['--- FAIL: TestSaves (0.00s)', '    saves_test.go:6: got 1, want 2'].join('\n')
     const b = 'pkg/b/saves_test.go'
-    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
-    expect(validRed(run(output, 1, b), b, ['TestSaves'], true)).toBe(true)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'], true)).toBe(true)
     // Uncertain, a failure that may be the test's still refuses it when it is another error.
     const panicked = output.replace('    saves_test.go:6: got 1, want 2', 'panic: boom [recovered]')
-    expect(validRed(run(panicked, 1, b), b, ['TestSaves'], true)).toBe(false)
+    expect(goRed(run(panicked, 1, b), b, ['TestSaves'], true)).toBe(false)
   })
 
-  test("Go: a test's folder that two printed packages end with is uncertain: the key line decides", () => {
+  test("Go: a test's folder that two printed packages end with is told apart by its module's path (#462)", () => {
     const output = GO_TWO_PACKAGES.replace('example.com/acme/pkg/b', 'example.com/acme/x/pkg/a')
     const a = 'pkg/a/saves_test.go'
-    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(false)
-    expect(validRed(run(output, 1, a), a, ['TestSaves'], true)).toBe(true)
+    expect(goRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+    const xa = 'x/pkg/a/saves_test.go'
+    expect(goRed(run(output, 1, xa), xa, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, xa), xa, ['TestSaves'], true)).toBe(true)
   })
 
-  test("Go: a test at the module's root is its package's when every other printed package is under it, or gotestsum's `.`", () => {
+  test("Go: a test at the module's root is its module path's package, whatever else is printed (#462)", () => {
     const path = 'saves_test.go'
     const output = GO_TWO_PACKAGES.replace('example.com/acme/pkg/a', 'example.com/acme')
-    expect(validRed(run(output, 1, path), path, ['TestSaves'])).toBe(true)
-    // A package outside it: which one is the module's root is not certain, the key line decides.
+    expect(goRed(run(output, 1, path), path, ['TestSaves'])).toBe(true)
+    // A package outside the module printed beside it: the module's path still names the root.
     const outside = output.replace('example.com/acme/pkg/b', 'example.com/other')
-    expect(validRed(run(outside, 1, path), path, ['TestSaves'])).toBe(false)
-    expect(validRed(run(outside, 1, path), path, ['TestSaves'], true)).toBe(true)
+    expect(goRed(run(outside, 1, path), path, ['TestSaves'])).toBe(true)
     // A package's test is not the root's.
-    expect(validRed(run(GO_TWO_PACKAGES, 1, path), path, ['TestSaves'])).toBe(false)
+    expect(goRed(run(GO_TWO_PACKAGES, 1, path), path, ['TestSaves'])).toBe(false)
+    // gotestsum's `.` is the folder it ran in, not certainly the module's root.
     const gotestsum = '=== FAIL: . TestSaves (0.00s)\n    saves_test.go:6: got 1, want 2\n'
-    expect(validRed(run(gotestsum, 1, path), path, ['TestSaves'])).toBe(true)
+    expect(goRed(run(gotestsum, 1, path), path, ['TestSaves'])).toBe(false)
+    expect(goRed(run(gotestsum, 1, path), path, ['TestSaves'], true)).toBe(true)
     const elsewhere = gotestsum.replace('FAIL: .', 'FAIL: pkg/a')
-    expect(validRed(run(elsewhere, 1, path), path, ['TestSaves'])).toBe(false)
+    expect(goRed(run(elsewhere, 1, path), path, ['TestSaves'])).toBe(false)
   })
 
   test('Go: Windows paths and CRLF line ends are read as on Linux', () => {
     const output = GO_TWO_PACKAGES.replaceAll('\n', '\r\n')
     const b = 'pkg\\b\\saves_test.go'
-    expect(validRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
+    expect(goRed(run(output, 1, b), b, ['TestSaves'])).toBe(false)
     const a = 'pkg\\a\\saves_test.go'
-    expect(validRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
+    expect(goRed(run(output, 1, a), a, ['TestSaves'])).toBe(true)
   })
 
   test('the package of each Go and Rust failure is read in linear time on long outputs', () => {
@@ -5388,7 +5407,7 @@ describe('A Go or Rust red is read within its package (#384)', () => {
       ).join('\n')
     const goPath = 'pkg/b/saves_test.go'
     const goRead = (output: string) =>
-      expect(validRed(run(output, 1, goPath), goPath, ['TestSaves'])).toBe(false)
+      expect(goRed(run(output, 1, goPath), goPath, ['TestSaves'])).toBe(false)
     expect(growth(go, 2_000, goRead)).toBeLessThan(24)
     const rust = (size: number) =>
       Array.from({ length: size }, (_, at) =>
@@ -5419,5 +5438,153 @@ describe('A Go or Rust red is read within its package (#384)', () => {
     const sourceRead = (code: string) =>
       expect(rustFile(code)).toHaveLength(code.split('#[test]').length - 1)
     expect(growth(source, 500, sourceRead)).toBeLessThan(24)
+  })
+})
+
+/** Module `example.com/m`, its `go.mod` at the repository's root. */
+const MODULE_M: GoModule = { path: 'example.com/m', folder: '' }
+
+/** go test ./internal/... of module `example.com/m`: `TestSaves` fails in package `internal/pkg`. */
+const GO_INTERNAL_PKG = [
+  '--- FAIL: TestSaves (0.00s)',
+  '    saves_test.go:6: got 1, want 2',
+  'FAIL',
+  'FAIL\texample.com/m/internal/pkg\t0.002s',
+  'FAIL',
+].join('\n')
+
+describe('A Go red is read against the module its go.mod names (#462)', () => {
+  test('Go: a test file at pkg/ is not the red of package example.com/m/internal/pkg: the key line decides', () => {
+    const path = 'pkg/saves_test.go'
+    expect(run(GO_INTERNAL_PKG, 1, path).classification).toBe('assertion_failed')
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(false)
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], true, MODULE_M)).toBe(true)
+  })
+
+  test('Go: the same output is the red of a test file at internal/pkg', () => {
+    const path = 'internal/pkg/saves_test.go'
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(true)
+  })
+
+  test("Go: a test at the module's root is the red of the module's own package only", () => {
+    const path = 'saves_test.go'
+    const root = GO_INTERNAL_PKG.replace('example.com/m/internal/pkg', 'example.com/m')
+    expect(validRed(run(root, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(true)
+    // Another module printed beside it no longer hides which package is the root's.
+    const beside = `${root}\nok  \texample.com/other\t0.001s`
+    expect(validRed(run(beside, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(true)
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(false)
+    // A module whose path only begins like the printed package is another module.
+    const longer = GO_INTERNAL_PKG.replace('example.com/m/internal/pkg', 'example.com/m2')
+    expect(validRed(run(longer, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(false)
+  })
+
+  test("Go: in nested modules the nearest go.mod names the package: the outer module's red is not the inner one's", () => {
+    const inner: GoModule = { path: 'example.com/tools', folder: 'tools' }
+    const path = 'tools/gen/saves_test.go'
+    const own = GO_INTERNAL_PKG.replace('example.com/m/internal/pkg', 'example.com/tools/gen')
+    expect(validRed(run(own, 1, path), path, ['TestSaves'], null, inner)).toBe(true)
+    // The package the outer module would hold at that folder is not the inner module's.
+    const outer = GO_INTERNAL_PKG.replace('example.com/m/internal/pkg', 'example.com/m/tools/gen')
+    expect(validRed(run(outer, 1, path), path, ['TestSaves'], null, inner)).toBe(false)
+    expect(validRed(run(outer, 1, path), path, ['TestSaves'], true, inner)).toBe(true)
+    // The inner module's root package.
+    const top = GO_INTERNAL_PKG.replace('example.com/m/internal/pkg', 'example.com/tools')
+    expect(
+      validRed(
+        run(top, 1, 'tools/saves_test.go'),
+        'tools/saves_test.go',
+        ['TestSaves'],
+        null,
+        inner,
+      ),
+    ).toBe(true)
+  })
+
+  test("Go: a test file outside its module's folder is uncertain: the key line decides", () => {
+    const inner: GoModule = { path: 'example.com/m', folder: 'tools' }
+    const path = 'svc/internal/pkg/saves_test.go'
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], null, inner)).toBe(false)
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], true, inner)).toBe(true)
+  })
+
+  test('Go: without a readable go.mod every Go failure is uncertain: the key line decides, another error still refuses', () => {
+    const path = 'internal/pkg/saves_test.go'
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'])).toBe(false)
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], null, null)).toBe(false)
+    expect(validRed(run(GO_INTERNAL_PKG, 1, path), path, ['TestSaves'], true, null)).toBe(true)
+    const panicked = GO_INTERNAL_PKG.replace(
+      '    saves_test.go:6: got 1, want 2',
+      'panic: boom [recovered]',
+    )
+    expect(validRed(run(panicked, 1, path), path, ['TestSaves'], true, null)).toBe(false)
+  })
+
+  test("Go: gotestsum's path from the module's root is uncertain: the key line decides", () => {
+    const output = [
+      '=== Failed',
+      '=== FAIL: internal/pkg TestSaves (0.00s)',
+      '    saves_test.go:6: got 1, want 2',
+      '',
+      'DONE 1 tests, 1 failure in 0.002s',
+    ].join('\n')
+    const path = 'internal/pkg/saves_test.go'
+    expect(validRed(run(output, 1, path), path, ['TestSaves'], null, MODULE_M)).toBe(false)
+    expect(validRed(run(output, 1, path), path, ['TestSaves'], true, MODULE_M)).toBe(true)
+    const root = output.replace('FAIL: internal/pkg', 'FAIL: .')
+    expect(
+      validRed(run(root, 1, 'saves_test.go'), 'saves_test.go', ['TestSaves'], null, MODULE_M),
+    ).toBe(false)
+    // Uncertain, it may still be the test's: another error refuses it.
+    const panicked = output.replace('    saves_test.go:6: got 1, want 2', 'panic: boom [recovered]')
+    expect(validRed(run(panicked, 1, path), path, ['TestSaves'], true, MODULE_M)).toBe(false)
+  })
+
+  test('Go: Windows paths and CRLF line ends are read against the module as on Linux', () => {
+    const output = GO_INTERNAL_PKG.replaceAll('\n', '\r\n')
+    const windows: GoModule = { path: 'example.com/m', folder: '' }
+    const pkg = 'pkg\\saves_test.go'
+    expect(validRed(run(output, 1, pkg), pkg, ['TestSaves'], null, windows)).toBe(false)
+    const internal = 'internal\\pkg\\saves_test.go'
+    expect(validRed(run(output, 1, internal), internal, ['TestSaves'], null, windows)).toBe(true)
+    const inner: GoModule = { path: 'example.com/m', folder: 'svc\\api' }
+    const nested = 'svc\\api\\internal\\pkg\\saves_test.go'
+    expect(validRed(run(output, 1, nested), nested, ['TestSaves'], null, inner)).toBe(true)
+  })
+
+  test('go.mod: the module line names the path, comments, dependencies, quotes and CRLF aside', () => {
+    expect(goModulePath('module example.com/m\n\ngo 1.22\n')).toBe('example.com/m')
+    expect(
+      goModulePath(
+        [
+          '// module example.com/fake',
+          '// Deprecated: use example.com/n.',
+          'module example.com/m // the module',
+          '',
+          'require (',
+          '\texample.com/module v1.0.0 // indirect',
+          '\tmodule.example/x v0.1.0',
+          ')',
+          'replace example.com/module => ./module',
+        ].join('\n'),
+      ),
+    ).toBe('example.com/m')
+    expect(goModulePath('module "example.com/m"\r\ngo 1.22\r\n')).toBe('example.com/m')
+    expect(goModulePath('module `example.com/m`\n')).toBe('example.com/m')
+    expect(goModulePath('\uFEFFmodule example.com/m\r\n')).toBe('example.com/m')
+    expect(goModulePath('  module\texample.com/m  \n')).toBe('example.com/m')
+  })
+
+  test('go.mod: no module line, two of them, a block or a path that does not read names no module', () => {
+    expect(goModulePath('go 1.22\n')).toBeNull()
+    expect(goModulePath('')).toBeNull()
+    expect(goModulePath('module example.com/m\nmodule example.com/n\n')).toBeNull()
+    expect(goModulePath('module (\n\texample.com/m\n)\n')).toBeNull()
+    expect(goModulePath('module "example.com/m\n')).toBeNull()
+    expect(goModulePath('module "example.com/\\u006d"\n')).toBeNull()
+    expect(goModulePath('module example.com/m extra\n')).toBeNull()
+    expect(goModulePath('module\n')).toBeNull()
+    expect(goModulePath('modules example.com/m\n')).toBeNull()
+    expect(goModulePath('/* module example.com/m */\n')).toBeNull()
   })
 })

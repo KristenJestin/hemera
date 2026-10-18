@@ -23,6 +23,7 @@ import { join, relative, sep } from 'node:path'
 
 import {
   DEFAULT_PROOF_MINUTES,
+  type GoModule,
   type Masked,
   type Proof,
   type ProofPhase,
@@ -47,6 +48,7 @@ import { buildings, missions, projects, proofRuns } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
 import { placeOf } from '../workspaces.ts'
 import { BuildDesk } from './desk.ts'
+import { goModuleOf } from './go-module.ts'
 import { type ReportPlan, disposeReport, prepareReport, reportFor } from './proof-report.ts'
 import { writeTrees } from './proof-store.ts'
 import { bases as basesCodec } from './tasks.ts'
@@ -101,6 +103,11 @@ export interface ProofRun extends ProofRunClass {
    * Known as it runs, never recorded.
    */
   readonly stopped: boolean
+  /**
+   * The module of its Go test file (#462), read once it ended while its write locks still held its
+   * repositories: null for another file, or one whose `go.mod` does not read. Never recorded.
+   */
+  readonly goModule: GoModule | null
 }
 
 /** A report beside an output whose start was dropped: not read. */
@@ -232,6 +239,15 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
     let dropped = 0
     let timedOut = false
     let stopped = false
+    let goModule: GoModule | null = null
+    // Its Go test's module, read before its locks are released: a write once they are could name
+    // another module than the one it ran under (#462).
+    const moduleOfTest =
+      test === null || base === null || !test.path.endsWith('.go')
+        ? Effect.succeed(null)
+        : Effect.tryPromise(() => goModuleOf(workspace.folder, base.folder, test.path)).pipe(
+            Effect.orElseSucceed(() => null),
+          )
     if (Result.isFailure(launched)) {
       if (watch !== null) yield* watch.finish(null)
       output = `It could not start: ${launched.failure.message}`
@@ -244,8 +260,11 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
           Effect.as(Effect.andThen(Deferred.await(started), Effect.sleep(limit)), Option.none()),
         )
         // Past its limit it is ended, its process tree with it: a red that timed out (#290).
-        if (Option.isSome(waited)) return { run: waited.value, timedOut: false }
-        return { run: yield* stopRun(id), timedOut: true }
+        const over = Option.isSome(waited)
+          ? { run: waited.value, timedOut: false }
+          : { run: yield* stopRun(id), timedOut: true }
+        goModule = yield* moduleOfTest
+        return over
       }).pipe(
         // Started for this proof and judged by it: nobody else would stop it.
         Effect.onInterrupt(() => stopRun(id).pipe(Effect.ignore)),
@@ -322,6 +341,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
       timedOutAfter: timedOut ? (mission.minutes ?? DEFAULT_PROOF_MINUTES) : null,
       started: yield* Deferred.isDone(started),
       stopped,
+      goModule,
     }
     yield* mutate('recording a proof run', (transaction) =>
       transaction
