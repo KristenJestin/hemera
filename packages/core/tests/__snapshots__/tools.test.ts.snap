@@ -1022,6 +1022,12 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
           "items": {
             "additionalProperties": true,
             "properties": {
+              "conflict": {
+                "description": "In round mode: the feedback, by its id, that conflicts with the frozen Spec. Hemera offers its three outcomes itself and acts on the user’s choice; \`recommended\` is their index (0: clarify with a note, 1: withdraw the feedback, 2: the third outcome).",
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string",
+              },
               "from_finding": {
                 "description": "The cold read finding it comes from.",
                 "maxLength": 80,
@@ -3280,6 +3286,575 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
       "type": "object",
     },
     "name": "review_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write a point of the round, or rewrite one: a requirement with its scenarios and their proofs, its classification and decisions, and every feedback it comes from. Refused on an unknown source, a behaviour point without delta, or a scenario without proof.",
+      "properties": {
+        "decisions": {
+          "description": "The decisions it takes, with the alternatives and why.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "alternatives": {
+                "items": {
+                  "description": "An alternative that was set aside.",
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "choice": {
+                "description": "What is decided.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "why": {
+                "description": "Why this one.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "choice",
+              "alternatives",
+              "why",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "delta": {
+          "additionalProperties": true,
+          "description": "For \`behaviour\`: the change to the requirement.",
+          "properties": {
+            "change": {
+              "description": "\`added\`, \`modified\` or \`removed\`.",
+              "enum": [
+                "added",
+                "modified",
+                "removed",
+              ],
+              "type": "string",
+            },
+            "living_version": {
+              "description": "The version of the living requirement you read (living_spec_read), 0 when the living spec has none.",
+              "minimum": 0,
+              "type": "integer",
+            },
+            "requirement": {
+              "description": "The requirement it changes: one of the frozen Spec (\`R2\`), one of the living spec (\`LR3\`), or the name of the one it adds.",
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "required": [
+            "requirement",
+            "change",
+            "living_version",
+          ],
+          "type": "object",
+        },
+        "id": {
+          "description": "The point (\`R2.1\`) to rewrite; a new point without it.",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "description": "\`corrective\` (the result did not match the frozen Spec) or \`behaviour\` (what a requirement says changes: give the delta).",
+          "enum": [
+            "corrective",
+            "behaviour",
+          ],
+          "type": "string",
+        },
+        "round": {
+          "description": "The round, as your brief numbers it.",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "scenarios": {
+          "description": "Its scenarios, whole: one left out is removed.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "description": "The scenario (\`R2.1.S1\`) to keep; a new one without it.",
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string",
+              },
+              "proof": {
+                "additionalProperties": true,
+                "description": "Its proof, whole, as in Planning: the exact actions, the starting data, the test or the command, the expected result, the key line; \`by_hand\` only for what cannot be automated. Its files go into the Workspace as it is now.",
+                "properties": {
+                  "actions": {
+                    "description": "The exact steps, in order.",
+                    "items": {
+                      "description": "One action, exact enough to replay word for word.",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "base_commit": {
+                    "description": "Where it was seen: the commit of each repository it was seen in.",
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "commit": {
+                          "description": "The commit it was seen on.",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "repository": {
+                          "description": "The repository, by its path as the Project names it (\`api\`).",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "repository",
+                        "commit",
+                      ],
+                      "type": "object",
+                    },
+                    "type": "array",
+                  },
+                  "command": {
+                    "description": "For \`automated\` without a test file: the catalogue command id or the one command line whose output or exit code shows the result.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "evidence": {
+                    "description": "The evidence that shows it.",
+                    "items": {
+                      "description": "Evidence kept with evidence_add, by its name.",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "expected": {
+                    "description": "The result after the change. For an automated proof, the assertion whose failure is the valid red.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "from_probe": {
+                    "description": "The Probe whose report it comes from (\`#2\`).",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "key_line": {
+                    "description": "The line of \`observed\` that shows the behaviour, copied exactly.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "mode": {
+                    "description": "\`automated\` (a test or a command), or \`by_hand\` only for what cannot be automated: a visual result, an animation, readability.",
+                    "enum": [
+                      "automated",
+                      "by_hand",
+                    ],
+                    "type": "string",
+                  },
+                  "observed": {
+                    "description": "What a real run printed today, verbatim and trimmed: never a paraphrase.",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "seen_today": {
+                    "description": "True when the scenario describes a wrong behaviour that exists now: \`observed\`, \`key_line\` and \`base_commit\` are then required.",
+                    "type": "boolean",
+                  },
+                  "starting_data": {
+                    "type": "string",
+                  },
+                  "support_files": {
+                    "description": "The files the proof needs beside its test.",
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "against": {
+                          "description": "For \`addition\`: the commit the patch was written against.",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "content": {
+                          "description": "For \`new_file\`: its whole content (empty for an empty file).",
+                          "type": "string",
+                        },
+                        "from_probe": {
+                          "description": "The Probe that captured it (\`#2\`).",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "insertion": {
+                          "description": "\`new_file\`: the path does not exist at the base commit, and the file is written whole. \`addition\`: the file exists, and \`patch\` adds to it.",
+                          "enum": [
+                            "new_file",
+                            "addition",
+                          ],
+                          "type": "string",
+                        },
+                        "patch": {
+                          "description": "For \`addition\`: a unified patch against the file as it is at the base commit, as \`git diff\` prints it.",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "path": {
+                          "description": "Its path, relative to that repository, with forward slashes.",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "repository": {
+                          "description": "The repository, by its path as the Project names it (\`api\`).",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "repository",
+                        "path",
+                        "insertion",
+                      ],
+                      "type": "object",
+                    },
+                    "type": "array",
+                  },
+                  "test": {
+                    "additionalProperties": true,
+                    "description": "For \`automated\`: the test, whole, and what runs it.",
+                    "properties": {
+                      "against": {
+                        "description": "For \`addition\`: the commit the patch was written against.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "code": {
+                        "description": "The whole code of the test, as it reads once inserted.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "command": {
+                        "description": "What runs it: a catalogue command id, or one command line without shell syntax.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "insertion": {
+                        "description": "\`new_file\`: the path does not exist at the base commit, and the file is written whole. \`addition\`: the file exists, and \`patch\` adds to it.",
+                        "enum": [
+                          "new_file",
+                          "addition",
+                        ],
+                        "type": "string",
+                      },
+                      "patch": {
+                        "description": "For \`addition\`: a unified patch against the file as it is at the base commit, as \`git diff\` prints it.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "path": {
+                        "description": "Its path, relative to that repository, with forward slashes.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "repository": {
+                        "description": "The repository, by its path as the Project names it (\`api\`).",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "repository",
+                      "path",
+                      "code",
+                      "insertion",
+                      "command",
+                    ],
+                    "type": "object",
+                  },
+                },
+                "required": [
+                  "mode",
+                  "actions",
+                  "starting_data",
+                  "expected",
+                  "seen_today",
+                ],
+                "type": "object",
+              },
+              "then": {
+                "description": "THEN: the observable result, concrete enough for a test to check.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "when": {
+                "description": "WHEN: the situation and the action, as a user would do it.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "when",
+              "then",
+              "proof",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "sources": {
+          "description": "Every feedback it comes from: several when they say the same thing.",
+          "items": {
+            "description": "A feedback of the round it comes from, by its id.",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "text": {
+          "description": "The point, written as a requirement.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "round",
+        "text",
+        "kind",
+        "scenarios",
+        "decisions",
+        "sources",
+      ],
+      "type": "object",
+    },
+    "name": "round_point_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Remove a point before round_ready. Its feedback then needs another outcome. Its id is never reused.",
+      "properties": {
+        "id": {
+          "description": "The point (\`R2.1\`).",
+          "maxLength": 20,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reason": {
+          "description": "Why it goes.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "round": {
+          "description": "The round, as your brief numbers it.",
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "round",
+        "id",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "round_point_remove",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Write the round's task graph, whole: each task covers scenarios and names its targets. Refused, every problem named and nothing written, on a cycle, a reference to nothing, or a target that is not as its intent says in the Workspace.",
+      "properties": {
+        "round": {
+          "description": "The round, as your brief numbers it.",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "tasks": {
+          "description": "The whole graph of the round, in order: a task left out is removed.",
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "depends_on": {
+                "items": {
+                  "description": "A task done before it: its id (\`R2.T1\`), or the title of a task new in this write.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "id": {
+                "description": "The task (\`R2.T1\`) to keep; a new task without it.",
+                "maxLength": 20,
+                "minLength": 1,
+                "type": "string",
+              },
+              "points": {
+                "items": {
+                  "description": "A point it builds (\`R2.1\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "result": {
+                "description": "What is true once it is done.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string",
+              },
+              "scenarios": {
+                "items": {
+                  "description": "A scenario it covers (\`R2.1.S1\`).",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "targets": {
+                "description": "The files it creates or changes, in the Workspace as it is now.",
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "intent": {
+                      "description": "\`create\` (the path does not exist at the base commit) or \`change\` (it does).",
+                      "enum": [
+                        "create",
+                        "change",
+                      ],
+                      "type": "string",
+                    },
+                    "path": {
+                      "description": "Its path, relative to that repository, with forward slashes.",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "repository": {
+                      "description": "The repository, by its path as the Project names it (\`api\`).",
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "repository",
+                    "path",
+                    "intent",
+                  ],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "title": {
+                "description": "What the task builds, in a few words.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "title",
+              "result",
+              "points",
+              "scenarios",
+              "targets",
+              "depends_on",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "round",
+        "tasks",
+      ],
+      "type": "object",
+    },
+    "name": "round_tasks_write",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Put "Start a mission from this" to the user as a wave question, for a feedback that adds a requirement the Spec does not have or touches a repository outside its Impact. The user may keep it in this round as a behaviour change.",
+      "properties": {
+        "feedback": {
+          "description": "The feedback, by its id.",
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reason": {
+          "description": "Why it is a mission of its own: the requirement the Spec does not have, or the repository outside its Impact.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "feedback",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "name": "round_propose_mission",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "End the grilling. Refused, naming what is missing, unless every feedback has an outcome, no question of the round is open, every answer is integrated, every point has a scenario with its proof, and the task graph holds. Then the mission goes to "Building · round N".",
+      "properties": {
+        "why": {
+          "description": "Why the round is ready to build.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "why",
+      ],
+      "type": "object",
+    },
+    "name": "round_ready",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
+      "description": "Answer a feedback of the round: what you did, or why nothing changed. It marks it addressed, never resolved: only the user resolves it.",
+      "properties": {
+        "source": {
+          "description": "The feedback, by its id.",
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "description": "What you did, or why nothing changed.",
+          "maxLength": 8000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "source",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "feedback_answer",
   },
   {
     "inputSchema": {

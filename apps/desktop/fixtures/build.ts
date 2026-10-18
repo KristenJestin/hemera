@@ -28,6 +28,7 @@ import { Effect, Match, Result, Schema, SubscriptionRef } from 'effect'
 import { suiteAgent } from '../src/engine/agents/suite-agent.ts'
 import { startProfile } from '../src/engine/profile.ts'
 import { BACKUP_FOLDERS, RECONCILIATION_STEPS } from '../src/engine/registries.ts'
+import { listNeeds } from '../src/engine/needs.ts'
 import { getSession } from '../src/engine/sessions/store.ts'
 import {
   FIXTURE_FORGE,
@@ -97,6 +98,11 @@ export interface FixtureAsk {
   readonly log: (line: string) => void
   /** The profiles no fixture may be or hold; this machine's otherwise. */
   readonly normalProfiles?: ReadonlyArray<string>
+  /**
+   * The home the engine reads while it builds (its Git guard's, its tools'): a suite's own, so
+   * nothing the machine's home configuration does reaches the build; the user's otherwise.
+   */
+  readonly home?: string
 }
 
 /** Refuses, with the sentence, what a check refuses. */
@@ -142,26 +148,28 @@ const buildState = (
   work: string,
   env: BuiltFixture['env'],
   log: FixtureAsk['log'],
+  home: FixtureAsk['home'],
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const fakes = yield* suiteAgent
       // The role of the session an agent is started for, read once the Profile is open.
       let roleOf = (_sessionId: string): Effect.Effect<string | null> => Effect.succeed(null)
+      const parts = {
+        backupFolders: BACKUP_FOLDERS,
+        reconciliationSteps: RECONCILIATION_STEPS,
+        gh: { path: env['PATH'] ?? '', env },
+        forge: { env },
+        sessions: {
+          ...scriptedAgents(fakes, group.scripts ?? {}, (sessionId) => roleOf(sessionId)),
+          // A new mission starts its Planner on its own, as in the application.
+          plannerStarts: true,
+        },
+        ticketSync: { schedules: false },
+      }
       const started = yield* startProfile(
         { dataFolder: profile, version: VERSION, migrations: MIGRATIONS },
-        {
-          backupFolders: BACKUP_FOLDERS,
-          reconciliationSteps: RECONCILIATION_STEPS,
-          gh: { path: env['PATH'] ?? '', env },
-          forge: { env },
-          sessions: {
-            ...scriptedAgents(fakes, group.scripts ?? {}, (sessionId) => roleOf(sessionId)),
-            // A new mission starts its Planner on its own, as in the application.
-            plannerStarts: true,
-          },
-          ticketSync: { schedules: false },
-        },
+        home === undefined ? parts : { ...parts, tools: { home } },
         log,
       )
       roleOf = (sessionId) =>
@@ -175,9 +183,42 @@ const buildState = (
           new Error(`the fixture's profile was refused: ${database.sentence}`),
         )
       }
-      yield* started.use(group.build({ work, git: fixtureGit(dirname(work)) }))
+      yield* started.use(
+        group.build({ work, git: fixtureGit(dirname(work)) }).pipe(
+          // What waits on the user when a build stops, a hold of the Git guard among them.
+          Effect.onError(() =>
+            Effect.flatMap(
+              Effect.orElseSucceed(listNeeds, () => []),
+              (groups) =>
+                Effect.sync(() => {
+                  for (const need of groups.flatMap((one) => one.needs)) {
+                    log(`open need ${need.state}: ${JSON.stringify(need.fields)}`)
+                  }
+                }),
+            ),
+          ),
+        ),
+      )
     }),
   )
+
+/** How many of the engine's last lines a failed build says. */
+const LINES_SAID = 40
+
+/**
+ * A build that failed, said with the engine's last lines: where the fixture is built (a CI
+ * runner's temporary folder) is gone once the test has failed.
+ */
+export const notBuilt = (group: string, engineLog: string, failure: Error): Error => {
+  const lines = existsSync(engineLog) ? readFileSync(engineLog, 'utf8').trimEnd().split('\n') : []
+  const said =
+    lines.length === 0 || lines[0] === ''
+      ? 'the engine wrote no line'
+      : `its last lines:\n${lines.slice(-LINES_SAID).join('\n')}`
+  return new Error(`${group} could not be built (the engine's lines: ${engineLog}); ${said}`, {
+    cause: failure,
+  })
+}
 
 export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   const group = FIXTURE_GROUPS.find((one) => one.name === asked.group)
@@ -221,11 +262,16 @@ export async function buildFixture(asked: FixtureAsk): Promise<BuiltFixture> {
   const engineLog = join(folder, BUILD_LOG)
   const started = Date.now()
   await Effect.runPromise(
-    buildState(group, profile, work, env, (line) => appendFileSync(engineLog, `${line}\n`)),
+    buildState(
+      group,
+      profile,
+      work,
+      env,
+      (line) => appendFileSync(engineLog, `${line}\n`),
+      asked.home,
+    ),
   ).catch((failure: Error) => {
-    throw new Error(`${group.name} could not be built (the engine's lines: ${engineLog})`, {
-      cause: failure,
-    })
+    throw notBuilt(group.name, engineLog, failure)
   })
   asked.log(`built ${group.name} in ${String(Math.round((Date.now() - started) / 1000))} s`)
   return fixture(env)

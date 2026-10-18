@@ -289,6 +289,44 @@ export {
   type DocRecipeDraft,
   type SettingsDocRecipe,
 } from './blocks/project-settings/doc-recipes-model.ts'
+export {
+  DeliveryRulesSection,
+  type DeliveryTarget,
+} from './blocks/project-settings/delivery-rules.tsx'
+export {
+  PushForm,
+  RepositoryForm as DeliveryRepositoryForm,
+  ReviewersForm,
+  StepForm as DeliveryStepForm,
+  TemplateForm,
+  type PushDraft,
+  type RepositoryDraft as DeliveryRepositoryDraft,
+  type StepAnchor,
+  type StepDraft as DeliveryStepDraft,
+} from './blocks/project-settings/delivery-forms.tsx'
+export { newStep } from './blocks/project-settings/delivery-form-options.ts'
+export { filled, templateRefusal } from './blocks/project-settings/delivery-words.ts'
+export {
+  CATALOGUE,
+  MOMENT_WORDS,
+  STEP_WORDS,
+  type CleanupStep,
+  type CliState as DeliveryCliState,
+  type DeliveryRefusals,
+  type DeliveryRepository as DeliveryRepositoryShown,
+  type DeliveryRules as DeliveryRulesShown,
+  type DeliveryStep,
+  type Dependency as DeliveryDependencyShown,
+  type ForgeKind,
+  type ForgeView,
+  type Moment,
+  type Preset,
+  type PullRequestRules,
+  type RecipeStep as DeliveryRecipeStep,
+  type Reviewer,
+  type StepConfig,
+  type StepKind as DeliveryStepKind,
+} from './blocks/project-settings/delivery-model.ts'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
   ProjectMark,

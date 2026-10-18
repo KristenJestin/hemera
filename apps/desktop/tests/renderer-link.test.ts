@@ -21,6 +21,10 @@ import {
   DocRecipesRpcs,
   ForgeRpcs,
   DeliveryRulesRpcs,
+  DeliveryRulesRefused,
+  type DeliveryProblem,
+  type DeliveryRulesView,
+  type ForgeRepositoryStatus,
   UnknownProject,
   ShellSyntax,
   type CommandDraft,
@@ -33,6 +37,7 @@ import {
   NeedTarget,
   OpenTarget,
 } from '@hemera/ipc'
+import { defaultDeliveryRules } from '@hemera/core/domain'
 import { Deferred, Effect, Layer, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
@@ -53,6 +58,35 @@ const status: EngineStatus = {
     reconciliation: 'none',
   }),
 }
+/** Acme's rules never saved: its defaults, at version 0. */
+const RULES_VIEW: DeliveryRulesView = {
+  rules: { ...defaultDeliveryRules(), version: 0, savedAt: null },
+  repositories: [],
+  proposedDependencies: [{ repositoryId: 'r-web', deliversAfter: 'r-shared' }],
+}
+
+const NO_PUSH: DeliveryProblem = {
+  code: 'pull-request-without-push',
+  repositoryId: 'r-api',
+  stepId: 'pull-request',
+  sentence: 'A pull request needs a push: api has no push step before its pull request step.',
+}
+
+const SIGNED_OUT: ForgeRepositoryStatus = {
+  repositoryId: 'r-api',
+  path: 'api',
+  forge: 'github',
+  host: 'github.com',
+  owner: 'acme',
+  slug: 'api',
+  forced: false,
+  cli: 'gh',
+  version: '2.60.0',
+  state: 'signed-out',
+  fix: 'gh auth login --hostname github.com',
+  detail: null,
+}
+
 const report: EnvironmentReport = {
   version: '1.0.0',
   channel: 'dev',
@@ -554,16 +588,16 @@ const main = async (engine: 'answers' | 'gone') => {
       'docRecipes.move': unused,
     }),
     ForgeRpcs.toLayer({
-      'forge.status': unused,
-      'forge.checkAgain': unused,
+      'forge.status': () => Effect.succeed([SIGNED_OUT]),
+      'forge.checkAgain': () => Effect.succeed([{ ...SIGNED_OUT, state: 'ready', fix: null }]),
       'forge.setForced': unused,
-      'forge.changes': () => Stream.die('the window’s link is not asked for the forges here'),
+      'forge.changes': () => Stream.make([SIGNED_OUT]),
     }),
     DeliveryRulesRpcs.toLayer({
-      'deliveryRules.read': unused,
-      'deliveryRules.validate': unused,
-      'deliveryRules.save': unused,
-      'deliveryRules.acceptDependencies': unused,
+      'deliveryRules.read': () => Effect.succeed(RULES_VIEW),
+      'deliveryRules.validate': () => Effect.succeed([NO_PUSH]),
+      'deliveryRules.save': () => Effect.fail(new DeliveryRulesRefused({ problems: [NO_PUSH] })),
+      'deliveryRules.acceptDependencies': () => Effect.succeed(RULES_VIEW),
       'deliveryRules.missionCopies': unused,
       'deliveryRules.preparationChangedSinceCopy': unused,
     }),
@@ -713,6 +747,35 @@ describe('The window’s link, for components and hooks', () => {
     const { link, logsShown } = await main('answers')
     await link.showLog()
     expect(logsShown()).toBe(1)
+  })
+
+  test('the delivery rules are read, checked, and a save refused rejects with every reason', async () => {
+    const { link } = await main('answers')
+    const { rules } = RULES_VIEW
+    await expect(link.deliveryRules('acme')).resolves.toEqual(RULES_VIEW)
+    const { version: _version, savedAt: _savedAt, ...draft } = rules
+    await expect(link.validateDeliveryRules('acme', draft)).resolves.toEqual([NO_PUSH])
+    const refusal = await link.saveDeliveryRules('acme', draft, 0).then(
+      () => new Error('the save was not refused'),
+      (error: Error) => error,
+    )
+    expect(refusal).toBeInstanceOf(DeliveryRulesRefused)
+    expect(refusal instanceof DeliveryRulesRefused ? refusal.problems : []).toEqual([NO_PUSH])
+    await expect(
+      link.acceptDependencies('acme', [{ repositoryId: 'r-web', deliversAfter: 'r-shared' }]),
+    ).resolves.toEqual(RULES_VIEW)
+  })
+
+  test('the forges are read, checked again, and followed as they change', async () => {
+    const { link } = await main('answers')
+    await expect(link.forgeStatus('acme')).resolves.toEqual([SIGNED_OUT])
+    await expect(link.checkForgeAgain('acme', 'r-api')).resolves.toEqual([
+      { ...SIGNED_OUT, state: 'ready', fix: null },
+    ])
+    const heard = await new Promise<ReadonlyArray<ForgeRepositoryStatus>>((resolve) => {
+      link.onForgeChanges('acme', resolve, () => undefined)
+    })
+    expect(heard).toEqual([SIGNED_OUT])
   })
 
   test('a call resolves with its value', async () => {

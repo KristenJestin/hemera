@@ -826,14 +826,26 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
       },
     )
     expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
-    // The path as written is read from the Probe's folder, as it leads from its repository.
+    // The path as written is read from the Probe's repository, where it leads (#480).
     expect(asked.map((one) => one.reason)).toEqual([
-      expect.stringMatching(/sensitive place: .*[\\/]ACME-1[\\/]1[\\/](?:api[\\/])?\.git$/),
+      expect.stringMatching(/sensitive place: .*[\\/]ACME-1[\\/]1[\\/]api[\\/]\.git$/),
     ])
     expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
     expect(seen.before).toBe(false)
     expect(seen.afterEngine).toBe(false)
     expect(seen.afterPlain).toBe(true)
+  })
+
+  test('a Probe’s write of .git/config naming its repository is asked as that repository’s Git folder, not the probe folder’s (#480)', async () => {
+    const { tree } = places()
+    const seen = await probeWrites(
+      join(work, 'never-written'),
+      [{ repository: 'api', path: '.git/config', content: '[core]\n\tfsmonitor = true\n' }],
+      {},
+    )
+    expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
+    expect(asked.map((one) => one.reason)).toEqual([`sensitive place: ${join(tree, '.git')}`])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
   })
 
   test('a Probe that writes a core.fsmonitor or a filter into the repository’s Git folder, or its worktree’s, is asked as a sensitive place, never written', async () => {
@@ -913,7 +925,7 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
       expect.stringMatching(/^refused/),
     ])
     expect(asked.map((one) => one.reason)).toEqual([
-      expect.stringMatching(/sensitive place: .*[\\/]1[\\/](?:api[\\/])?\.GIT$/),
+      expect.stringMatching(/sensitive place: .*[\\/]1[\\/]api[\\/]\.GIT$/),
       expect.stringMatching(/sensitive place: .*[\\/]api[\\/]\.git$/),
     ])
     expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)

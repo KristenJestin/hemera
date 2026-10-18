@@ -11,7 +11,6 @@ import {
   type RecipeStep,
   type Reviewer,
   type StepConfig,
-  TEMPLATE_VARIABLES,
 } from './delivery-model.ts'
 
 /**
@@ -545,38 +544,3 @@ export const FORCED = withForge({
   forced: true,
   cli: 'ready',
 })
-
-// ——— Templates ———
-
-/** What a template is filled with, for the example under its field: ACME-12. */
-export const EXAMPLE: Record<(typeof TEMPLATE_VARIABLES)[number]['name'], string> = {
-  '{key}': 'ACME-12',
-  '{title}': 'Export invoices as CSV',
-  '{slug}': 'export-invoices-as-csv',
-  '{branch}': 'acme/ACME-12-export-invoices-as-csv',
-  '{summary}': 'The invoices page exports its rows as CSV, streamed page by page.',
-  '{images}': '![The export button](export.png)',
-}
-
-/** The names a template holds that Hemera does not fill. */
-export function unknownNames(template: string): string[] {
-  const known = new Set<string>(TEMPLATE_VARIABLES.map((one) => one.name))
-  return [...template.matchAll(/\{[^{}\s]*\}/g)]
-    .map((match) => match[0])
-    .filter((name) => !known.has(name))
-}
-
-/** The engine's refusal of a template, in its words. */
-export function templateRefusal(template: string): string | undefined {
-  const unknown = unknownNames(template)
-  if (unknown.length === 0) return undefined
-  const names = TEMPLATE_VARIABLES.map((one) => one.name).join(', ')
-  return `${unknown.join(', ')} ${unknown.length === 1 ? 'is not a name' : 'are not names'} Hemera fills. Use ${names}.`
-}
-
-/** A template as ACME-12 fills it. */
-export function filled(template: string): string {
-  let text = template
-  for (const [name, value] of Object.entries(EXAMPLE)) text = text.replaceAll(name, value)
-  return text
-}
