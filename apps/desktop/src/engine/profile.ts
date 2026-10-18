@@ -53,6 +53,8 @@ import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from 
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
+import { roundDeskLayer } from './review/round-desk.ts'
+import { type Rounds, roundsLayer } from './review/rounds.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, cancelHelpersIn, helpersLayer } from './building/helpers.ts'
@@ -414,6 +416,7 @@ export type EngineServices =
   | Checkpoints
   | Diffs
   | Review
+  | Rounds
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -509,6 +512,8 @@ export const startProfile = (
     const docsContext = yield* Layer.build(docsDeskLayer)
     // Where the gate reaches the reviewers' tools, served by the automatic review (#147).
     const reviewContext = yield* Layer.build(reviewDeskLayer)
+    // Where the gate reaches a Review round's tools, served by the rounds (#468).
+    const roundContext = yield* Layer.build(roundDeskLayer)
     // The database as a suite sees it, wrapped around the real one (#341): one connection either way.
     const realDatabase = databaseLayer(file)
     const wrapDatabase = parts.database
@@ -538,6 +543,7 @@ export const startProfile = (
       Layer.succeedContext(helperContext),
       Layer.succeedContext(docsContext),
       Layer.succeedContext(reviewContext),
+      Layer.succeedContext(roundContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
@@ -746,8 +752,13 @@ export const startProfile = (
       outside,
       checkpoints,
       diffs,
-      reviewLayer({ log, hold: parts.review?.hold }).pipe(
-        Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
+      // The rounds over Review's feedback (#468), which the window reaches too.
+      roundsLayer({ log }).pipe(
+        Layer.provideMerge(
+          reviewLayer({ log, hold: parts.review?.hold }).pipe(
+            Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
+          ),
+        ),
       ),
     ).pipe(
       Layer.provideMerge(

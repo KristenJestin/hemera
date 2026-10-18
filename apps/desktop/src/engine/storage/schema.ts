@@ -1563,6 +1563,14 @@ export const questions = sqliteTable(
     mootDecision: text('moot_decision').$type<Masked<string>>(),
     askedAt: text('asked_at').notNull(),
     changedAt: text('changed_at').notNull(),
+    /** The Review round whose grilling asked it (#468); null for a question of Planning. */
+    round: integer('round'),
+    /**
+     * What Hemera does with its answer (#468): `conflict` (a feedback against the frozen Spec) or
+     * `new_mission` ("Start a mission from this"), about `feedback_id`; null for any other.
+     */
+    kind: text('kind'),
+    feedbackId: text('feedback_id'),
   },
   (table) => [
     primaryKey({ columns: [table.missionId, table.id] }),
@@ -3162,6 +3170,8 @@ export const reviewRounds = sqliteTable(
     state: text('state').notNull(),
     createdAt: text('created_at').notNull(),
     movedAt: text('moved_at').notNull(),
+    /** Why the Planner said the round was ready to build (#468); null before. */
+    readyWhy: text('ready_why').$type<Masked<string>>(),
   },
   (table) => [primaryKey({ columns: [table.missionId, table.number] })],
 )
@@ -3223,6 +3233,13 @@ export const reviewFeedback = sqliteTable(
     answer: text('answer').$type<Masked<string>>(),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
+    /**
+     * The feedback as the round's agents read it, its images by their path (#468): written when a
+     * Fix takes it, read-only from then on, as the feedback is.
+     */
+    said: text('said').$type<Masked<string>>(),
+    /** The mission started from it (#468), which closed it in its round. */
+    movedTo: text('moved_to'),
   },
   (table) => [
     index('review_feedback_of_mission').on(table.missionId, table.round),
@@ -3257,4 +3274,108 @@ export const reviewFeedbackImages = sqliteTable(
       .references(() => memoryEvidence.id, { onDelete: 'cascade' }),
   },
   (table) => [primaryKey({ columns: [table.feedbackId, table.position] })],
+)
+
+/**
+ * A point of a Review round (#468, R2): a feedback grilled into a requirement, `R2.1`, numbered
+ * per round and never reused. Its kind (`corrective` or `behaviour`), the delta of a behaviour
+ * change on a requirement with the living version it was written against (CT-57), the feedback it
+ * comes from (JSON ids) and its decisions (JSON: choice, alternatives, why). A point removed
+ * before the round is ready keeps its row and its reason.
+ */
+export const roundPoints = sqliteTable(
+  'round_points',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    kind: text('kind').notNull(),
+    deltaRequirement: text('delta_requirement'),
+    deltaChange: text('delta_change'),
+    deltaLivingVersion: integer('delta_living_version'),
+    sources: text('sources').notNull(),
+    decisions: text('decisions').$type<Masked<string>>().notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull(),
+    removedReason: text('removed_reason').$type<Masked<string>>(),
+    sessionId: text('session_id').notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A scenario of a round's point (#468): `R2.1.S1`, its WHEN and THEN, and its Proof block (JSON,
+ * #90's shape) that "Building · round N" proves red then green as any scenario of the Spec.
+ */
+export const roundScenarios = sqliteTable(
+  'round_scenarios',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    point: text('point').notNull(),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    rank: integer('rank').notNull(),
+    when: text('when').$type<Masked<string>>().notNull(),
+    then: text('then').$type<Masked<string>>().notNull(),
+    block: text('block').$type<Masked<string>>().notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A task of a round (#468): `R2.T1`, #90's shape with the points it builds in place of
+ * requirements (JSON lists, the targets masked). The round's Building copies the live ones.
+ */
+export const roundTasks = sqliteTable(
+  'round_tasks',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    rank: integer('rank').notNull(),
+    title: text('title').$type<Masked<string>>().notNull(),
+    result: text('result').$type<Masked<string>>().notNull(),
+    points: text('points').notNull(),
+    scenarios: text('scenarios').notNull(),
+    targets: text('targets').$type<Masked<string>>().notNull(),
+    dependsOn: text('depends_on').notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A decision taken in a Review round (#468), joining the decisions since Freeze: a behaviour
+ * point's (`behaviour`), one a point carries (`point`), or the note that clarifies a feedback in
+ * conflict with the frozen Spec (`clarify`, with that feedback). The frozen Spec itself is never
+ * written.
+ */
+export const roundDecisions = sqliteTable(
+  'round_decisions',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    point: text('point'),
+    feedbackId: text('feedback_id'),
+    kind: text('kind').notNull(),
+    choice: text('choice').$type<Masked<string>>().notNull(),
+    alternatives: text('alternatives').$type<Masked<string>>().notNull(),
+    why: text('why').$type<Masked<string>>().notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('round_decisions_of_mission').on(table.missionId, table.round)],
 )

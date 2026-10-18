@@ -73,12 +73,14 @@ import type { DomainEvents } from '../domain-events.ts'
 import type { ProfileHome } from '../profile-home.ts'
 import { planRows, readProof } from '../planning/plan.ts'
 import { missionRow } from '../planning/store.ts'
+import { roundProofIn, roundScenariosIn } from '../review/round-store.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
   buildingAttempts,
   buildingDecisions,
   missions,
+  roundScenarios,
   scenarioProofs,
   specProofs,
   specScenarios,
@@ -410,7 +412,7 @@ export const buildingProofs = (parts: ProofParts) => {
       () => done(missionId),
     )
 
-  /** The Proof block of a scenario, as the Spec keeps it, or null. */
+  /** The Proof block of a scenario, as the Spec keeps it or a Review round's point (#468), or null. */
   const proofOf = (missionId: string, scenario: string) =>
     Effect.gen(function* () {
       const database = yield* Database
@@ -419,28 +421,34 @@ export const buildingProofs = (parts: ProofParts) => {
         .from(specProofs)
         .where(and(eq(specProofs.missionId, missionId), eq(specProofs.scenarioId, scenario)))
         .pipe(Effect.mapError(refusedWhile('reading a proof')))
-      return row === undefined ? null : Option.getOrNull(readProof(row.block))
+      if (row === undefined) return yield* roundProofIn(database, missionId, scenario)
+      return Option.getOrNull(readProof(row.block))
     })
 
   /** The repository and path of every file the mission's proofs insert. */
   const proofFilesIn = (transaction: EngineTransaction, missionId: string) =>
-    Effect.map(
-      transaction
+    Effect.gen(function* () {
+      const rows = yield* transaction
         .select({ block: specProofs.block })
         .from(specProofs)
         .where(eq(specProofs.missionId, missionId))
-        .pipe(Effect.mapError(refusedWhile('reading the proofs'))),
-      (rows) =>
-        new Set(
-          rows.flatMap((row) =>
-            Option.match(readProof(row.block), {
-              onNone: () => [],
-              onSome: (proof) =>
-                insertedFiles(proof).map((file) => `${file.repository}\u0000${file.path}`),
-            }),
-          ),
+        .pipe(Effect.mapError(refusedWhile('reading the proofs')))
+      // A Review round's proofs go into the Workspace too (#468).
+      const rounds = yield* transaction
+        .select({ block: roundScenarios.block })
+        .from(roundScenarios)
+        .where(and(eq(roundScenarios.missionId, missionId), eq(roundScenarios.removed, false)))
+        .pipe(Effect.mapError(refusedWhile('reading the proofs')))
+      return new Set(
+        [...rows, ...rounds].flatMap((row) =>
+          Option.match(readProof(row.block), {
+            onNone: () => [],
+            onSome: (proof) =>
+              insertedFiles(proof).map((file) => `${file.repository}\u0000${file.path}`),
+          }),
         ),
-    )
+      )
+    })
 
   /** The folder of a repository of the Workspace, or null. */
   const folderOf = (building: BuildingRow, repository: string) =>
@@ -644,6 +652,28 @@ export const buildingProofs = (parts: ProofParts) => {
   /** Each scenario of the frozen Spec with its Proof block, in the Building's first transaction. */
   const setUpIn = (transaction: EngineTransaction, building: BuildingRow) =>
     Effect.gen(function* () {
+      // A round's Building proves its points' scenarios, red first as any (#468).
+      if (building.round !== null) {
+        const scenarios = yield* roundScenariosIn(transaction, building.missionId, building.round)
+        for (const [rank, scenario] of scenarios.entries()) {
+          if (scenario.proof === null) continue
+          const automated = scenario.proof.mode === 'automated'
+          yield* transaction
+            .insert(scenarioProofs)
+            .values({
+              buildingId: building.id,
+              scenario: scenario.id,
+              requirement: scenario.point,
+              rank,
+              mode: scenario.proof.mode,
+              state: automated ? 'waiting_red' : 'to_verify',
+              updatedAt: now(),
+            })
+            .onConflictDoNothing()
+            .pipe(Effect.mapError(refusedWhile('setting up the proofs')))
+        }
+        return
+      }
       const { proofs } = yield* planRows(transaction, building.missionId)
       const scenarios = yield* transaction
         .select({ id: specScenarios.id, requirement: specScenarios.requirementId })

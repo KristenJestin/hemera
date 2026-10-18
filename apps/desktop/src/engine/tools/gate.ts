@@ -105,6 +105,7 @@ import { HelperDesk } from '../building/helper-desk.ts'
 import { STOPPED_AT_THE_END } from '../building/helper-store.ts'
 import { DocsDesk } from '../building/docs-desk.ts'
 import { ReviewDesk } from '../building/review-desk.ts'
+import { RoundDesk } from '../review/round-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -225,6 +226,7 @@ export type GateServices =
   | HelperDesk
   | DocsDesk
   | ReviewDesk
+  | RoundDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -508,6 +510,18 @@ const decodeCall = (
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
       return decoder(tool, TOOLS.hemera_reports.input)(raw)
+    case 'round_point_write':
+      return decoder(tool, TOOLS.round_point_write.input)(raw)
+    case 'round_point_remove':
+      return decoder(tool, TOOLS.round_point_remove.input)(raw)
+    case 'round_tasks_write':
+      return decoder(tool, TOOLS.round_tasks_write.input)(raw)
+    case 'round_propose_mission':
+      return decoder(tool, TOOLS.round_propose_mission.input)(raw)
+    case 'round_ready':
+      return decoder(tool, TOOLS.round_ready.input)(raw)
+    case 'feedback_answer':
+      return decoder(tool, TOOLS.feedback_answer.input)(raw)
   }
 }
 
@@ -1040,6 +1054,18 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':
               return yield* hemeraReports(call.args)
+            case 'round_point_write':
+              return yield* RoundDesk.use((desk) => desk.pointWrite(grant, call.args))
+            case 'round_point_remove':
+              return yield* RoundDesk.use((desk) => desk.pointRemove(grant, call.args))
+            case 'round_tasks_write':
+              return yield* RoundDesk.use((desk) => desk.tasksWrite(grant, call.args))
+            case 'round_propose_mission':
+              return yield* RoundDesk.use((desk) => desk.proposeMission(grant, call.args))
+            case 'round_ready':
+              return yield* RoundDesk.use((desk) => desk.ready(grant, call.args))
+            case 'feedback_answer':
+              return yield* RoundDesk.use((desk) => desk.answer(grant, call.args))
           }
         })
 

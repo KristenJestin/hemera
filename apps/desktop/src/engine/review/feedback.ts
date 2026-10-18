@@ -949,6 +949,8 @@ export const reviewLayer = (settings: ReviewSettings) =>
             answer: null,
             createdAt: at,
             updatedAt: at,
+            said: null,
+            movedTo: null,
           }
           yield* transaction
             .insert(reviewFeedback)

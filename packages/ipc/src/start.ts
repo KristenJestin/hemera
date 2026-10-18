@@ -74,6 +74,8 @@ export const StartCreate = Schema.Struct({
   ticket: Schema.optionalKey(StartTicket),
   /** The mission this one is started from ("Start a mission from this"); stored as a link. */
   origin: Schema.optionalKey(Schema.String),
+  /** The feedback of `origin` it is started from (#468): closed in its round once created. */
+  originFeedback: Schema.optionalKey(Schema.String),
   /** The same key twice (a double click) creates one mission. */
   idempotencyKey: Schema.String.check(Schema.isNonEmpty()),
 })
