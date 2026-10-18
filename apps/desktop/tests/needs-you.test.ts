@@ -225,6 +225,14 @@ describe('What each card says', () => {
     })
   })
 
+  test('a forge’s command line signed out: the link names the Delivery rules of its Project', () => {
+    const fields = { ...ENVIRONMENT, settingsSection: 'delivery' }
+    expect(cardOf(need(ACME, fields, '2026-10-05T10:00:00Z'), NOW).ask).toEqual({
+      kind: 'environment',
+      settings: 'Delivery rules',
+    })
+  })
+
   test('something a setting answers: the link names its section', () => {
     const fields = { ...ENVIRONMENT, settingsSection: 'models' }
     expect(cardOf(need(APP, fields, '2026-10-05T10:00:00Z'), NOW).ask).toEqual({
@@ -437,6 +445,13 @@ describe('What a card’s buttons do', () => {
       handlersFor(need(APP, { ...ENVIRONMENT, settingsSection: 'checks' }, NOW.toISOString()), on)
         .onSettings,
     ).toBeUndefined()
+  })
+
+  test('a forge’s command line signed out opens the Delivery rules of its Project’s settings', () => {
+    const asked = need(ACME, { ...ENVIRONMENT, settingsSection: 'delivery' }, NOW.toISOString())
+    const on = tools()
+    handlersFor(asked, on).onSettings?.()
+    expect(on.openSettings).toHaveBeenCalledWith({ projectId: 'acme', section: 'delivery' })
   })
 
   test('something missing is retried, and its link opens its settings section', () => {

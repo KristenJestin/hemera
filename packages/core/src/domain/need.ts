@@ -25,6 +25,7 @@ export const SETTINGS_SECTIONS = [
   'profile',
   'developer',
   'checks',
+  'delivery',
 ] as const
 export const SettingsSection = Schema.Literals(SETTINGS_SECTIONS)
 

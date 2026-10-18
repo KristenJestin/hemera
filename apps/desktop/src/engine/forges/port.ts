@@ -375,6 +375,9 @@ interface Known {
   readonly noContext: boolean
 }
 
+/** The Project settings' section where a CLI's state is said with Check again: its needs open it. */
+const DELIVERY_SECTION = 'delivery'
+
 /** What a need says its CLI lacks, from the state a repository waiting on it was found in. */
 const needFields = (waiting: Known): NeedFields => {
   const { status } = waiting
@@ -386,7 +389,7 @@ const needFields = (waiting: Known): NeedFields => {
       EnvironmentFields.make({
         missing: `${cli}, to reach ${host}: it is not on the PATH`,
         action: `Install it: ${fix}\nThen choose Check again.`,
-        settingsSection: null,
+        settingsSection: DELIVERY_SECTION,
       }),
     ),
     Match.when('signed-out', () =>
@@ -397,19 +400,19 @@ const needFields = (waiting: Known): NeedFields => {
               status.fix === null
                 ? `Make one with bkt context create, for ${host}.\nThen choose Check again.`
                 : `Make one: ${status.fix}\nThen choose Check again.`,
-            settingsSection: null,
+            settingsSection: DELIVERY_SECTION,
           })
         : EnvironmentFields.make({
             missing: `${cli} signed in on ${host}`,
             action: `Sign in: ${fix}\nThen choose Check again.`,
-            settingsSection: null,
+            settingsSection: DELIVERY_SECTION,
           }),
     ),
     Match.orElse(() =>
       EnvironmentFields.make({
         missing: `${host}, which ${cli} could not reach: ${status.detail ?? ''}`,
         action: 'Choose Check again once it is reachable.',
-        settingsSection: null,
+        settingsSection: DELIVERY_SECTION,
       }),
     ),
   )

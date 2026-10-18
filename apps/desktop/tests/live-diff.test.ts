@@ -47,7 +47,7 @@ import {
   workspaceRepositories,
   workspaces,
 } from '../src/engine/storage/schema.ts'
-import { call } from './building-world.ts'
+import { acmeAt, call } from './building-world.ts'
 import { builderAgents, builderOf, launched } from './builder-world.ts'
 import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { git } from './repositories.ts'
@@ -119,9 +119,22 @@ const moreOnBase = () =>
 /** A `.env` whose value must never leave the engine. */
 const SECRET = 'TOKEN=hunter2-not-a-real-one\n'
 
-const launchedOverBoth = (onBase: () => Effect.Effect<void> = moreOnBase) =>
+/**
+ * `configured` sets Acme's `api` config before Hemera knows the repository, as the user's machine
+ * has it: set later, it is a change of what shapes its Git, which the guard asks about (#457).
+ */
+const launchedOverBoth = (
+  onBase: () => Effect.Effect<void> = moreOnBase,
+  configured: (api: string) => void = () => {},
+) =>
   Effect.gen(function* () {
-    const { mission } = yield* launched(work, onBase, 'It touches api and web, nothing else.')
+    const { mission } = yield* launched(
+      work,
+      onBase,
+      'It touches api and web, nothing else.',
+      undefined,
+      (folder) => acmeAt(folder, 'acme', configured),
+    )
     const database = yield* Database
     const [launch] = yield* database
       .select({ workspaceId: buildingLaunches.workspaceId })
@@ -147,6 +160,8 @@ const launchedOverBoth = (onBase: () => Effect.Effect<void> = moreOnBase) =>
     }
   })
 
+const crlf = (api: string) => git(api, 'config', 'core.autocrlf', 'true')
+
 const live = (missionId: string) => Diffs.use((diffs) => diffs.live(missionId))
 const fileOf = (missionId: string, repository: string, path: string, force = false) =>
   Diffs.use((diffs) => diffs.file(missionId, repository, path, force))
@@ -169,15 +184,17 @@ describe('Each change gives Git’s letter', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api } = yield* launchedOverBoth()
+          const { missionId, api } = yield* launchedOverBoth(moreOnBase, (main) =>
+            git(main, 'config', 'core.symlinks', 'false'),
+          )
           writeFileSync(join(api, 'invoices.ts'), 'export const invoices = ["csv"]\n')
           writeFileSync(join(api, 'export.ts'), 'export const csv = true\n')
           git(api, 'add', 'export.ts')
           unlinkSync(join(api, 'package.json'))
           mkdirSync(join(api, 'docs'))
           renameSync(join(api, 'README.md'), join(api, 'docs', 'README.md'))
-          // A type change written as Git records it, which every platform can check out.
-          git(api, 'config', 'core.symlinks', 'false')
+          // A type change written as Git records it, which every platform can check out: its
+          // core.symlinks is set off before the launch.
           writeFileSync(join(api, 'link.txt'), 'invoices.ts')
           const blob = git(api, 'hash-object', '-w', 'link.txt')
           git(api, 'update-index', '--cacheinfo', `120000,${blob},link.txt`)
@@ -468,24 +485,23 @@ if (mode === 'clean') {
 /** A drawing as text. */
 const SVG = '<svg><circle r="1"/></svg>\n'
 
+/** The pointer driver set on Acme's `api`, its script and store under `work`. */
+const pointerDriver = (api: string) => {
+  const script = join(work, 'pointer-driver.cjs')
+  const store = join(work, 'pointer-store')
+  // Forward slashes: Git runs the command through its shell, on Windows too.
+  const quoted = (path: string) => `"${path.replaceAll('\\', '/')}"`
+  for (const mode of ['clean', 'smudge']) {
+    git(api, 'config', `filter.pointer.${mode}`, `node ${quoted(script)} ${mode} ${quoted(store)}`)
+  }
+}
+
 /** The base of Acme's `api` with two drawings under the pointer driver, pushed. */
 const filteredOnBase = () =>
   Effect.sync(() => {
     const api = join(work, 'acme', 'api')
-    const store = join(work, 'pointer-store')
-    mkdirSync(store)
-    const script = join(work, 'pointer-driver.cjs')
-    writeFileSync(script, POINTER_DRIVER)
-    // Forward slashes: Git runs the command through its shell, on Windows too.
-    const quoted = (path: string) => `"${path.replaceAll('\\', '/')}"`
-    for (const mode of ['clean', 'smudge']) {
-      git(
-        api,
-        'config',
-        `filter.pointer.${mode}`,
-        `node ${quoted(script)} ${mode} ${quoted(store)}`,
-      )
-    }
+    mkdirSync(join(work, 'pointer-store'))
+    writeFileSync(join(work, 'pointer-driver.cjs'), POINTER_DRIVER)
     writeFileSync(join(api, '.gitattributes'), '*.svg filter=pointer\n')
     writeFileSync(join(api, 'logo.svg'), SVG)
     writeFileSync(join(api, 'icon.svg'), SVG)
@@ -503,7 +519,7 @@ describe('A file under a filter driver is diffed in one form on both sides', () 
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api } = yield* launchedOverBoth(filteredOnBase)
+          const { missionId, api } = yield* launchedOverBoth(filteredOnBase, pointerDriver)
           const checkedOut = readFileSync(join(api, 'icon.svg'), 'utf8')
           writeFileSync(join(api, 'logo.svg'), drawn)
           const diff = yield* live(missionId)
@@ -777,9 +793,8 @@ describe('The diff follows the Workspace live', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api } = yield* launchedOverBoth()
           // Windows runners set it system-wide: Git stores the lines with LF, the disk keeps CRLF.
-          git(api, 'config', 'core.autocrlf', 'true')
+          const { missionId, api } = yield* launchedOverBoth(moreOnBase, crlf)
           mkdirSync(join(api, 'mes docs'))
           writeFileSync(join(api, 'mes docs', 'été à noël.md'), 'un\r\ndeux\r\n')
           writeFileSync(join(api, 'crlf.txt'), 'un\r\ndeux\r\ntrois\r\n')
@@ -810,8 +825,7 @@ describe('The diff follows the Workspace live', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api, rows } = yield* launchedOverBoth()
-          git(api, 'config', 'core.autocrlf', 'true')
+          const { missionId, api, rows } = yield* launchedOverBoth(moreOnBase, crlf)
           writeFileSync(join(api, 'crlf.txt'), 'un\r\ndeux\r\ntrois\r\n')
           const checkpointId = yield* Checkpoints.use((checkpoints) =>
             checkpoints.take(

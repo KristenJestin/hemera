@@ -70,6 +70,12 @@ import {
   type CheckDraft,
   type DocRecipe,
   type DocRecipeDraft,
+  type DeliveryDependency,
+  type DeliveryProblem,
+  type DeliveryRulesDraft,
+  type DeliveryRulesView,
+  type ForcedForge,
+  type ForgeRepositoryStatus,
   type ProjectCheck,
   type EngineStatus,
   type EnvironmentReport,
@@ -245,6 +251,42 @@ export interface Link {
     id: string,
     rank: number,
   ) => Promise<ReadonlyArray<DocRecipe>>
+  /** The Project's delivery rules, each repository resolved, the dependencies proposed. */
+  readonly deliveryRules: (projectId: string) => Promise<DeliveryRulesView>
+  /** Every reason the engine would refuse a draft of the rules; none when it can be saved. */
+  readonly validateDeliveryRules: (
+    projectId: string,
+    draft: DeliveryRulesDraft,
+  ) => Promise<ReadonlyArray<DeliveryProblem>>
+  /** Saves a draft edited from `version`; rejects with `DeliveryRulesRefused` and its reasons. */
+  readonly saveDeliveryRules: (
+    projectId: string,
+    draft: DeliveryRulesDraft,
+    version: number,
+  ) => Promise<DeliveryRulesView>
+  readonly acceptDependencies: (
+    projectId: string,
+    edges: ReadonlyArray<DeliveryDependency>,
+  ) => Promise<DeliveryRulesView>
+  /** Each repository's forge, forced or detected, and the state of its CLI. */
+  readonly forgeStatus: (projectId: string) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
+  /** Checks one repository's CLI again, or every one with null; answers the Project's states. */
+  readonly checkForgeAgain: (
+    projectId: string,
+    repositoryId: string | null,
+  ) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
+  readonly setForcedForge: (
+    projectId: string,
+    repositoryId: string,
+    forge: ForcedForge | null,
+    host: string | null,
+  ) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
+  /** The Project's forge states after each change. */
+  readonly onForgeChanges: (
+    projectId: string,
+    listener: (statuses: ReadonlyArray<ForgeRepositoryStatus>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The runs of the Project's main checkout, the newest first. */
   readonly runs: (projectId: string) => Promise<ReadonlyArray<Run>>
   readonly startRun: (start: RunStart) => Promise<Run>
@@ -743,6 +785,25 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['docRecipes.remove']({ projectId, id })),
     moveDocRecipe: (projectId, id, rank) =>
       call((ready) => ready['docRecipes.move']({ projectId, id, rank })),
+    deliveryRules: (projectId) => call((ready) => ready['deliveryRules.read']({ projectId })),
+    validateDeliveryRules: (projectId, draft) =>
+      call((ready) => ready['deliveryRules.validate']({ projectId, draft })),
+    saveDeliveryRules: (projectId, draft, version) =>
+      call((ready) => ready['deliveryRules.save']({ projectId, draft, version })),
+    acceptDependencies: (projectId, edges) =>
+      call((ready) => ready['deliveryRules.acceptDependencies']({ projectId, edges })),
+    forgeStatus: (projectId) => call((ready) => ready['forge.status']({ projectId })),
+    checkForgeAgain: (projectId, repositoryId) =>
+      call((ready) => ready['forge.checkAgain']({ projectId, repositoryId })),
+    setForcedForge: (projectId, repositoryId, forge, host) =>
+      call((ready) => ready['forge.setForced']({ projectId, repositoryId, forge, host })),
+    onForgeChanges: (projectId, listener, onEnd) =>
+      follow(
+        (ready) => ready['forge.changes']({ projectId }),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
     runs: (projectId) => call((ready) => ready['runs.list']({ projectId, workspaceId: null })),
     startRun: (start) => call((ready) => ready['runs.start'](start)),
     stopRun: (id) => call((ready) => ready['runs.stop']({ id })),

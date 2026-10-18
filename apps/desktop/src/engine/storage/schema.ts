@@ -3379,3 +3379,37 @@ export const roundDecisions = sqliteTable(
   },
   (table) => [index('round_decisions_of_mission').on(table.missionId, table.round)],
 )
+
+/**
+ * The holds of the guard on the engine's own Git (#457): a repository (or every one) whose Git
+ * the engine runs no more until the user answers, kept across restarts. What it holds of each
+ * changed file is its kind and digest, before the change and as the question showed it.
+ */
+export const gitHolds = sqliteTable('git_holds', {
+  /** Its scope: the real common Git folder of its repository, or `~` for the home. */
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  /** Its question, once written; null while it waits for one. */
+  needId: text('need_id').references(() => needs.id, { onDelete: 'set null' }),
+  everywhere: integer('everywhere', { mode: 'boolean' }).notNull(),
+  /** JSON: the checkouts it holds. */
+  checkouts: text('checkouts').notNull(),
+  /** JSON: each changed file, its path, as it was and as shown (its kind and digest). */
+  changes: text('changes').notNull(),
+  /** `none`, `allowed` or `denied`. */
+  answer: text('answer').notNull(),
+})
+
+/**
+ * What shapes the engine's Git in one scope, as the guard last accepted it (#457): a repository,
+ * by its real common Git folder, or the home (`~`). Compared at every Git call of the engine there.
+ */
+export const gitBaselines = sqliteTable('git_baselines', {
+  id: text('id').primaryKey(),
+  /** The Project whose agents first worked there: its questions belong to it. */
+  projectId: text('project_id').notNull(),
+  /** JSON: the checkouts of the repository the agents worked in. */
+  checkouts: text('checkouts').notNull(),
+  /** JSON: each file of the fingerprint, its path, its kind and digest. */
+  shapes: text('shapes').notNull(),
+})

@@ -5160,8 +5160,12 @@ describe('What the user answers on a red', () => {
       within(
         profile,
         Effect.gen(function* () {
+          // The cancel's stops run after its transaction: both are waited for.
           yield* until(
-            Effect.map(buildingOf(first.mission.id), (view) => view?.state === 'cancelled'),
+            Effect.map(
+              Effect.all([buildingOf(first.mission.id), getMission(first.mission.id)]),
+              ([view, mission]) => view?.state === 'cancelled' && mission.unstopped.length === 0,
+            ),
           )
           return {
             mission: yield* getMission(first.mission.id),
