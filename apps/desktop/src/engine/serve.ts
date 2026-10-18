@@ -17,6 +17,7 @@ import {
   AutoReviewRpcs,
   EngineApartRpcs,
   ForgeRpcs,
+  DeliveryRpcs,
   DeliveryRulesRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -41,6 +42,7 @@ import { buildingChanges, launchMission, preparationOf } from './building/launch
 import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
 import { Review, type ReviewService } from './review/feedback.ts'
+import { Pushes } from './delivery/pushes.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
 import {
@@ -911,7 +913,25 @@ export const engineHandlers = (
     proofsHandlers(profile, log),
     autoReviewHandlers(profile, log),
     reviewHandlers(profile, log),
+    pushesHandlers(profile, log),
   )
+}
+
+/** The pushes and pull requests (R6), a layer of their own (see `EngineServedRpcs`). */
+const pushesHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return DeliveryRpcs.toLayer({
+    'delivery.pushes': ({ missionId }) =>
+      use(Pushes.use((pushes) => pushes.pushes(missionId))).pipe(observed('delivery.pushes', log)),
+    'delivery.retry': ({ missionId, repository }) =>
+      use(Pushes.use((pushes) => pushes.retry(missionId, repository))).pipe(
+        observed('delivery.retry', log),
+      ),
+    'delivery.changes': ({ missionId }) =>
+      follow(Stream.unwrap(Pushes.useSync((pushes) => pushes.changes(missionId)))).pipe(
+        observedStream('delivery.changes', log),
+      ),
+  })
 }
 
 /** Review's feedback (#341), a layer of its own (see `EngineServedRpcs`); the user is the caller. */

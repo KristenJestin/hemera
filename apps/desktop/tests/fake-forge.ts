@@ -32,6 +32,11 @@ export interface FakeRule {
   readonly kill?: boolean
   /** Prints more than Hemera reads of one answer, then hangs: the call is cut for it. */
   readonly flood?: boolean
+  /**
+   * A CommonJS module answering the call instead, `(cli, args) => ({ stdout, stderr, code, kill })`:
+   * a fake forge with a state of its own (R6's pull requests).
+   */
+  readonly program?: string
 }
 
 export interface FakeCall {
@@ -65,6 +70,14 @@ module.exports = (cli, args) => {
   if (rule === undefined) {
     process.stderr.write('fake ' + cli + ': no rule for ' + args.join(' ') + '\\n')
     process.exit(1)
+  }
+  if (rule.program !== undefined) {
+    const answer = require(rule.program)(cli, args)
+    process.stdout.write(answer.stdout ?? '')
+    process.stderr.write(answer.stderr ?? '')
+    if (answer.kill) { process.kill(process.pid, 'SIGKILL'); return }
+    process.exitCode = answer.code ?? 0
+    return
   }
   if (rule.hang) { setInterval(() => {}, 1000); return }
   if (rule.kill) { process.kill(process.pid, 'SIGKILL'); return }

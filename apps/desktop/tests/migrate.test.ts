@@ -125,6 +125,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'cold_reads',
       'command_runs',
       'deliveries_by_target',
+      'delivery_pushes',
       'delivery_rule_copies',
       'delivery_rules',
       'dependencies_on_mission',

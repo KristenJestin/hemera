@@ -1,6 +1,6 @@
 /**
  * The checkpoints of a mission's Workspace (#140, CT-01): at a key moment (before the automatic
- * review, at the entry into Review, at the end of each round), each repository's `HEAD`, the
+ * review, at the entry into Review, at the end of each round, at each push), each repository's `HEAD`, the
  * snapshot tree of its working tree with untracked files, its base branch and the merge base of
  * `HEAD` with it, and the files from the merge base to the tree with their contents, copied into
  * the database. A checkpoint is read from the database alone: the same whether its Workspace still
@@ -40,7 +40,7 @@ import {
 } from './snapshots.ts'
 
 /** The moment a checkpoint is taken at. */
-export type CheckpointKind = 'review' | 'review_entry' | 'round_end'
+export type CheckpointKind = 'review' | 'review_entry' | 'round_end' | 'push'
 
 /**
  * A repository of the Workspace as a checkpoint takes it: its name there, its working tree, and

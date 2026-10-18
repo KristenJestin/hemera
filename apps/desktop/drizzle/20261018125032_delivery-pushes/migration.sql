@@ -1,0 +1,22 @@
+CREATE TABLE `delivery_pushes` (
+	`mission_id` text NOT NULL,
+	`repository_id` text NOT NULL,
+	`repository` text NOT NULL,
+	`round` integer NOT NULL,
+	`state` text NOT NULL,
+	`step` text,
+	`message` text,
+	`need_id` text,
+	`checkpoint_id` text,
+	`tree` text,
+	`sensitive` text,
+	`sensitive_answer` text,
+	`commit` text,
+	`pushed_at` text,
+	`remote` text,
+	`branch` text,
+	`pull_request` text,
+	`updated_at` text NOT NULL,
+	CONSTRAINT `delivery_pushes_pk` PRIMARY KEY(`mission_id`, `repository_id`),
+	CONSTRAINT `fk_delivery_pushes_mission_id_missions_id_fk` FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE
+);

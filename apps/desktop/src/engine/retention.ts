@@ -173,6 +173,7 @@ export const TABLE_CLASSES = {
   review_feedback: 'permanent',
   review_feedback_versions: 'permanent',
   review_feedback_images: 'permanent',
+  delivery_pushes: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

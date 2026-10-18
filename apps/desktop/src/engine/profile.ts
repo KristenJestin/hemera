@@ -191,6 +191,8 @@ import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
 import { type Diffs, diffsLayer } from './review/diffs.ts'
 import { Review, type ReviewHold, reviewLayer } from './review/feedback.ts'
+import { DELIVERY_NEEDS, Pushes, type PushesHold, pushesLayer } from './delivery/pushes.ts'
+import { DELIVERY_MAPPERS } from './delivery/journal.ts'
 import { REVIEW_MAPPERS } from './review/journal.ts'
 import {
   type OutsideChanges,
@@ -284,6 +286,16 @@ export interface ProfileParts {
   readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** Where a suite holds Review's feedback (#341, see `ReviewHold`); never held otherwise. */
   readonly review?: { readonly hold?: ReviewHold | undefined } | undefined
+  /**
+   * The pushes' Git as a suite sees it, wrapped around the machine's, and where a suite holds a
+   * repository's sequence (R6): the machine's and never held otherwise.
+   */
+  readonly delivery?:
+    | {
+        readonly git?: ((real: GitBytesSpawn) => GitBytesSpawn) | undefined
+        readonly hold?: PushesHold | undefined
+      }
+    | undefined
   /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
   readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
@@ -414,6 +426,7 @@ export type EngineServices =
   | Checkpoints
   | Diffs
   | Review
+  | Pushes
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -594,6 +607,13 @@ export const startProfile = (
     const diffs = diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
       Layer.provide(Layer.mergeAll(checkpoints, outside)),
     )
+    // The pushes and pull requests, and where their needs' answers go (R6).
+    const deliveryGit = spawnGitBytes(SYSTEM_GIT, secrets.mask)
+    const pushes = pushesLayer({
+      log,
+      git: parts.delivery?.git?.(deliveryGit) ?? deliveryGit,
+      hold: parts.delivery?.hold,
+    })
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -608,6 +628,7 @@ export const startProfile = (
         [BUILDER_NEEDS, builder.handler],
         [REVIEW_NEEDS, ending.handler],
         [END_NEEDS, ending.retry],
+        [DELIVERY_NEEDS, pushes.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -665,6 +686,7 @@ export const startProfile = (
         ...BUILDING_MAPPERS,
         ...HELPER_MAPPERS,
         ...REVIEW_MAPPERS,
+        ...DELIVERY_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -749,6 +771,7 @@ export const startProfile = (
       reviewLayer({ log, hold: parts.review?.hold }).pipe(
         Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
       ),
+      pushes.layer.pipe(Layer.provide(Layer.mergeAll(diffs, checkpoints))),
     ).pipe(
       Layer.provideMerge(
         sessionsLayer({
@@ -1052,6 +1075,13 @@ export const startProfile = (
     const reviewEvents = yield* Context.get(context, DomainEvents).subscribe
     yield* gate.pass.pipe(
       Effect.andThen(run(Review.use((review) => review.follow(reviewEvents)))),
+      Effect.forkScoped,
+    )
+    // The pushes and pull requests (R6): followed from now, what a stop cut resumed once
+    // automations may run.
+    const pushEvents = yield* Context.get(context, DomainEvents).subscribe
+    yield* gate.pass.pipe(
+      Effect.andThen(run(Pushes.use((one) => one.follow(pushEvents)))),
       Effect.forkScoped,
     )
     // Once automations may run: the reservations are settled, then again at each change (#88).

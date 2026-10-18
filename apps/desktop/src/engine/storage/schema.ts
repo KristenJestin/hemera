@@ -3258,3 +3258,39 @@ export const reviewFeedbackImages = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.feedbackId, table.position] })],
 )
+
+/**
+ * Where one repository of a mission stands in its push and pull request (R6), one row per mission
+ * and repository: the Review round it was last considered for, its state (`waiting` on a need,
+ * `running`, `done`, `failed`, `indeterminate`, `declined`), the action of the preparation stack it
+ * stands at, what failed (masked), the need it waits on, the checkpoint it pushes and the tree its
+ * commit must have, the untracked sensitive files the user answered for and how (`push`, `keep`),
+ * the last commit pushed with when, the remote and branch it was pushed to (its upstream, kept
+ * here rather than in the repository's configuration), and its pull request as last read (JSON).
+ */
+export const deliveryPushes = sqliteTable(
+  'delivery_pushes',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    repository: text('repository').notNull(),
+    round: integer('round').notNull(),
+    state: text('state').notNull(),
+    step: text('step'),
+    message: text('message').$type<Masked<string>>(),
+    needId: text('need_id'),
+    checkpointId: text('checkpoint_id'),
+    tree: text('tree'),
+    sensitive: text('sensitive'),
+    sensitiveAnswer: text('sensitive_answer'),
+    commit: text('commit'),
+    pushedAt: text('pushed_at'),
+    remote: text('remote'),
+    branch: text('branch'),
+    pullRequest: text('pull_request'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repositoryId] })],
+)
