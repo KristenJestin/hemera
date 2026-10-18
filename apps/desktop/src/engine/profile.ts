@@ -8,9 +8,11 @@
  * says why in a sentence the window shows, and every call on the Profile is refused with it.
  */
 
-import { release, type } from 'node:os'
+import { realpathSync } from 'node:fs'
+import { homedir, release, tmpdir, type } from 'node:os'
 import { join } from 'node:path'
 
+import { ROOT_REPOSITORY } from '@hemera/core/domain'
 import {
   type AutomaticBackups,
   DatabaseOpen,
@@ -84,6 +86,7 @@ import type { Delivery } from './permissions/delivery.ts'
 import type { HemeraAuto } from './permissions/hemera-auto.ts'
 import { type SessionTurns, sessionTurnsLayer } from './permissions/ports.ts'
 import { runAtOpen } from './at-open.ts'
+import { GIT_GUARD, engineGitGuard } from './git-guard.ts'
 import { type GitBytesSpawn, SYSTEM_GIT, gitLayer, spawnGit, spawnGitBytes } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
 import { Secrets, type SecretsRegistry, secretsRegistry, registerAllVariables } from './secrets.ts'
@@ -105,7 +108,7 @@ import {
   refusedWhile,
 } from './storage/database.ts'
 import { type HostProcesses, supervisorLayer } from './supervisor.ts'
-import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
+import { type WorkspaceServices, listWorkspaces, preparationsLayer } from './workspaces.ts'
 import {
   type MissionParts,
   type MissionServices,
@@ -131,7 +134,7 @@ import {
   memoryLayer,
 } from './memory/index.ts'
 import type { HemeraEndpoint } from './agents/endpoint.ts'
-import { assignKeyPrefixes } from './projects.ts'
+import { assignKeyPrefixes, listProjects } from './projects.ts'
 import { LaunchFailed } from '@hemera/ipc'
 import { defaultPermissionAnswerLayer } from './agents/client.ts'
 import { type Discovery, discoveryLayer, machineLayer } from './agents/discovery.ts'
@@ -180,7 +183,7 @@ import {
   probeDeskLayer,
 } from './planning/probe-desk.ts'
 import { type ProbeSteps, probeStepsLayer } from './planning/probe-steps.ts'
-import { PROBE_MAPPERS } from './planning/probe-store.ts'
+import { PROBES_FOLDER, PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
 import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
 import { coldReadsLayer } from './planning/cold-reads.ts'
@@ -473,6 +476,15 @@ const refusedProfile = (sentence: string): Effect.Effect<StartedProfile, never, 
     }
   })
 
+/** The events after which the Git guard sees the places Hemera knows again (#457). */
+const SIGHTED_ON: ReadonlySet<string> = new Set([
+  'project.created',
+  'project.updated',
+  'repository.added',
+  'repository.updated',
+  'workspace.created',
+])
+
 export const startProfile = (
   start: ProfileStart,
   parts: ProfileParts,
@@ -494,6 +506,26 @@ export const startProfile = (
     if (restored !== null) log(`restored the backup taken at ${restored.takenAt}`)
 
     const secrets = parts.secrets ?? secretsRegistry()
+    // The guard on the engine's own Git (#457), which every Git spawn below asks first; the home
+    // it reads is the gate's, a suite's own folder when it hands one.
+    const guardHome = parts.tools?.home
+    const guard = yield* engineGitGuard(
+      guardHome === undefined
+        ? {
+            home: homedir(),
+            configHome: process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'),
+          }
+        : { home: guardHome, configHome: join(guardHome, '.config') },
+      log,
+      secrets.mask,
+      // The engine's scratch repositories, never a scope of the guard. Its snapshot stores are
+      // watched as any repository; of its data, only the Probes' worktrees' bookkeeping is its own.
+      [
+        join(realpathSync.native(tmpdir()), 'hemera-scratch-'),
+        join(realpathSync.native(tmpdir()), 'hemera-patch-'),
+      ],
+      join(realpathSync.native(dataFolder), PROBES_FOLDER),
+    )
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)
     const desk = Context.get(deskContext, ProbeDesk)
@@ -540,7 +572,8 @@ export const startProfile = (
       Layer.succeedContext(reviewContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
-      gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
+      gitLayer(spawnGit(SYSTEM_GIT, secrets.mask, guard.spawn)),
+      guard.layer,
       sessionTurnsLayer,
       repositoryStatusesLayer,
       preparationsLayer(log),
@@ -572,7 +605,7 @@ export const startProfile = (
     // The end of a Building, and where the answers to the review's findings go (#147).
     const ending = buildingEndLayer(log, parts.building?.endHold)
     // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
-    const snapshotsGit = spawnGitBytes(SYSTEM_GIT, secrets.mask)
+    const snapshotsGit = spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn)
     const machineSnapshots = snapshotsLayer(parts.snapshotsGit?.(snapshotsGit) ?? snapshotsGit)
     const wrapped = parts.snapshots
     const snapshots =
@@ -587,17 +620,18 @@ export const startProfile = (
     // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
     const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
     // One store of the checkpoints: the review at the end of a Building, the live diff, the calls.
-    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn)).pipe(
       Layer.provideMerge(snapshots),
     )
     // One live diff: the calls and Review's anchors (#341) read the same repositories' turns.
-    const diffs = diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
+    const diffs = diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn), log).pipe(
       Layer.provide(Layer.mergeAll(checkpoints, outside)),
     )
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
         [RUN_CONSENT, consent.handler],
+        [GIT_GUARD, guard.handler],
         [SESSION_NEEDS, post.needs],
         [BUDGET_NEEDS, budgetHandler],
         [PERMISSION_REQUESTS, requestsHandler],
@@ -859,6 +893,47 @@ export const startProfile = (
 
     // The Journal catches up with the event log before anything reads the Memory, then follows it.
     yield* Context.get(context, Memory).start.pipe(Effect.forkScoped)
+    // The Git guard's holds a stopped engine left are read back, before any Git of the engine
+    // runs; its questions are written as its holds need them (#457).
+    yield* run(guard.restore)
+    // Added before the writer is forked, so it runs once the writer is stopped: what is left is
+    // written before the database closes.
+    yield* Effect.addFinalizer(() => run(guard.flush))
+    yield* run(guard.questions).pipe(Effect.forkScoped)
+    // Every place Hemera knows is seen by the guard, at the start and as one is added (#457): no
+    // repository waits for an agent's action to be given its baseline.
+    const placesKnown = Effect.gen(function* () {
+      const places: Array<{ readonly projectId: string; readonly checkouts: string[] }> = []
+      for (const project of yield* listProjects) {
+        const of = (root: string) => [
+          root,
+          ...project.repositories
+            .filter((one) => one.path !== ROOT_REPOSITORY)
+            .map((one) => join(root, one.path)),
+        ]
+        places.push({ projectId: project.id, checkouts: of(project.mainCheckout) })
+        for (const workspace of yield* listWorkspaces(project.id)) {
+          places.push({ projectId: project.id, checkouts: of(workspace.folder) })
+        }
+      }
+      return places
+    })
+    const sightKnown = run(Effect.flatMap(placesKnown, guard.sight)).pipe(
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the Git guard did not see the places: ${said(refusal)}`)),
+      ),
+    )
+    // Off the start: a scope an action or an engine call reaches first is sighted there.
+    const placesAdded = yield* Context.get(context, DomainEvents).subscribe
+    yield* sightKnown.pipe(
+      Effect.andThen(
+        placesAdded.pipe(
+          Stream.filter((event) => SIGHTED_ON.has(event.type)),
+          Stream.runForEach(() => sightKnown),
+        ),
+      ),
+      Effect.forkScoped,
+    )
 
     let reconciliation: Reconciliation = 'none'
     const databaseNow = (): DatabaseStatus =>

@@ -148,6 +148,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'freeze_files',
       'freeze_once_per_cycle',
       'freezes',
+      'git_baselines',
+      'git_holds',
       'grants_by_mission',
       'helper_of_lineage',
       'helpers',
