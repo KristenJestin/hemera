@@ -380,6 +380,8 @@ describe('An operation with the CLI signed out waits behind one Project need', (
     expect(Predicate.isTagged(before[0]?.fields, 'Environment')).toBe(true)
     expect(before[0]?.fields).toMatchObject({
       action: expect.stringContaining('gh auth login --hostname github.com'),
+      // Its link opens the Delivery rules of the Project's settings, where Check again stands.
+      settingsSection: 'delivery',
     })
     expect(after).toEqual([])
   })
