@@ -17,10 +17,15 @@
 import {
   type Answer,
   type AskedQuestion,
+  CONFLICT_DETAILS,
+  CONFLICT_OPTIONS,
   type QuestionOption,
   type QuestionState,
   type RetireHow,
   QUESTION_STATES,
+  TO_A_MISSION,
+  WITHDRAW_FEEDBACK,
+  CANCEL_MISSION_TOO,
   WaitingOnSomeoneMark,
   answerChangeSaid,
   answerTo,
@@ -37,12 +42,13 @@ import {
   type Question,
   type Wave,
 } from '@hemera/ipc'
-import { and, asc, count, eq, inArray, max } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNotNull, max, or } from 'drizzle-orm'
 import { Effect, Option, Schema, Stream } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
-import { markIn, clearMarkIn } from '../missions.ts'
+import { cancelMissionIn, markIn, clearMarkIn } from '../missions.ts'
+import { feedbackEventPayload, grillingRoundIn, roundEvent } from '../review/round-store.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
@@ -53,6 +59,8 @@ import {
   projects,
   questionDrafts,
   questions,
+  reviewFeedback,
+  roundDecisions,
   waves,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
@@ -78,6 +86,14 @@ const refused = <A>(sentence: string): Written<A> => ({ refused: sentence })
 export interface WaveQuestion extends AskedQuestion {
   readonly section?: string | undefined
   readonly fromFinding?: string | undefined
+  /**
+   * In a round's grilling (#468): a feedback in conflict with the frozen Spec, whose three outcomes
+   * Hemera offers itself, or one put to the user as "Start a mission from this"; Hemera acts on
+   * the answer.
+   */
+  readonly about?:
+    | { readonly kind: 'conflict' | 'new_mission'; readonly feedbackId: string }
+    | undefined
   readonly replaces?: string | undefined
 }
 
@@ -135,6 +151,67 @@ const questionRow = (transaction: EngineTransaction, missionId: string, id: stri
 
 // --- The Planner's side ----------------------------------------------------------------------
 
+/**
+ * Whether a writer may ask and integrate now: the Planner while its mission is in Planning (the
+ * Spec's own rule), or the Planner in round mode while its mission's round is grilled (#468), with
+ * that round.
+ */
+const askingStandingIn = (transaction: EngineTransaction, writer: SpecWriter) =>
+  Effect.gen(function* () {
+    if (writer.role !== 'round-planner') {
+      const standing = yield* standingOf(transaction, writer)
+      const none: number | null = null
+      return { refusal: standing.refusal, round: none }
+    }
+    const mission = yield* missionRow(transaction, writer.missionId)
+    const key = missionKey(mission.keyPrefix, mission.keyNumber)
+    const round =
+      mission.stage === 'review' ? yield* grillingRoundIn(transaction, writer.missionId) : null
+    return round === null
+      ? { refusal: `refused: no round of ${key} is being grilled: round mode is over.`, round }
+      : { refusal: null, round }
+  })
+
+/** The options Hemera offers itself for a question about a feedback of a round (#468). */
+const conflictOptions = CONFLICT_OPTIONS.map((label) => ({
+  label,
+  detail: CONFLICT_DETAILS[label],
+}))
+
+/**
+ * Why a question about a feedback may not be asked, or null: only in a round's grilling, about a
+ * remark of that round still waiting for its outcome.
+ */
+const aboutRefusal = (
+  transaction: EngineTransaction,
+  missionId: string,
+  round: number | null,
+  feedbackId: string,
+) =>
+  Effect.gen(function* () {
+    if (round === null)
+      return 'refused: a question about a feedback is asked in a round’s grilling.'
+    const [row] = yield* transaction
+      .select({
+        round: reviewFeedback.round,
+        kind: reviewFeedback.kind,
+        state: reviewFeedback.state,
+      })
+      .from(reviewFeedback)
+      .where(and(eq(reviewFeedback.missionId, missionId), eq(reviewFeedback.id, feedbackId)))
+      .pipe(Effect.mapError(refusedWhile('reading a feedback')))
+    if (row?.round !== round) {
+      return `refused: ${feedbackId} is no feedback of round ${String(round)}.`
+    }
+    if (row.kind === 'question') {
+      return `refused: ${feedbackId} is a question: answer it with feedback_answer.`
+    }
+    if (row.state !== 'in_round') {
+      return `refused: ${feedbackId} is ${row.state.replace('_', ' ')}: it waits for no outcome.`
+    }
+    return null
+  })
+
 /** What a wave came to: its number, its questions, and the questions they replaced. */
 export interface Asked {
   readonly number: number
@@ -147,8 +224,12 @@ export interface Asked {
  * `planning.wave_asked` and Now's next step. A question that replaces another marks it replaced,
  * keeping the link both ways. Several waves may be open at once.
  */
-export const askWave = (writer: SpecWriter, asked: ReadonlyArray<WaveQuestion>) =>
+export const askWave = (writer: SpecWriter, given: ReadonlyArray<WaveQuestion>) =>
   Effect.gen(function* () {
+    // A conflict's outcomes are Hemera's to offer, whatever options the Planner gave (#468).
+    const asked = given.map((one) =>
+      one.about?.kind === 'conflict' ? { ...one, options: conflictOptions } : one,
+    )
     const secrets = yield* Secrets
     return yield* mutate('asking a wave of questions', (transaction) =>
       Effect.gen(function* () {
@@ -156,8 +237,18 @@ export const askWave = (writer: SpecWriter, asked: ReadonlyArray<WaveQuestion>) 
           result,
           events,
         })
-        const standing = yield* standingOf(transaction, writer)
+        const standing = yield* askingStandingIn(transaction, writer)
         if (standing.refusal !== null) return answer(refused(standing.refusal))
+        for (const one of asked) {
+          if (one.about === undefined) continue
+          const wrong = yield* aboutRefusal(
+            transaction,
+            writer.missionId,
+            standing.round,
+            one.about.feedbackId,
+          )
+          if (wrong !== null) return answer(refused(wrong))
+        }
         const invalid = waveRefusal(asked)
         if (invalid !== null) return answer(refused(invalid))
         const replacing = asked.flatMap((one) => (one.replaces === undefined ? [] : [one.replaces]))
@@ -225,6 +316,9 @@ export const askWave = (writer: SpecWriter, asked: ReadonlyArray<WaveQuestion>) 
               state: 'open',
               askedAt: at,
               changedAt: at,
+              round: standing.round,
+              kind: one.about?.kind ?? null,
+              feedbackId: one.about?.feedbackId ?? null,
             })
             .pipe(Effect.mapError(refusedWhile('asking a question')))
           const old = replaced.find((row) => row.id === one.replaces)
@@ -400,7 +494,7 @@ export const integrateInput = (writer: SpecWriter, id: string, where: Integrated
     const said = secrets.mask(isText(where) ? where.trim() : `no change: ${where.no_change.trim()}`)
     return yield* mutate('marking an input integrated', (transaction) =>
       Effect.gen(function* () {
-        const standing = yield* standingOf(transaction, writer)
+        const standing = yield* askingStandingIn(transaction, writer)
         if (standing.refusal !== null) {
           return { result: refused<Integration>(standing.refusal), events: [] }
         }
@@ -466,8 +560,13 @@ const actedOn = (
   doing: string,
 ) =>
   Effect.gen(function* () {
-    const { key } = yield* inPlanning(transaction, missionId, doing)
-    const row = yield* questionRow(transaction, missionId, questionId)
+    const found = yield* questionRow(transaction, missionId, questionId)
+    // A question of a round's grilling is answered while that round is grilled (#468).
+    const { key } =
+      found?.round == null
+        ? yield* inPlanning(transaction, missionId, doing)
+        : yield* inGrilling(transaction, missionId, found.round, doing)
+    const row = found
     if (row === null) {
       return yield* new PlanningRefused({ reason: `${key} has no question ${questionId}.` })
     }
@@ -477,6 +576,136 @@ const actedOn = (
       })
     }
     return row
+  })
+
+/** The mission while its round `round` is grilled, or the refusal of what is done outside it. */
+const inGrilling = (
+  transaction: EngineTransaction,
+  missionId: string,
+  round: number,
+  doing: string,
+) =>
+  Effect.gen(function* () {
+    const mission = yield* missionRow(transaction, missionId)
+    const key = missionKey(mission.keyPrefix, mission.keyNumber)
+    const grilled =
+      mission.stage === 'review' ? yield* grillingRoundIn(transaction, missionId) : null
+    if (grilled !== round) {
+      return yield* new PlanningRefused({
+        reason: `${key}'s round ${String(round)} is no longer grilled: ${doing} is for its grilling.`,
+      })
+    }
+    return { mission, key }
+  })
+
+/**
+ * Whether the answer of a question about a feedback was acted on for good (#468): a withdrawn
+ * feedback or a cancelled mission for a conflict, either choice for "Start a mission from this".
+ * A clarifying note may still change.
+ */
+const appliedFor = (row: QuestionRow, answer: Answer | null): boolean =>
+  answer !== null &&
+  answer.optionId !== null &&
+  (row.kind === 'new_mission' || (row.kind === 'conflict' && answer.optionId !== optionIdAt(0)))
+
+/**
+ * What Hemera does with the user's answer to a question about a feedback (#468), in the answer's
+ * transaction: a clarifying note kept as a decision, the feedback withdrawn, the mission cancelled
+ * (open question 35), or the feedback taken out of the round for a mission of its own.
+ */
+const aboutAnsweredIn = (transaction: EngineTransaction, row: QuestionRow, answer: Answer) =>
+  Effect.gen(function* () {
+    const secrets = yield* Secrets
+    const feedbackId = row.feedbackId
+    if (feedbackId === null || row.round === null) return []
+    const [feedback] = yield* transaction
+      .select()
+      .from(reviewFeedback)
+      .where(and(eq(reviewFeedback.missionId, row.missionId), eq(reviewFeedback.id, feedbackId)))
+      .pipe(Effect.mapError(refusedWhile('reading a feedback')))
+    if (feedback === undefined) return []
+    const clarified = and(
+      eq(roundDecisions.missionId, row.missionId),
+      eq(roundDecisions.feedbackId, feedbackId),
+      eq(roundDecisions.kind, 'clarify'),
+    )
+    const events: NewEvent[] = []
+    if (row.kind === 'conflict') {
+      if (answer.optionId === null || answer.optionId === optionIdAt(0)) {
+        const note = secrets.mask(answer.text ?? row.recommendedReason)
+        yield* transaction
+          .delete(roundDecisions)
+          .where(clarified)
+          .pipe(Effect.mapError(refusedWhile('keeping a decision')))
+        yield* transaction
+          .insert(roundDecisions)
+          .values({
+            id: crypto.randomUUID(),
+            missionId: row.missionId,
+            round: row.round,
+            point: null,
+            feedbackId,
+            kind: 'clarify',
+            choice: note,
+            alternatives: secrets.mask(JSON.stringify([WITHDRAW_FEEDBACK, CANCEL_MISSION_TOO])),
+            why: secrets.mask(
+              `How ${feedbackId} fits the frozen Spec, as the user answered ${row.id}.`,
+            ),
+            at: now(),
+          })
+          .pipe(Effect.mapError(refusedWhile('keeping a decision')))
+        events.push(
+          roundEvent(row.missionId, 'review.decision_recorded', {
+            round: row.round,
+            feedbackId,
+            kind: 'clarify',
+            choice: note,
+          }),
+        )
+        return events
+      }
+      if (answer.optionId === optionIdAt(1)) {
+        yield* transaction
+          .delete(roundDecisions)
+          .where(clarified)
+          .pipe(Effect.mapError(refusedWhile('setting a decision aside')))
+        const withdrawn = yield* transaction
+          .update(reviewFeedback)
+          .set({ state: 'withdrawn', updatedAt: now() })
+          .where(and(eq(reviewFeedback.id, feedbackId), eq(reviewFeedback.state, 'in_round')))
+          .returning({ id: reviewFeedback.id })
+          .pipe(Effect.mapError(refusedWhile('withdrawing a feedback')))
+        if (withdrawn.length > 0) {
+          events.push({
+            type: 'review.feedback_withdrawn',
+            entityKind: 'mission',
+            entityId: row.missionId,
+            source: 'ui',
+            author: 'human',
+            payload: feedbackEventPayload(feedback),
+          })
+        }
+        return events
+      }
+      return yield* cancelMissionIn(transaction, row.missionId)
+    }
+    if (answer.optionId !== optionIdAt(0)) return []
+    const said = secrets.mask(TO_A_MISSION)
+    const addressed = yield* transaction
+      .update(reviewFeedback)
+      .set({ state: 'addressed', answer: said, updatedAt: now() })
+      .where(and(eq(reviewFeedback.id, feedbackId), eq(reviewFeedback.state, 'in_round')))
+      .returning({ id: reviewFeedback.id })
+      .pipe(Effect.mapError(refusedWhile('answering a feedback')))
+    if (addressed.length > 0) {
+      events.push(
+        roundEvent(row.missionId, 'review.feedback_answered', {
+          ...feedbackEventPayload(feedback),
+          answer: said,
+        }),
+      )
+    }
+    return events
   })
 
 const sameAnswer = (one: Answer, other: Answer): boolean =>
@@ -526,6 +755,11 @@ export const answerIn = (
       const last = earlier.at(-1)
       const was = last === undefined ? null : answerOf(last)
       if (was !== null && sameAnswer(was, kept)) return { result: false, events: [] }
+      if (appliedFor(row, was)) {
+        return yield* new InvalidAnswer({
+          reason: `${row.id}'s answer is applied already: it takes no other.`,
+        })
+      }
       const version = (last?.version ?? 0) + 1
       const at = now()
       yield* transaction
@@ -582,6 +816,8 @@ export const answerIn = (
       events.push(
         ...(yield* expireProposalsIn(transaction, missionId, row.id, `${row.id} was answered`)),
       )
+      // About a feedback of a round, Hemera acts on the answer at once (#468).
+      events.push(...(yield* aboutAnsweredIn(transaction, row, kept)))
       return { result: true, events }
     })
   })
@@ -776,7 +1012,16 @@ const openRowsIn = (transaction: EngineTransaction) =>
     .from(questions)
     .innerJoin(missions, eq(missions.id, questions.missionId))
     .innerJoin(projects, eq(projects.id, missions.projectId))
-    .where(and(inArray(questions.state, ['open', 'waiting']), eq(missions.stage, 'planning')))
+    .where(
+      and(
+        inArray(questions.state, ['open', 'waiting']),
+        // A round's grilling asks in Review too (#468).
+        or(
+          eq(missions.stage, 'planning'),
+          and(eq(missions.stage, 'review'), isNotNull(questions.round)),
+        ),
+      ),
+    )
     .orderBy(asc(missions.createdAt), asc(missions.id), asc(questions.wave), asc(questions.number))
     .pipe(Effect.mapError(refusedWhile('reading the open questions')))
 

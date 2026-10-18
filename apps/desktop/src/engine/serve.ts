@@ -43,6 +43,7 @@ import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
 import { Review, type ReviewService } from './review/feedback.ts'
 import { Pushes } from './delivery/pushes.ts'
+import { Rounds } from './review/rounds.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
 import {
@@ -972,6 +973,16 @@ const reviewHandlers = (profile: StartedProfile, log: Log) => {
     'review.changes': ({ missionId }) =>
       follow(Stream.unwrap(Review.useSync((one) => one.changes(missionId)))).pipe(
         observedStream('review.changes', log),
+      ),
+    'review.fix': ({ missionId }) =>
+      use(Rounds.use((rounds) => rounds.fix(missionId))).pipe(observed('review.fix', log)),
+    'review.round': ({ missionId, number }) =>
+      use(Rounds.use((rounds) => rounds.round(missionId, number))).pipe(
+        observed('review.round', log),
+      ),
+    'review.startMissionFrom': ({ feedbackId }) =>
+      use(Rounds.use((rounds) => rounds.startMissionFrom(feedbackId))).pipe(
+        observed('review.startMissionFrom', log),
       ),
   })
 }

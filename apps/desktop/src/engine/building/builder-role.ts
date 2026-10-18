@@ -16,8 +16,30 @@ import { Effect, Option } from 'effect'
 import type { BriefField, RoleEntry, SessionOwner } from '../sessions/roles.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { commandRuns, missions } from '../storage/schema.ts'
+import {
+  feedbackLine,
+  pointSaid,
+  roundFeedbackIn,
+  roundPointsIn,
+  roundScenariosIn,
+} from '../review/round-store.ts'
 import { frozenPrototypesOf, prototypesSaid } from './prototype-files.ts'
 import { type TaskNow, attemptsIn, bases, causeSaid, latestBuildingIn, tasksIn } from './tasks.ts'
+
+/** What the Builder of a Review round is told, as #468 writes it. */
+export const ROUND_SECTION = `## Round N (your brief says "Building · round N")
+You are a fresh session. The user reviewed the result and asked for changes. Your brief carries the
+round's points, written like requirements, with their scenarios, proofs, decisions, tasks, and the
+ids of the feedback each comes from. The Spec stays frozen; the round's decisions add to it.
+
+Work the round like a Building: red first for each testable point (record it with \`proof_run\`),
+then build its tasks, then green. Everything else is as in Building: the ready set, the checks, the
+three-reds rule, helpers, needs.
+
+Answer every source with \`feedback_answer\`: what you did, or why nothing changed. This marks it
+addressed; only the user resolves it. For a code comment, your answer shows next to its lines. Write
+a comment in the source code only when the code itself should carry the explanation. The round does
+not end while a source has no answer.`
 
 /** The Builder's layer of the instructions, as the ticket writes it. */
 export const BUILDER_TEMPLATE = `# Role: Builder
@@ -44,7 +66,8 @@ Spec, Now, the Notes and the end of the Journal, the sub-agents running and the 
 fs_read, fs_list, search, fs_write, fs_edit (the Workspace; a file another running task holds is
 refused); commands_list, commands_run, commands_output, commands_stop; build_read; spec_read;
 prototype_read; memory_read; task_start; task_finished; task_blocked; report_need; need_propose;
-proof_run; build_summary; journal_add, note_add, now_set; helper_launch, helper_read.
+proof_run; build_summary; journal_add, note_add, now_set; helper_launch, helper_read;
+feedback_answer (in a round).
 
 ## How you work
 1. Start with the real state. On a resume, read build_read and the Workspace before anything: a
@@ -83,6 +106,8 @@ proof_run; build_summary; journal_add, note_add, now_set; helper_launch, helper_
 - Hemera runs each proof again when the tasks covering it are done. Never weaken, skip or delete a
   proof test, or change its expected result.
 - Scenarios verified by hand have no red: the user validates them in Review.
+
+${ROUND_SECTION}
 
 ## Changes made outside Hemera
 The user may change files in the Workspace themselves. Hemera tells you which ones. Never overwrite
@@ -189,6 +214,35 @@ const runningServicesSaid = (workspaceId: string | null) =>
           .join('\n')
   })
 
+/**
+ * What a round's Builder reads of the round (#468): its points with their scenarios, proofs and
+ * decisions, and every feedback it answers, its images by their path.
+ */
+const roundFieldsOf = (missionId: string, round: number) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const points = (yield* roundPointsIn(database, missionId, round)).filter((one) => !one.removed)
+    const scenarios = yield* roundScenariosIn(database, missionId, round)
+    const sources = new Set(points.flatMap((one) => one.sources))
+    const feedback = (yield* roundFeedbackIn(database, missionId, round)).filter((one) =>
+      sources.has(one.id),
+    )
+    const fields: ReadonlyArray<BriefField> = [
+      {
+        label: `Round ${String(round)}: its points`,
+        text: points.map((one) => pointSaid(one, scenarios)).join('\n'),
+      },
+      {
+        label: `Round ${String(round)}: the feedback to answer`,
+        text:
+          feedback.length === 0
+            ? null
+            : `${feedback.map(feedbackLine).join('\n')}\n\nAnswer each with feedback_answer before the round ends; read an image with fs_read at its path.`,
+      },
+    ]
+    return fields
+  })
+
 const builderBriefOf = (owner: SessionOwner) =>
   Effect.gen(function* () {
     if (owner.kind !== 'mission') return []
@@ -203,11 +257,14 @@ const builderBriefOf = (owner: SessionOwner) =>
     const tasks = yield* tasksIn(database, building.id)
     const attempts = yield* attemptsIn(database, building.id)
     const repositories = Option.getOrElse(bases.read(building.bases), () => [])
+    const round =
+      building.round === null ? [] : yield* roundFieldsOf(owner.missionId, building.round)
     const fields: ReadonlyArray<BriefField> = [
       {
         label: `Builder · ${missionKey(mission.prefix, mission.number)} · ${mission.title} · ${building.label}`,
         text: 'Spec: frozen; spec_read for the full text, the decisions since Freeze and the effective plan.',
       },
+      ...round,
       { label: 'Ready set', text: readySaid(tasks) },
       { label: 'Tasks', text: tasks.map((task) => taskLine(task, attempts)).join('\n') },
       {

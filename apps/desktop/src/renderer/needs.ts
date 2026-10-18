@@ -110,7 +110,10 @@ const sectionOf = (id: string | null): AppSection | undefined =>
   [...APP_SECTIONS.keys()].find((section) => section === id)
 
 /** The sections of a Project's settings a need may open (#321), with their names. */
-const PROJECT_SECTIONS: ReadonlyMap<string, string> = new Map([['checks', 'Checks']])
+const PROJECT_SECTIONS: ReadonlyMap<string, string> = new Map([
+  ['checks', 'Checks'],
+  ['delivery', 'Delivery rules'],
+])
 
 /** Where a need's settings section is, and its name, when the window has it. */
 const placeOf = (

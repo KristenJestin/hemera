@@ -127,6 +127,7 @@ import {
   reviewerOf,
 } from './review-store.ts'
 import { Snapshots } from './snapshots.ts'
+import { roundAnsweredIn, unansweredSourcesIn } from '../review/round-store.ts'
 import {
   type BuildingBase,
   type BuildingRow,
@@ -151,6 +152,7 @@ export const RETRY = 'Retry'
 
 /** The steps of the end, in their order, as `buildings.phase` keeps them. */
 export const END_PHASES = [
+  'answers',
   'documenter',
   'final_checks',
   'checkpoint',
@@ -366,6 +368,14 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
       const said = (line: string) => Effect.sync(() => log(`end of a Building: ${line}`))
       /** The Buildings whose driver runs, and whether it is asked to run again. */
       const running = new Map<string, boolean>()
+      /**
+       * The sources each round's end last named to its Builder as waiting for an answer (#468),
+       * the delivery that named them, and how many times that set was told.
+       */
+      const answersTold = new Map<
+        string,
+        { readonly set: string; readonly delivery: string; readonly times: number }
+      >()
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
       /** The Buildings whose proofs this engine refreshed, with the trees it refreshed them on. */
@@ -617,6 +627,20 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           return yield* handed(open.id, open.startedAt)
         })
 
+      /** Whether the Builder took a delivery and ended a turn after it. */
+      const turnedSince = (building: BuildingRow, deliveryId: string) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const [told] = yield* database
+            .select({ sentAt: sessionDeliveries.sentAt })
+            .from(sessionDeliveries)
+            .where(eq(sessionDeliveries.id, deliveryId))
+            .pipe(Effect.mapError(refusedWhile('reading what was delivered to the Builder')))
+          const turned = turnedOf(building.id, building.builderTurnedAt)
+          const sent = told?.sentAt ?? null
+          return sent !== null && turned !== null && turned > sent
+        })
+
       /** Whether the last result of a final check is red. */
       const checksRed = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -632,6 +656,51 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
           const database = yield* Database
           const missionId = building.missionId
           switch (phase) {
+            case 'answers': {
+              // A round's end starts once every source of its points is answered (#468).
+              const started = buildingEvent(missionId, 'building.end_started', {
+                label: building.label,
+              })
+              const left =
+                building.round === null
+                  ? []
+                  : yield* unansweredSourcesIn(database, missionId, building.round)
+              if (left.length === 0) {
+                answersTold.delete(building.id)
+                return yield* moveOn(building, 'documenter', [started])
+              }
+              // Told for each set left: an answer that comes leaves a smaller set to name. A
+              // Builder that ends its turn on it with the set unchanged is told once more, then the
+              // user is asked, as for the documenter and the reviewers; Retry tells it again.
+              const set = left.join('\u0000')
+              const told = answersTold.get(building.id)
+              const times = told?.set === set ? told.times : 0
+              if (
+                told !== undefined &&
+                times > 0 &&
+                !(yield* turnedSince(building, told.delivery))
+              ) {
+                return yield* withBuilder(building)
+              }
+              if (times >= 2) {
+                answersTold.delete(building.id)
+                yield* raise(
+                  building,
+                  `The Builder ended its turn twice without answering ${left.join(', ')} with feedback_answer: Retry tells it again.`,
+                )
+                return false
+              }
+              const delivery = yield* Sessions.use((sessions) =>
+                sessions.deliver({
+                  owner: { kind: 'mission', missionId },
+                  target: { role: 'builder' },
+                  kind: 'answers',
+                  body: `The round does not end while a source has no answer: answer ${left.join(', ')} with feedback_answer, saying what you did or why nothing changed. Only the user resolves them.`,
+                }),
+              )
+              answersTold.set(building.id, { set, delivery, times: times + 1 })
+              return yield* withBuilder(building)
+            }
             case 'documenter': {
               if (documenting.has(building.id)) return false
               const last = (yield* passesIn(database, building.id)).at(-1)
@@ -1243,6 +1312,11 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                   .onConflictDoNothing()
                   .pipe(Effect.mapError(refusedWhile('keeping what changed after the review')))
               }
+              // The round it built is answered with the move back to Review (#468).
+              const answered =
+                building.round === null
+                  ? []
+                  : yield* roundAnsweredIn(transaction, missionId, building.round)
               return {
                 result: 'ended' as const,
                 events: [
@@ -1251,6 +1325,7 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                     label: building.label,
                     changedAfter: changed.length,
                   }),
+                  ...answered,
                 ],
               }
             }),
@@ -1508,16 +1583,24 @@ export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) =>
                 const building = yield* activeBuildingIn(transaction, missionId)
                 if (building === null) return { result: null, events: [] }
                 if (building.phase !== 'tasks') return { result: building.id, events: [] }
+                // A round's end waits first for every source to be answered (#468).
+                const round = building.round !== null
                 yield* transaction
                   .update(buildings)
-                  .set({ phase: 'documenter' })
+                  .set({ phase: round ? 'answers' : 'documenter' })
                   .where(eq(buildings.id, building.id))
                   .pipe(Effect.mapError(refusedWhile('starting the end of the Building')))
                 return {
                   result: building.id,
                   events: [
                     buildingEvent(missionId, 'building.tasks_done'),
-                    buildingEvent(missionId, 'building.end_started', { label: building.label }),
+                    ...(round
+                      ? []
+                      : [
+                          buildingEvent(missionId, 'building.end_started', {
+                            label: building.label,
+                          }),
+                        ]),
                   ],
                 }
               }),

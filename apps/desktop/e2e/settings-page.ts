@@ -50,10 +50,14 @@ export function checkbox(within: ReturnType<typeof $>, words: string) {
  */
 export async function choose(within: ReturnType<typeof $>, select: string, words: string) {
   await within.$(`[aria-label="${select}"]`).click()
-  const option = $(`[role="option"]*=${words}`)
+  // In the list of this select only: once a select has had the focus, its list stays in the page,
+  // hidden, with every option in it, so an option found by its words alone can be the hidden one
+  // of a select used before (`Library`, then `Local`: the second found the first's).
+  const list = $(`[role="listbox"][aria-label="${select}"]`)
+  const option = list.$(`[role="option"]*=${words}`)
   await option.waitForDisplayed()
   await option.click()
-  await $(`[role="listbox"][aria-label="${select}"]`).waitForDisplayed({
+  await list.waitForDisplayed({
     reverse: true,
     timeoutMsg: `the list of ${select} never closed`,
   })
