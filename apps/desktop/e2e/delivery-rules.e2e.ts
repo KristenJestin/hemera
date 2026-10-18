@@ -14,11 +14,11 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { $, browser, expect } from '@wdio/globals'
+import { $, expect } from '@wdio/globals'
 
 import { diagnosticOf, waitForEngine } from './diagnostic.ts'
 import { GH_SIGNED_IN_BY_FILE, RUNS_FAKE_GH, writeFakeGh } from './fake-gh.ts'
-import { choose, designSize, dialog, section, settingsOf } from './settings-page.ts'
+import { choose, designSize, dialog, field, section, settingsOf, write } from './settings-page.ts'
 
 const SPEC = 'delivery-rules.e2e.ts'
 
@@ -73,12 +73,23 @@ describeWithFake('The delivery rules, from the settings of a Project', () => {
     writeAcme()
     await waitForEngine()
     await designSize()
-    await browser.electron.execute(
-      async (_, folder) => await globalThis.hemeraProbe?.createProject('Acme', folder),
-      ACME,
+    // Added from its folder, so that the three repositories are the Project's: the probe's
+    // `createProject` adds a Project with none.
+    await $('nav[aria-label="Places"]').$('button*=Add a Project').click()
+    const adding = dialog()
+    await write(field(adding, 'Folder'), ACME)
+    await Promise.all(
+      ['api', 'web', 'shared'].map((path) =>
+        expect(adding.$(`[data-found="${path}"]`)).toBeDisplayed(),
+      ),
     )
-    await $('nav[aria-label="Places"]').$('button*=Acme').click()
-    await settingsOf('Acme')
+    await adding
+      .$('label*=Let an agent propose the rest of the setup')
+      .$('[role="checkbox"]')
+      .click()
+    await adding.$('button=Add acme').click()
+    await expect(adding).not.toBeExisting()
+    await settingsOf('acme')
     await section('Delivery rules')
     await expect(line('api')).toHaveAttribute('aria-label', expect.stringContaining('Application'))
     await expect(line('web')).toHaveAttribute('aria-label', expect.stringContaining('Application'))

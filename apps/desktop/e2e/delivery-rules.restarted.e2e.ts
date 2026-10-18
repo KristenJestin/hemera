@@ -31,8 +31,8 @@ describeWithFake('The delivery rules, found again after Hemera started anew', ()
   it('restart and find the rules unchanged', async () => {
     await waitForEngine()
     await designSize()
-    await $('nav[aria-label="Places"]').$('button*=Acme').click()
-    await settingsOf('Acme')
+    await $('nav[aria-label="Places"]').$('button*=acme').click()
+    await settingsOf('acme')
     await section('Delivery rules')
     await expect(line('api')).toHaveAttribute(
       'aria-label',
