@@ -432,7 +432,7 @@ const CONTENT = {
     hands: 'ran',
     how: 'the output of the test it runs, masked by the known values as a run’s output is',
     proof: {
-      suite: 'building-proofs.test.ts',
+      suite: 'building-proofs-green.test.ts',
       test: 'a proof whose test prints a known value hands its run back through proof_run masked (#392)',
     },
   },
@@ -460,7 +460,7 @@ const CONTENT = {
     hands: 'kept',
     how: 'the checkpoint keeps a sensitive file by its name and fingerprint; withheldFromReviewers before any content',
     proof: {
-      suite: 'building-end.test.ts',
+      suite: 'building-end-review.test.ts',
       test: 'checkpoint_read reads the checkpoint, not a later write in the Workspace; a .env shows "content withheld"',
     },
   },
