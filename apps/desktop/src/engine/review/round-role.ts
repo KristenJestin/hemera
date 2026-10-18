@@ -237,4 +237,5 @@ export const ROUND_PLANNER_ROLE: RoleEntry = {
   brief: roundPlannerBrief,
   countsInCap: false,
   ledByUser: false,
+  modelOf: 'planner',
 }

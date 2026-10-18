@@ -27,7 +27,7 @@ import { getProject } from '../projects.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions, modelMarks, roleModels } from '../storage/schema.ts'
 import { ModelChoice } from './ports.ts'
-import { RoleRegistry, type SessionOwner, roleNamed } from './roles.ts'
+import { type RoleEntry, RoleRegistry, type SessionOwner, roleNamed } from './roles.ts'
 
 /** The app level's scope: there is one app. */
 const APP_SCOPE = ''
@@ -104,9 +104,14 @@ const scopesOf = (owner: SessionOwner) =>
 /** Claude Code on its own defaults: the app's setting of a role no start has given one yet. */
 const CLAUDE_DEFAULTS: ModelSettingValue = { agent: 'claude', model: null, effort: null }
 
+/** The role a role's setting is read at: its own, or the one whose model it takes. */
+const settingRoleOf = (roles: ReadonlyArray<RoleEntry>, role: string) =>
+  roleNamed(roles, role)?.modelOf ?? role
+
 /** The setting a role's next session of this owner gets, and the level it came from. */
-export const resolvedSetting = (owner: SessionOwner, role: string) =>
+export const resolvedSetting = (owner: SessionOwner, named: string) =>
   Effect.gen(function* () {
+    const role = settingRoleOf(yield* RoleRegistry, named)
     const { projectId, missionId } = yield* scopesOf(owner)
     const app = (yield* roleSettingAt('app', null, role)) ?? CLAUDE_DEFAULTS
     const project = projectId === null ? null : yield* roleSettingAt('project', projectId, role)
@@ -117,7 +122,7 @@ export const resolvedSetting = (owner: SessionOwner, role: string) =>
 /** The runtime's `ModelChoice`, from the cascade. */
 export const modelChoiceLayer = Layer.effect(
   ModelChoice,
-  Effect.map(Effect.context<Database>(), (context) => ({
+  Effect.map(Effect.context<Database | RoleRegistry>(), (context) => ({
     of: (owner: SessionOwner, role: string) =>
       resolvedSetting(owner, role).pipe(Effect.provide(context)),
   })),
@@ -134,6 +139,7 @@ export const seedAppSettings = Effect.gen(function* () {
   const given = { ...CLAUDE_DEFAULTS, agent: first ?? 'claude' }
   let seeded = 0
   for (const role of roles) {
+    if (role.modelOf !== undefined) continue
     if ((yield* roleSettingAt('app', null, role.id)) !== null) continue
     yield* setRoleSetting('app', null, role.id, given)
     seeded += 1
@@ -147,7 +153,8 @@ export const roleModelsOf = (projectId: string | null, missionId: string | null)
     if (projectId !== null) yield* getProject(projectId)
     if (missionId !== null) yield* getMission(missionId)
     const roles = yield* RoleRegistry
-    return yield* Effect.forEach(roles, (role) =>
+    const own = roles.filter((role) => role.modelOf === undefined)
+    return yield* Effect.forEach(own, (role) =>
       Effect.gen(function* () {
         const app = yield* roleSettingAt('app', null, role.id)
         const project =
@@ -177,8 +184,15 @@ export const setRoleModel = (
   setting: ModelSettingValue | null,
 ) =>
   Effect.gen(function* () {
-    if (roleNamed(yield* RoleRegistry, role) === undefined) {
+    const roles = yield* RoleRegistry
+    const entry = roleNamed(roles, role)
+    if (entry === undefined) {
       return yield* new ModelSettingRefused({ reason: `no role ${role} is registered` })
+    }
+    if (entry.modelOf !== undefined) {
+      return yield* new ModelSettingRefused({
+        reason: `${entry.displayName} takes the model of ${roleNamed(roles, entry.modelOf)?.displayName ?? entry.modelOf}`,
+      })
     }
     if (level === 'app' && setting === null) {
       return yield* new ModelSettingRefused({

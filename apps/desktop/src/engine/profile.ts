@@ -826,7 +826,7 @@ export const startProfile = (
           roles,
           replacementGuardLayer.pipe(Layer.provide(roles)),
           capLayer.pipe(Layer.provide(postLayer)),
-          modelChoiceLayer,
+          modelChoiceLayer.pipe(Layer.provide(roles)),
           parts.sessions?.specLanguage ?? projectSpecLanguages,
           parts.sessions?.testerMode ?? testerModeLayer,
           postLayer,

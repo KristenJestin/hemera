@@ -78,6 +78,11 @@ export interface RoleEntry {
    * service that owns them, in its own words, rather than by the sessions' (a helper, #145).
    */
   readonly toldToParentByOwner?: boolean | undefined
+  /**
+   * The role whose model setting its sessions take, when it has none of its own: the Planner in
+   * round mode takes the Planner's (#468), and Models by role shows no row of its own.
+   */
+  readonly modelOf?: string | undefined
 }
 
 export class RoleRegistry extends Context.Service<RoleRegistry, ReadonlyArray<RoleEntry>>()(
