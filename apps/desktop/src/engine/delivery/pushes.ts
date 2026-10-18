@@ -19,8 +19,8 @@
  *   delivery remote, the branch the Workspace recorded, never forced, through the engine's own Git
  *   in the user's environment (the agents' is the one where pushing is neutralised). No `-u`: the
  *   upstream is recorded here, so the repository's configuration is never written. A file in a
- *   sensitive place the branch's commits added or changed since the base asks first too; kept
- *   out, it stops the push, since no history is rewritten.
+ *   sensitive place that any commit the push publishes adds or changes (since the base, or what
+ *   the remote holds) asks first too; kept out, it stops the push, since no history is rewritten.
  * - **The branch.** Nothing is committed unless the worktree's HEAD names the branch the
  *   Workspace recorded: an agent's `git symbolic-ref` stops the sequence with an error need.
  * - **The pull request** (`pull-request`): an open one from the branch into the base is found
@@ -331,18 +331,43 @@ export const pushesLayer = (settings: PushesSettings) => {
           ])
           return [...new Set([...tracked, ...untracked])]
         })
-      /** What the branch's commits added or changed since the Workspace's base. */
-      const committedPathsOf = (folder: string, base: string | null, head: string) =>
-        base === null
-          ? Effect.succeed([])
-          : pathsOf(folder, [
-              'diff',
-              '--name-only',
-              '-z',
-              '--no-renames',
-              '--diff-filter=d',
-              `${base}...${head}`,
-            ])
+      /**
+       * What each commit a push of `head` would publish adds or changes: every commit reachable
+       * from it and neither from the Workspace's base nor from what the remote's branch already
+       * holds, never their net diff (a file committed then deleted is in the history all the
+       * same). A merge counts for what it changes against all of its parents (`-c`).
+       */
+      const publishedPathsOf = (
+        folder: string,
+        base: string | null,
+        there: string | null,
+        head: string,
+      ) =>
+        Effect.gen(function* () {
+          if (base === null) return []
+          // The remote's commit, when someone else pushed it, may not be here to stop at.
+          const known =
+            there === null
+              ? false
+              : yield* git(folder, ['cat-file', '-e', `${there}^{commit}`]).pipe(
+                  Effect.as(true),
+                  Effect.orElseSucceed(() => false),
+                )
+          const paths = yield* pathsOf(folder, [
+            'log',
+            '--name-only',
+            '-z',
+            '--no-renames',
+            '--diff-filter=d',
+            '-c',
+            '--format=',
+            head,
+            '--not',
+            base,
+            ...(known && there !== null ? [there] : []),
+          ])
+          return [...new Set(paths)]
+        })
       /** The commit `refs/heads/<branch>` is at on the push URL of `remote`, or null. */
       const remoteHeadOf = (folder: string, remote: string, branch: string) =>
         Effect.gen(function* () {
@@ -807,7 +832,7 @@ export const pushesLayer = (settings: PushesSettings) => {
           yield* screened(
             one,
             [],
-            (yield* committedPathsOf(folder, one.place.baseCommit, head)).filter(
+            (yield* publishedPathsOf(folder, one.place.baseCommit, there, head)).filter(
               (path) => sensitivePlace(path, where) !== null,
             ),
           )

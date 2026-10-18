@@ -1540,6 +1540,121 @@ describe('What stops a push', () => {
     SLOW,
   )
 
+  test.each([
+    {
+      how: 'committed then deleted by a later commit',
+      make: (mission: { api: string; branch: string }) => {
+        writeFileSync(join(mission.api, '.env'), 'API_KEY=1\n')
+        git(mission.api, 'add', '-A')
+        git(mission.api, 'commit', '-q', '-m', 'env')
+        git(mission.api, 'rm', '-q', '.env')
+        writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+        git(mission.api, 'add', '-A')
+        git(mission.api, 'commit', '-q', '-m', 'notes')
+      },
+    },
+    {
+      how: 'carried by an ancestor of a commit an agent set the branch to (git update-ref)',
+      make: (mission: { api: string; branch: string }) => {
+        // Commits made elsewhere, fetched, and the branch moved onto them: no commit on HEAD.
+        const elsewhere = join(work, 'elsewhere')
+        git(work, 'clone', '-q', mission.api, elsewhere)
+        writeFileSync(join(elsewhere, '.env'), 'API_KEY=1\n')
+        git(elsewhere, 'add', '-A')
+        git(elsewhere, 'commit', '-q', '-m', 'env')
+        git(elsewhere, 'rm', '-q', '.env')
+        writeFileSync(join(elsewhere, 'notes.ts'), 'export const notes = 1\n')
+        git(elsewhere, 'add', '-A')
+        git(elsewhere, 'commit', '-q', '-m', 'notes')
+        git(mission.api, 'fetch', '-q', elsewhere, 'HEAD')
+        git(mission.api, 'update-ref', `refs/heads/${mission.branch}`, 'FETCH_HEAD')
+        writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+      },
+    },
+  ])(
+    'a .env $how stops the first push with the decision need; “Keep them out” pushes nothing',
+    async ({ make }) => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* launchedOnForge()
+            make(mission)
+            yield* moved(mission.missionId, 'endBuilding')
+            const need = yield* needOf(mission.missionId, 'Decision')
+            yield* chosen(need, 'Keep them out')
+            yield* untilState(mission.missionId, 'api', 'failed')
+            const failed = yield* needOf(mission.missionId, 'Error')
+            return {
+              need,
+              failed,
+              branch: mission.branch,
+              tip: git(mission.api, 'ls-tree', '-r', '--name-only', 'HEAD').split('\n'),
+            }
+          }),
+        ),
+      )
+      // The branch's tip no longer holds it: only its history does.
+      expect(seen.tip).not.toContain('.env')
+      const fields = seen.need.fields
+      if (!Predicate.isTagged(fields, 'Decision')) throw new Error('not a decision')
+      expect(fields.question).toMatch(/already committed on the branch: \.env/)
+      expect(remoteHead('api', seen.branch)).toBeNull()
+      const failed = seen.failed.fields
+      if (!Predicate.isTagged(failed, 'Error')) throw new Error('not an error need')
+      expect(failed.failed).toMatch(/\.env is already committed on the branch/)
+    },
+    SLOW,
+  )
+
+  test(
+    'a second push after a round screens only the commits it publishes: a .env pushed in round 1 is not asked again',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* launchedOnForge()
+            writeFileSync(join(mission.api, '.env'), 'API_KEY=1\n')
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            git(mission.api, 'add', '-A')
+            git(mission.api, 'commit', '-q', '-m', 'notes')
+            yield* moved(mission.missionId, 'endBuilding')
+            yield* chosen(yield* needOf(mission.missionId, 'Decision'), 'Push them anyway')
+            yield* untilState(mission.missionId, 'api', 'done')
+            const first = git(mission.api, 'rev-parse', 'HEAD')
+            // A round: Fix, a change, and back into Review.
+            yield* moved(mission.missionId, 'fix')
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 2\n')
+            yield* moved(mission.missionId, 'endBuilding')
+            yield* until(
+              Effect.map(
+                pushesOf(mission.missionId),
+                (pushes) =>
+                  repositoryOf(pushes, 'api')?.state === 'done' &&
+                  repositoryOf(pushes, 'api')?.commit !== first,
+              ),
+              60_000,
+            )
+            return {
+              first,
+              branch: mission.branch,
+              head: git(mission.api, 'rev-parse', 'HEAD'),
+              parent: git(mission.api, 'rev-parse', 'HEAD^'),
+              asked: yield* pendingOf(mission.missionId, 'Decision'),
+            }
+          }),
+        ),
+      )
+      expect(seen.parent).toBe(seen.first)
+      expect(remoteHead('api', seen.branch)).toBe(seen.head)
+      expect(seen.asked).toEqual([])
+    },
+    SLOW,
+  )
+
   test(
     'the preparation section is copied once, at the first push, with its version in the Journal',
     async () => {
