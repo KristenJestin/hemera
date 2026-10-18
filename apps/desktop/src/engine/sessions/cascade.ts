@@ -27,7 +27,7 @@ import { getProject } from '../projects.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { missions, modelMarks, roleModels } from '../storage/schema.ts'
 import { ModelChoice } from './ports.ts'
-import { type RoleEntry, RoleRegistry, type SessionOwner, roleNamed } from './roles.ts'
+import { RoleRegistry, type SessionOwner, roleNamed } from './roles.ts'
 
 /** The app level's scope: there is one app. */
 const APP_SCOPE = ''
@@ -104,14 +104,9 @@ const scopesOf = (owner: SessionOwner) =>
 /** Claude Code on its own defaults: the app's setting of a role no start has given one yet. */
 const CLAUDE_DEFAULTS: ModelSettingValue = { agent: 'claude', model: null, effort: null }
 
-/** The role a role's setting is read at: its own, or the one whose model it takes. */
-const settingRoleOf = (roles: ReadonlyArray<RoleEntry>, role: string) =>
-  roleNamed(roles, role)?.modelOf ?? role
-
 /** The setting a role's next session of this owner gets, and the level it came from. */
-export const resolvedSetting = (owner: SessionOwner, named: string) =>
+export const resolvedSetting = (owner: SessionOwner, role: string) =>
   Effect.gen(function* () {
-    const role = settingRoleOf(yield* RoleRegistry, named)
     const { projectId, missionId } = yield* scopesOf(owner)
     const app = (yield* roleSettingAt('app', null, role)) ?? CLAUDE_DEFAULTS
     const project = projectId === null ? null : yield* roleSettingAt('project', projectId, role)
@@ -119,12 +114,19 @@ export const resolvedSetting = (owner: SessionOwner, named: string) =>
     return resolveSetting(app, project, mission)
   })
 
+/** The setting a role's next session gets: a role that takes another's model reads that one's. */
+export const sessionSetting = (owner: SessionOwner, role: string) =>
+  Effect.gen(function* () {
+    const roles = yield* RoleRegistry
+    return yield* resolvedSetting(owner, roleNamed(roles, role)?.modelOf ?? role)
+  })
+
 /** The runtime's `ModelChoice`, from the cascade. */
 export const modelChoiceLayer = Layer.effect(
   ModelChoice,
   Effect.map(Effect.context<Database | RoleRegistry>(), (context) => ({
     of: (owner: SessionOwner, role: string) =>
-      resolvedSetting(owner, role).pipe(Effect.provide(context)),
+      sessionSetting(owner, role).pipe(Effect.provide(context)),
   })),
 )
 

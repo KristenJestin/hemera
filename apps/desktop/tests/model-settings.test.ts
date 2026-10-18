@@ -14,8 +14,8 @@ import { missionBudget, projectLimits, setProjectLimits } from '../src/engine/bu
 import {
   markModel,
   modelMarksOf,
-  resolvedSetting,
   roleModelsOf,
+  sessionSetting,
   setRoleModel,
 } from '../src/engine/sessions/cascade.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
@@ -124,7 +124,10 @@ describe('Models by role', () => {
               Effect.flip(setRoleModel('mission', mission.id, 'round-planner', setting)),
               (one) => one.message,
             ),
-            resolved: yield* resolvedSetting({ kind: 'mission', missionId: mission.id }, 'round-planner'),
+            resolved: yield* sessionSetting(
+              { kind: 'mission', missionId: mission.id },
+              'round-planner',
+            ),
           }
         }),
       ),
