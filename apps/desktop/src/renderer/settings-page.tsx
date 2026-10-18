@@ -12,6 +12,7 @@ import {
   IconBook2,
   IconChecklist,
   IconDatabase,
+  IconGitMerge,
   IconFileText,
   IconGauge,
   IconGitBranch,
@@ -71,6 +72,7 @@ const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'resources', label: 'Exclusive resources', icon: <IconDatabase size="sm" /> },
   { id: 'checks', label: 'Checks', icon: <IconChecklist size="sm" /> },
   { id: 'documentation', label: 'Documentation', icon: <IconBook2 size="sm" /> },
+  { id: 'delivery', label: 'Delivery rules', icon: <IconGitMerge size="sm" /> },
 ]
 
 /** The section an entry of the list names, or null when the page has none of that name. */
