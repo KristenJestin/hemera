@@ -95,8 +95,6 @@ export interface ProofRunClass {
    * failure's title in its list, never its tree's line.
    */
   readonly printedFailures: ReadonlyArray<PrintedFailure>
-  /** The Go packages whose result line (`ok`, `FAIL`, `?`) closes a block of the output. */
-  readonly goPackages: ReadonlyArray<string>
   /**
    * The test file's tests as the runner's report names them, each with how it ended and whether
    * the runner's own listing on the console shows it so: read whole, the same tests, path for path,
@@ -687,7 +685,7 @@ const failureAt = (
  */
 const failingLinesOf = (
   output: string,
-): Pick<ProofRunClass, 'failingLines' | 'printedFailures' | 'goPackages'> => {
+): Pick<ProofRunClass, 'failingLines' | 'printedFailures'> => {
   const lines = output.split(/\r?\n/).map((line) => uncoloured(line).slice(0, LINE_CAP))
   const places = placesOf(lines)
   let failing = 0
@@ -769,7 +767,6 @@ const failingLinesOf = (
       ...goVerdicts(read, lines, places.goBelow),
       ...rustVerdicts(read, lines, places.rustAt),
     ],
-    goPackages: places.goPackages,
   }
 }
 
@@ -785,18 +782,13 @@ const failingLinesOf = (
  */
 const placesOf = (lines: ReadonlyArray<string>) => {
   const goBelow: Array<string | null> = []
-  const goPackages: Array<string> = []
   let below: string | null = null
   for (let at = lines.length - 1; at >= 0; at -= 1) {
     const found = GO_PACKAGE.exec(lines[at] ?? '')?.groups?.['package']
-    if (found !== undefined) {
-      below = found
-      goPackages.push(found)
-    }
+    if (found !== undefined) below = found
     goBelow.push(below)
   }
   goBelow.reverse()
-  goPackages.reverse()
   const rustAt: Array<string | null> = []
   const binaries = new Set<string>()
   // The binaries cargo ran from each source: two of one source are two packages' (their deps names).
@@ -832,7 +824,7 @@ const placesOf = (lines: ReadonlyArray<string>) => {
     if (key === null || !key.startsWith('cargo ') || packages) return null
     return cargoUnit(key.slice('cargo '.length))
   }
-  return { goBelow, goPackages, rustAt, rustUnit }
+  return { goBelow, rustAt, rustUnit }
 }
 
 /** cargo's test binary as a unit, from its source: `lib`, `bin` (`src/main.rs`), `bin:x`, `test:x`. */
@@ -1513,6 +1505,33 @@ const casedAnswers = (path: string, function_: string): boolean => {
   )
 }
 
+/** go.mod's `module` directive, what follows it. */
+const GO_MODULE_LINE = /^module(?:[ \t]+(.*))?$/
+/** A module path, bare or quoted (`"…"`, `` `…` ``), never one with an escape or a space. */
+const GO_MODULE_PATH = /^(?<q>["`]?)(?<path>[\w.~+-]+(?:\/[\w.~+-]+)*)\k<q>$/
+
+/**
+ * A Go module as the `go.mod` nearest above a test file names it: its module path, and the folder
+ * of that `go.mod` within the repository (`''` at its root).
+ */
+export interface GoModule {
+  readonly path: string
+  readonly folder: string
+}
+
+/** The module path a `go.mod` names on its one `module` line; null when it names none for certain. */
+export const goModulePath = (text: string): string | null => {
+  const found: Array<string | null> = []
+  for (const line of text.split(/\r?\n/)) {
+    // go.mod's only comments run from `//` to the line's end.
+    const bare = line.replace(/(?:^|[ \t])\/\/.*$/, '').trim()
+    const module = GO_MODULE_LINE.exec(bare)
+    if (module !== null) found.push(GO_MODULE_PATH.exec(module[1] ?? '')?.groups?.['path'] ?? null)
+  }
+  const [path] = found
+  return found.length === 1 && path !== undefined ? path : null
+}
+
 /** A path with forward slashes and without a leading `./`, cut into its folders and file. */
 const pathParts = (path: string): ReadonlyArray<string> =>
   posix(path).replace(/^\.\//, '').split('/')
@@ -1524,38 +1543,28 @@ const pathParts = (path: string): ReadonlyArray<string> =>
 type Placed = 'own' | 'other' | 'unknown'
 
 /**
- * Where a Go test file's tests run: its folder, which only a package whose path is that folder, or
- * ends with it, holds, or gotestsum's path from the module's root (`./pkg/b`). A package whose
- * folder another printed package also ends with is told apart from none. The module's root is
- * gotestsum's `.`, or the printed package every other printed package is under.
+ * Where a Go failure ran against the test file's package: the package its `go.mod` makes of the
+ * file's folder, which only that import path names (`own`); any other import path is another
+ * package's. Without the module, a path from gotestsum (`.`, `./pkg/b`, from whichever module it
+ * ran in) or no package at all, it is `unknown`.
  */
-const goPlaced = (
-  unit: string | null,
-  folder: string,
-  claimed: number,
-  root: string | null,
-): Placed => {
-  if (unit === null) return 'unknown'
-  if (unit.startsWith('.')) return unit === (folder === '' ? '.' : `./${folder}`) ? 'own' : 'other'
-  if (folder === '') return root === null ? 'unknown' : unit === root ? 'own' : 'other'
-  if (!goClaims(unit, folder)) return 'other'
-  return claimed <= 1 ? 'own' : 'unknown'
+const goPlaced = (unit: string | null, testPath: string, module: GoModule | null): Placed => {
+  if (unit === null || unit.startsWith('.') || module === null) return 'unknown'
+  const own = goPackageOf(testPath, module)
+  if (own === null) return 'unknown'
+  return unit === own ? 'own' : 'other'
 }
 
-/** The Go package every other printed package is under, null when there is none. */
-const goRoot = (packages: ReadonlyArray<string>): string | null => {
-  const shortest = packages.reduce<string | null>(
-    (best, unit) => (best === null || unit.length < best.length ? unit : best),
-    null,
-  )
-  if (shortest === null) return null
-  const under = packages.every((unit) => unit === shortest || unit.startsWith(`${shortest}/`))
-  return under ? shortest : null
+/**
+ * A Go test file's import path: its module's path, then the file's folders below the module's
+ * folder; null for a file that is not under that folder.
+ */
+const goPackageOf = (testPath: string, module: GoModule): string | null => {
+  const folders = pathParts(testPath).slice(0, -1)
+  const root = pathParts(module.folder).filter((part) => part !== '')
+  if (root.some((part, at) => folders[at] !== part)) return null
+  return [module.path, ...folders.slice(root.length)].join('/')
 }
-
-/** Whether a Go package's import path is a folder's, or ends with it. */
-const goClaims = (unit: string, folder: string): boolean =>
-  folder !== '' && (unit === folder || unit.endsWith(`/${folder}`))
 
 /** The crate's own binary's root file, `src/main.rs`, without its extension. */
 const RUST_BIN_ROOT = /^main$/
@@ -1714,16 +1723,13 @@ const named = (
   failures: ReadonlyArray<PrintedFailure>,
   names: ReadonlyArray<TestName>,
   testPath: string,
-  goPackages: ReadonlyArray<string>,
+  goModule: GoModule | null,
 ): Verdict => {
   // A Go or Rust failure is the test's only within its package or binary, read for certain; one
   // that may be another's is never its red, and may still refuse it.
-  const folder = pathParts(testPath).slice(0, -1).join('/')
-  const claimed = new Set(goPackages.filter((unit) => goClaims(unit, folder))).size
-  const root = folder === '' ? goRoot(goPackages) : null
   const place = rustPlace(testPath)
   const placed = (failure: PrintedFailure, name: TestName): Placed => {
-    if (failure.runner === 'go') return goPlaced(failure.unit, folder, claimed, root)
+    if (failure.runner === 'go') return goPlaced(failure.unit, testPath, goModule)
     if (failure.runner === 'rust') return rustPlaced(failure, name, place, testPath)
     return 'own'
   }
@@ -1807,7 +1813,7 @@ const scriptedRed = (
   const own =
     located.length > 0 ? located.filter((one) => sameFile(one.file ?? '', testPath)) : run.failures
   const shown = run.failures.length > 0 ? own.map(reportFailure) : run.printedFailures
-  if (names.length > 0 && named(shown, names, testPath, run.goPackages) === 'error') return false
+  if (names.length > 0 && named(shown, names, testPath, null) === 'error') return false
   const report = reportedVerdict(run, testPath, names)
   if (report !== null) return report === 'assertion'
   const asserted =
@@ -1827,13 +1833,16 @@ const scriptedRed = (
  * where an assertion failed (in its file, for a report), never the exit code alone. A proof whose
  * code names no test, or a command with no test file, is red by its exit code, the key line its
  * guard. A Go subtest whose parent is unknown is a test the proof adds without a name: alone, the
- * key line decides when the proof has one, and the exit code when it has none.
+ * key line decides when the proof has one, and the exit code when it has none. A Go failure is
+ * the test's only in the package `goModule` (the nearest `go.mod` above the file) makes of its
+ * folder; without it, every Go failure is uncertain and the key line decides.
  */
 export const validRed = (
   run: ProofRunClass,
   testPath: string | null,
   testNames: ReadonlyArray<TestName> = [],
   keyLineMatched: boolean | null = null,
+  goModule: GoModule | null = null,
 ): boolean => {
   const asserted = run.classification === 'assertion_failed'
   if (testPath === null) return asserted
@@ -1855,7 +1864,7 @@ export const validRed = (
     reported ? own.map(reportFailure) : run.printedFailures,
     names,
     testPath,
-    run.goPackages,
+    goModule,
   )
   if (said !== 'silent') return said === 'assertion'
   return keyLineMatched === true && (reported ? own.some((one) => one.assertion) : asserted)
