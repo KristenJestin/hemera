@@ -9,7 +9,7 @@
  * and Acme's real repositories with a bare remote on the same disk. Every wait is on state.
  */
 
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { MaskedText } from '@hemera/core/domain'
@@ -462,9 +462,11 @@ describe('The check lists what moved since the Freeze, and the choice stays the 
       within(
         profile,
         Effect.gen(function* () {
-          const { project, main, api } = yield* acme()
+          const { project, main, bare } = yield* acme()
           const { mission } = yield* frozenIn(project.id, main)
-          git(api, 'remote', 'set-url', 'origin', join(work, 'nowhere'))
+          // Offline: the remote cannot be reached, and nothing of the repository's configuration
+          // changed (a URL rewritten would be a change the guard on the engine's Git asks about).
+          renameSync(bare, `${bare}-away`)
           yield* checkMission(mission.id)
           return yield* checked(mission.id)
         }),

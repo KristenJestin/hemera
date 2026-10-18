@@ -6309,7 +6309,9 @@ describe('The reviewers count in the cap', () => {
               LONG,
             )
             yield* setProjectLimits(project.id, { ...limits, cap: 3 })
-            return mission
+            // What runs when the engine stops: rows the next start ends, not its agents.
+            const stale = yield* sessionsIn(['working', 'idle'], owner)
+            return { mission, stale: new Set(stale.map((row) => row.id)) }
           }),
         ),
       )
@@ -6319,8 +6321,8 @@ describe('The reviewers count in the cap', () => {
           profile,
           Effect.gen(function* () {
             const running = Effect.map(
-              sessionsIn(['working', 'idle'], { kind: 'mission', missionId: left.id }),
-              (rows) => rows.filter((row) => row.role !== 'builder'),
+              sessionsIn(['working', 'idle'], { kind: 'mission', missionId: left.mission.id }),
+              (rows) => rows.filter((row) => row.role !== 'builder' && !left.stale.has(row.id)),
             )
             // Every look from the start: the most agents seen running at once.
             let most = 0
@@ -6337,7 +6339,7 @@ describe('The reviewers count in the cap', () => {
               yield* Effect.sleep('20 millis')
             }
             const full = yield* running
-            const passes = (yield* autoReviewOf(left.id))?.passes ?? []
+            const passes = (yield* autoReviewOf(left.mission.id))?.passes ?? []
             const first = full[0]
             if (first === undefined) return yield* Effect.die(new Error('nothing runs'))
             yield* Sessions.use((sessions) => sessions.end(first.lineage, 'done'))
