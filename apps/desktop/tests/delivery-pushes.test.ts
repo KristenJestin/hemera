@@ -41,6 +41,7 @@ import {
   buildingLaunches,
   checkpointRepositories,
   effectfulActions,
+  missions,
   workspaceRepositories,
 } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
@@ -1088,6 +1089,85 @@ describe('A step on a click', () => {
       expect(seen.declined).toBeNull()
       expect(seen.second.id).not.toBe(seen.first.id)
       expect(commitsSinceBase(seen.api)).toEqual([])
+    },
+    SLOW,
+  )
+
+  test.each([
+    { asked: 'a click’s question', kind: 'Decision', state: 'declined', identity: true },
+    { asked: 'a missing identity’s need', kind: 'Environment', state: 'failed', identity: false },
+  ] as const)(
+    '$asked left unanswered when Fix takes the mission out of Review is withdrawn: nothing holds the round, and the next Review asks again',
+    async ({ kind, state, identity }) => {
+      const global = join(work, 'user.gitconfig')
+      writeFileSync(global, '[user]\n\tname = Ada Lovelace\n')
+      const { run } = engine(identity ? {} : { git: withoutUserConfig(global) })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            // The defaults put the push and the pull request on a click.
+            const mission = yield* launchedOnForge(identity ? null : rulesWith(), identity)
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            yield* moved(mission.missionId, 'endBuilding')
+            const first = yield* needOf(mission.missionId, kind)
+            yield* moved(mission.missionId, 'fix')
+            // A Building's end waits while the mission holds a need: none of the pushes is left.
+            yield* until(
+              Effect.map(getMission(mission.missionId), (one) => one.needs.length === 0),
+              60_000,
+            )
+            const left = repositoryOf(yield* pushesOf(mission.missionId), 'api')
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 2\n')
+            yield* moved(mission.missionId, 'endBuilding')
+            const next = yield* needOf(mission.missionId, kind)
+            return { first, left, next, pushed: remoteHead('api', mission.branch) }
+          }),
+        ),
+      )
+      expect(seen.left?.state).toBe(state)
+      expect(seen.next.id).not.toBe(seen.first.id)
+      expect(seen.pushed).toBeNull()
+    },
+    SLOW,
+  )
+
+  test(
+    'a click’s question left by a stop that missed the move out of Review is withdrawn at the next start',
+    async () => {
+      const { run } = engine()
+      const missionId = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* launchedOnForge(null)
+            writeFileSync(join(mission.api, 'notes.ts'), 'export const notes = 1\n')
+            yield* moved(mission.missionId, 'endBuilding')
+            yield* needOf(mission.missionId, 'Decision')
+            // Out of Review with no event, as a move the stopping engine wrote but never followed.
+            const database = yield* Database
+            yield* database
+              .update(missions)
+              .set({ stage: 'building' })
+              .where(eq(missions.id, mission.missionId))
+            return mission.missionId
+          }),
+        ),
+      )
+      const { run: again } = engine()
+      const seen = await again(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* until(
+              Effect.map(getMission(missionId), (one) => one.needs.length === 0),
+              60_000,
+            )
+            return repositoryOf(yield* pushesOf(missionId), 'api')
+          }),
+        ),
+      )
+      expect(seen?.state).toBe('declined')
     },
     SLOW,
   )

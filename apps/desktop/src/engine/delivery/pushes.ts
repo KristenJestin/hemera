@@ -64,7 +64,7 @@ import {
   type RepositoryPush,
   UnknownMission,
 } from '@hemera/ipc'
-import { and, asc, desc, eq, inArray, like } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, like, ne } from 'drizzle-orm'
 import {
   Context,
   Effect,
@@ -1419,10 +1419,42 @@ export const pushesLayer = (settings: PushesSettings) => {
           }
         })
 
+      /**
+       * The mission left Review: a need of its pushes still pending is withdrawn, since a
+       * Building's end waits while the mission holds one, and the next return to Review asks
+       * again. A row waiting for its click is declined, as "Not now" leaves it; a stopped one
+       * keeps its state. The rows let go of their need first, so its withdrawal resumes none.
+       */
+      const leaveReview = (missionId: string) =>
+        Effect.gen(function* () {
+          const held = (yield* rowsOf(missionId)).filter((row) => row.needId !== null)
+          if (held.length === 0) return
+          const ids = [...new Set(held.flatMap((row) => (row.needId === null ? [] : [row.needId])))]
+          for (const row of held) {
+            yield* setRow(
+              row,
+              row.state === 'waiting' ? { needId: null, state: 'declined' } : { needId: null },
+            )
+          }
+          const pending = yield* database
+            .select({ id: needs.id })
+            .from(needs)
+            .where(and(inArray(needs.id, ids), eq(needs.state, 'pending')))
+            .pipe(Effect.mapError(refusedWhile('reading the needs of the pushes')))
+          for (const need of pending) {
+            yield* provided(withdrawNeed(need.id, 'the mission left Review')).pipe(
+              Effect.catchTag('UnknownNeed', () => Effect.void),
+            )
+          }
+        })
+
       const handle = (event: DomainEvent) =>
         Effect.gen(function* () {
           if (event.type === 'mission.moved' && event.payload['to'] === 'review') {
             return yield* consider(event.entityId)
+          }
+          if (event.type === 'mission.moved' && event.payload['from'] === 'review') {
+            return yield* leaveReview(event.entityId)
           }
           if (event.type === 'delivery.answered') {
             for (const row of yield* rowsOf(event.entityId)) {
@@ -1450,6 +1482,14 @@ export const pushesLayer = (settings: PushesSettings) => {
           .where(eq(missions.stage, 'review'))
           .pipe(Effect.mapError(refusedWhile('reading the missions')))
         for (const one of reviewing) yield* consider(one.id)
+        // A move out of Review the stop missed: its needs are let go as the move would have.
+        const holding = yield* database
+          .selectDistinct({ missionId: deliveryPushes.missionId })
+          .from(deliveryPushes)
+          .innerJoin(missions, eq(missions.id, deliveryPushes.missionId))
+          .where(and(isNotNull(deliveryPushes.needId), ne(missions.stage, 'review')))
+          .pipe(Effect.mapError(refusedWhile('reading the pushes')))
+        for (const one of holding) yield* leaveReview(one.missionId)
       })
 
       // --- what the window reads -------------------------------------------------------------------
