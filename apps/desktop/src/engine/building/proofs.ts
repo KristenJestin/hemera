@@ -653,9 +653,8 @@ export const buildingProofs = (parts: ProofParts) => {
 
   /**
    * The proofs of the Building before a round's, carried into it with their runs, states, verdicts
-   * and trees (CT-38): the Spec's and the earlier rounds' proofs stay the mission's. A green run on
-   * a tree that is no longer the current one is to run again, a verdict by hand given on one is to
-   * verify again; the round's change makes them so as any change does. Answers how many it carried.
+   * and trees (CT-38): the Spec's and the earlier rounds' proofs stay the mission's, and the round's
+   * changes make them stale as any change does (`recordTreeIn`). Answers how many it carried.
    */
   const carriedIn = (transaction: EngineTransaction, building: BuildingRow) =>
     Effect.gen(function* () {
@@ -669,7 +668,6 @@ export const buildingProofs = (parts: ProofParts) => {
       if (before === undefined) return 0
       const rows = yield* scenarioProofsIn(transaction, before.id)
       const runs = yield* proofRunsIn(transaction, before.id)
-      const current = yield* currentTreesIn(transaction, building.missionId)
       const ids = new Map(runs.map((run) => [run.id, crypto.randomUUID()]))
       for (const run of runs) {
         yield* transaction
@@ -679,20 +677,13 @@ export const buildingProofs = (parts: ProofParts) => {
       }
       const idOf = (id: string | null) => (id === null ? null : (ids.get(id) ?? null))
       for (const row of rows) {
-        const green = runs.find((run) => run.id === row.greenRunId)
-        const state = stateOf(row)
-        const stale =
-          (state === 'green' &&
-            (green === undefined || !upToDate(readTrees(green.trees), current))) ||
-          state === 'held'
-        const again =
-          (state === 'validated' || state === 'refused') && !upToDate(readTrees(row.trees), current)
         yield* transaction
           .insert(scenarioProofs)
           .values({
             ...row,
             buildingId: building.id,
-            state: stale ? 'to_rerun' : again ? 'to_verify' : row.state,
+            // A run's need ended with its Building: the proof runs again on the round's tree.
+            state: stateOf(row) === 'held' ? 'to_rerun' : row.state,
             redRunId: idOf(row.redRunId),
             greenRunId: idOf(row.greenRunId),
             heldRunId: null,
