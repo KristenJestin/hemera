@@ -1138,6 +1138,40 @@ describe('What a user’s everyday Git writes into a configuration asks nothing 
     expect(reopened.needs).toEqual([])
   })
 
+  test('a baseline kept before its steady digests (before #458’s round 5) takes them at the start: the everyday Git that follows asks nothing', async () => {
+    await withBuilder(({ main }) => {
+      remote(main, join(work, 'acme.git'))
+      return engineStatus(main)
+    })
+    // As a record from before round 5: no steady digest on any file.
+    const database = new DatabaseSync(join(data, DATABASE_FILE))
+    database.exec(
+      "UPDATE git_baselines SET shapes = (SELECT json_group_array(json_remove(value, '$.steady')) FROM json_each(git_baselines.shapes))",
+    )
+    database.close()
+    const main = join(work, 'acme')
+    const config = realpathSync.native(join(main, '.git', 'config'))
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        everyday(main)
+        return {
+          status: yield* engineStatus(main),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(reopened.status).toBe('ran')
+    expect(reopened.needs).toEqual([])
+    const kept = new DatabaseSync(join(data, DATABASE_FILE))
+    const [row] = kept
+      .prepare(
+        "SELECT json_extract(value, '$.steady') AS steady FROM git_baselines, json_each(git_baselines.shapes) WHERE git_baselines.id = ? AND json_extract(value, '$.path') = ?",
+      )
+      .all(realpathSync.native(join(main, '.git')), config)
+    kept.close()
+    expect(row?.['steady']).toEqual(expect.any(String))
+  })
+
   test('a worktree the engine adds on a branch made from a remote one, its upstream written into the config, asks nothing', async () => {
     const result = await withBuilder(({ main }) =>
       Effect.gen(function* () {

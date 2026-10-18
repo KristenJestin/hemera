@@ -843,6 +843,8 @@ export const engineGitGuard = (
         .pipe(Effect.mapError(refusedWhile('reading the holds of the Git guard')))
       const unread = (what: string) => Effect.fail(new Error(`a record does not read: ${what}`))
       const readScopes: Scope[] = []
+      /** The baselines kept before their files had a steady digest (before #458's round 5). */
+      const unsteady: Scope[] = []
       for (const row of baselines) {
         const shapes = Option.getOrNull(readShapes(row.shapes))
         const checkouts = Option.getOrNull(readFolders(row.checkouts))
@@ -856,6 +858,7 @@ export const engineGitGuard = (
           baseline: new Map(shapes.map(({ path, ...shape }) => [path, unkept(shape, everywhere)])),
         }
         readScopes.push(scope)
+        if (shapes.some((shape) => shape.steady === undefined)) unsteady.push(scope)
       }
       const readHolds: Hold[] = []
       for (const row of rows) {
@@ -884,7 +887,7 @@ export const engineGitGuard = (
           answer,
         })
       }
-      return { readScopes, readHolds }
+      return { readScopes, readHolds, unsteady }
     })
 
     /**
@@ -912,8 +915,21 @@ export const engineGitGuard = (
         ask(hold)
         return
       }
-      const { readScopes, readHolds } = outcome.success
+      const { readScopes, readHolds, unsteady } = outcome.success
       for (const scope of readScopes) scopes.set(scope.key, scope)
+      // A baseline kept without steady digests takes them from its files still as it has them: an
+      // everyday change made from now on is taken as one. A file changed meanwhile keeps none, and
+      // asks.
+      for (const scope of unsteady) {
+        const now = fingerprintOf(scope)
+        scope.baseline = new Map(
+          [...scope.baseline].map(([path, was]) => {
+            const shape = now.get(path)
+            return [path, shape?.digest === was.digest ? { ...was, steady: shape.steady } : was]
+          }),
+        )
+        keep(scope)
+      }
       for (const hold of readHolds) {
         holds.set(hold.key, hold)
         if (hold.answer !== 'none') continue
