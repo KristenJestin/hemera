@@ -65,6 +65,7 @@ import {
   type ShapeChange,
   type ShapeHome,
   type Shapes,
+  asCloned,
   checkoutOf,
   commonOf,
   onlyWorktreeFormat,
@@ -413,17 +414,14 @@ export const engineGitGuard = (
     /**
      * A configuration that changed only by what a user's everyday Git writes on its own and that
      * runs nothing (a submodule's address, a branch's upstream): its steady digest is the same, and
-     * what it has now is taken into the baseline, whoever wrote it. Nothing is asked.
+     * what it has now is taken into the baseline, whoever wrote it. So is a submodule's Git folder
+     * as `git submodule` clones it (#470). Nothing is asked.
      */
     const everyday = (scope: Scope, now: Shapes): void => {
       const taken = [...now].filter(([path, shape]) => {
         const was = scope.baseline.get(path)
-        return (
-          was !== undefined &&
-          was.digest !== shape.digest &&
-          shape.steady !== null &&
-          was.steady === shape.steady
-        )
+        if (was === undefined) return !scope.home && asCloned(scope.key, path, shape)
+        return was.digest !== shape.digest && shape.steady !== null && was.steady === shape.steady
       })
       if (taken.length === 0) return
       scope.baseline = new Map([...scope.baseline, ...taken])
@@ -850,13 +848,14 @@ export const engineGitGuard = (
         const checkouts = Option.getOrNull(readFolders(row.checkouts))
         if (shapes === null || checkouts === null) return yield* unread(`baseline ${row.id}`)
         const everywhere = row.id === HOME
-        readScopes.push({
+        const scope: Scope = {
           key: row.id,
           home: everywhere,
           checkouts: new Set(checkouts),
           projectId: row.projectId,
           baseline: new Map(shapes.map(({ path, ...shape }) => [path, unkept(shape, everywhere)])),
-        })
+        }
+        readScopes.push(scope)
       }
       const readHolds: Hold[] = []
       for (const row of rows) {
