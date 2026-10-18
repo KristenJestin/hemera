@@ -13,15 +13,8 @@ import {
   type RepositoryDraft,
 } from '../../blocks/project-settings/repositories.tsx'
 import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
-import {
-  GuessSentence,
-  InSettings,
-  type TestRunnerProps,
-  TestsFields,
-  problemOf,
-  testsOf,
-  useTests,
-} from './test-runner-parts.tsx'
+import { GuessSentence, InSettings, TestsFields } from './test-runner-parts.tsx'
+import { type TestRunnerProps, problemOf, testsOf, useTests } from './test-runner-state.ts'
 import type { Refusal, RepositoryTests, TestsDraft } from './test-runner-model.ts'
 
 /** What a repository's own form holds, from Acme's fixtures. */

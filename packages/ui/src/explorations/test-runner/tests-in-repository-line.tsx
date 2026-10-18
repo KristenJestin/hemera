@@ -23,14 +23,8 @@ import { Section } from '../../blocks/project-settings/parts.tsx'
 import { REPOSITORIES } from '../../blocks/project-settings/project-settings-fixtures.ts'
 import { baseOf } from '../../blocks/project-settings/repositories-model.ts'
 import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
-import {
-  GuessSentence,
-  InSettings,
-  type TestRunnerProps,
-  TestsFields,
-  problemOf,
-  useTests,
-} from './test-runner-parts.tsx'
+import { GuessSentence, InSettings, TestsFields, RepositoryIcon } from './test-runner-parts.tsx'
+import { type TestRunnerProps, problemOf, useTests } from './test-runner-state.ts'
 import {
   RUNNER_WORDS,
   type Refusal,
@@ -38,7 +32,6 @@ import {
   type TestsDraft,
   runnerOf,
 } from './test-runner-model.ts'
-import { repositoryIcon } from './tests-section.tsx'
 
 const RULE = 'border-b border-border last:border-b-0'
 
@@ -124,7 +117,9 @@ function RepositoryLine({
         />
         <span className={CELLS}>
           <span className={PATH}>
-            <span className={ICON_ROOM}>{repositoryIcon(tests.repository)}</span>
+            <span className={ICON_ROOM}>
+              <RepositoryIcon repository={tests.repository} />
+            </span>
             <span className="truncate">{tests.repository}</span>
           </span>
           <span className={BASE}>

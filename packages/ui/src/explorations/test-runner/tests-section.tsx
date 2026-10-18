@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 
 import { IconButton } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
-import { markIcon } from '../../components/project-mark/mark-icons.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
@@ -10,22 +9,13 @@ import {
   IconAlertTriangle,
   IconArrowBackUp,
   IconChevronRight,
-  IconFolder,
   IconPencil,
   IconTestPipe,
 } from '../../icons.ts'
 import { FormFoot, Section } from '../../blocks/project-settings/parts.tsx'
-import { REPOSITORIES } from '../../blocks/project-settings/project-settings-fixtures.ts'
 import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
-import {
-  GuessSentence,
-  InSettings,
-  type TestRunnerProps,
-  TestsFields,
-  problemOf,
-  testsOf,
-  useTests,
-} from './test-runner-parts.tsx'
+import { GuessSentence, InSettings, TestsFields, RepositoryIcon } from './test-runner-parts.tsx'
+import { type TestRunnerProps, problemOf, testsOf, useTests } from './test-runner-state.ts'
 import {
   RUNNER_WORDS,
   type RepositoryTests,
@@ -33,12 +23,6 @@ import {
   runnerOf,
   testsWords,
 } from './test-runner-model.ts'
-
-/** The icon a repository wears in Acme's fixtures, or a folder. */
-export function repositoryIcon(repository: string): ReactNode {
-  const icon = REPOSITORIES.find((one) => one.path === repository)?.icon
-  return icon === undefined ? <IconFolder size="sm" /> : markIcon(icon)
-}
 
 const ROW = 'flex min-w-0 items-center gap-1 pr-2 pl-2'
 
@@ -110,7 +94,9 @@ function TestsLine({
       <div className={ROW}>
         <button type="button" className={OPEN} aria-label={testsWords(tests)} onClick={onOpen}>
           <span className={PATH}>
-            <span className={ICON_ROOM}>{repositoryIcon(tests.repository)}</span>
+            <span className={ICON_ROOM}>
+              <RepositoryIcon repository={tests.repository} />
+            </span>
             <span className="truncate">{tests.repository}</span>
           </span>
           {runner === null ? (
