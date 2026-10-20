@@ -43,6 +43,8 @@ export interface DiffViewProps extends DiffViewHandlers {
   loading?: boolean | undefined
   /** Why the diff could not be read, in words, and the way to read it again. */
   error?: { words: string; onRetry: () => void } | undefined
+  /** Why the last gesture on a comment did not go through, in words. */
+  notice?: string | undefined
   target?: StageTarget | null | undefined
   lit?: string | null | undefined
 }
@@ -107,6 +109,7 @@ export function DiffView({
   layout,
   loading = false,
   error,
+  notice,
   target = null,
   lit = null,
   onFile,
@@ -134,6 +137,17 @@ export function DiffView({
             <IconHistory size="sm" />
           </span>
           {checkpointWords(source)}
+        </p>
+      )}
+      {notice !== undefined && (
+        <p
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-sm"
+        >
+          <span className="flex shrink-0 text-warning">
+            <IconAlertTriangle size="sm" />
+          </span>
+          <span className="min-w-0 break-words">{notice}</span>
         </p>
       )}
       {unreadable.map((one) => (

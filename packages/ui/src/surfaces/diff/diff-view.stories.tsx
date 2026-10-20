@@ -499,6 +499,16 @@ export const Loading: Story = {
   },
 }
 
+/** A gesture refused — a comment withdrawn that a round already took — said once, in words. */
+export const GestureRefused: Story = {
+  args: { notice: 'A round already took F8: it cannot be withdrawn now.' },
+  play: async ({ canvasElement }) => {
+    await expect(body(canvasElement).getByRole('status')).toHaveTextContent(
+      'A round already took F8',
+    )
+  },
+}
+
 /** The diff could not be read: why, in words, where the diff would be. */
 export const ErrorInWords: Story = {
   args: { error: 'Hemera could not read its storage: the disk is full.' },

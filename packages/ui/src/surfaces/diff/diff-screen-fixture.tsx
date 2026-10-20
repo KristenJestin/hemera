@@ -36,6 +36,8 @@ export interface DiffScreenProps {
   layout?: DiffLayout | undefined
   loading?: boolean | undefined
   error?: string | undefined
+  /** Why the last gesture did not go through, in words. */
+  notice?: string | undefined
   /** Round 2 writes while the user reads: the steps of `LIVE_STEPS`, one after the other. */
   live?: boolean | undefined
   onComment: (comment: NewComment) => void
@@ -135,6 +137,7 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
           layout={layout}
           loading={loading}
           error={props.error === undefined ? undefined : { words: props.error, onRetry: () => {} }}
+          notice={props.notice}
           target={target}
           lit={props.at ?? null}
           onAdd={add}

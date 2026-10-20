@@ -258,7 +258,10 @@ export function CommentCard({
         <div className={HEAD}>
           <Marks comment={comment} />
           <Author comment={comment} />
-          <span className={QUIET}>{linesOf(comment.place)}</span>
+          {/* An outdated comment's lines are gone: its excerpt says where it was written. */}
+          {comment.outdated === undefined && (
+            <span className={QUIET}>{linesOf(comment.place)}</span>
+          )}
           {comment.movedFrom !== undefined && (
             <Legend
               label={`Moved with its lines: written on line ${String(comment.movedFrom.start)}`}
@@ -301,7 +304,9 @@ export function CommentCard({
               <span className="text-xs font-medium text-muted-foreground">
                 {`Written on ${comment.outdated.version}`}
               </span>
-              <pre className={CODE}>{comment.outdated.excerpt.trimEnd()}</pre>
+              {comment.outdated.excerpt.trim() !== '' && (
+                <pre className={CODE}>{comment.outdated.excerpt.trimEnd()}</pre>
+              )}
               <Button
                 variant="link"
                 size="sm"
