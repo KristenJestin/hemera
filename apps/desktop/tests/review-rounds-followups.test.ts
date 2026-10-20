@@ -7,7 +7,7 @@
  * Builders and the round's Planner driven through their grants, Acme's `api` in temporary folders.
  */
 
-import { readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { START_A_MISSION } from '@hemera/core/domain'
@@ -334,6 +334,191 @@ describe('A round grilled without its Workspace', () => {
   )
 })
 
+/** Why a start from the feedback is refused, or null when it is allowed. */
+const refusalOf = (feedbackId: string) =>
+  Rounds.use((rounds) => rounds.startMissionFrom(feedbackId)).pipe(
+    Effect.map(() => null),
+    Effect.catchTag('FeedbackRefused', (refused) => Effect.succeed(refused.reason)),
+  )
+
+describe('A second mission from the same feedback', () => {
+  test(
+    'a feedback its round still grills or builds refuses a second "Start a mission from this", through a restart and once the round is answered; the first mission gets the link',
+    SLOW,
+    async () => {
+      const first = rounding(data, work)
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, projectId, lineage } = yield* reviewed(work)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            const two = yield* written(missionId, remark('The export button is grey.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerPoint(planner.grantId, [one.id])
+            const started = yield* startedFrom(projectId, one.id)
+            yield* withdrawnAndTold(missionId, two.id)
+            return {
+              missionId,
+              lineage,
+              planner: planner.session.id,
+              one: one.id,
+              started,
+              again: yield* refusalOf(one.id),
+            }
+          }),
+        ),
+      )
+      const after = rounding(data, work, { resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = left
+            const restarted = yield* refusalOf(left.one)
+            const planner = yield* roundPlannerOf(missionId, left.planner)
+            yield* headerTask(planner.grantId)
+            yield* used(planner.grantId, 'round_ready', { why: 'One point, one task.' })
+            yield* roundBuilding(missionId, 1)
+            const building = yield* refusalOf(left.one)
+            const builder = yield* roundBuilderOf(missionId, left.lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: left.one,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(after.world, missionId)
+            yield* until(
+              Effect.map(feedbackNow(missionId), (all) => all.get(left.one)?.state === 'resolved'),
+              LONG,
+            )
+            return {
+              restarted,
+              building,
+              closed: (yield* feedbackNow(missionId)).get(left.one),
+              answered: yield* refusalOf(left.one),
+            }
+          }),
+        ),
+      )
+      const reason = 'A mission was started from this feedback already.'
+      expect(left.again).toBe(reason)
+      expect(seen.restarted).toBe(reason)
+      expect(seen.building).toBe(reason)
+      expect(seen.answered).toBe(reason)
+      expect(seen.closed?.answer).toContain(left.started.key)
+    },
+  )
+})
+
+describe('A feedback withdrawn after its mission started', () => {
+  test(
+    'a feedback withdrawn while its round runs, after a mission was started from it, reads as withdrawn and as moved to that mission once the round is answered',
+    SLOW,
+    async () => {
+      const { world, run } = rounding(data, work)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, projectId, lineage } = yield* reviewed(work)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            const two = yield* written(missionId, remark('The export button is grey.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerPoint(planner.grantId, [two.id])
+            const started = yield* startedFrom(projectId, one.id)
+            yield* withdrawnAndTold(missionId, one.id)
+            yield* headerTask(planner.grantId)
+            yield* used(planner.grantId, 'round_ready', { why: 'One point, one task.' })
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: two.id,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(world, missionId)
+            yield* until(
+              Effect.map(
+                feedbackNow(missionId),
+                (all) => all.get(one.id)?.answer?.includes(started.key) === true,
+              ),
+              LONG,
+            )
+            return {
+              started,
+              moved: (yield* feedbackNow(missionId)).get(one.id),
+              rounds: yield* roundsOf(missionId),
+            }
+          }),
+        ),
+      )
+      expect(seen.rounds).toEqual([[1, 'answered']])
+      expect(seen.moved?.state).toBe('withdrawn')
+      expect(seen.moved?.answer).toBe(`Moved to a new mission: ${seen.started.key}.`)
+    },
+  )
+})
+
+describe('The Planner at a start while the Workspace need waits', () => {
+  test(
+    'queued deliveries do not open the Planner of a round at an engine start while its missing-Workspace need waits, even with the Workspace back; Retry opens it',
+    SLOW,
+    async () => {
+      const first = rounding(data, work)
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed(work)
+            yield* written(missionId, remark('The CSV has no header row.'))
+            const spare = yield* written(missionId, remark('The export button is grey.'))
+            const later = yield* written(missionId, remark('The file name has no date.'))
+            const folder = yield* workspaceOf(missionId)
+            renameSync(folder, `${folder}.away`)
+            yield* fix(missionId)
+            yield* until(
+              Effect.map(getMission(missionId), (mission) => mission.needs.length > 0),
+              LONG,
+            )
+            // Queued for a Planner that does not run.
+            yield* withdrawn(spare.id)
+            yield* until(
+              Effect.map(deliveredTo(missionId, 'round-planner'), (told) => told.length > 0),
+              LONG,
+            )
+            renameSync(`${folder}.away`, folder)
+            return { missionId, later: later.id, needs: (yield* getMission(missionId)).needs }
+          }),
+        ),
+      )
+      const after = rounding(data, work, { resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = left
+            // A later event followed means the start's catch-up has ended.
+            yield* withdrawnAndTold(missionId, left.later)
+            const planners = (yield* liveOf(missionId)).filter(
+              (row) => row.role === 'round-planner',
+            )
+            const waiting = (yield* getMission(missionId)).needs
+            yield* retryNeed(waiting[0]?.id ?? '')
+            const planner = yield* roundPlannerOf(missionId)
+            return { planners, waiting, planner: planner.session }
+          }),
+        ),
+      )
+      expect(seen.planners).toEqual([])
+      expect(seen.waiting.map((one) => one.id)).toEqual(left.needs.map((one) => one.id))
+      expect(seen.planner.role).toBe('round-planner')
+    },
+  )
+})
+
 /** The test of the Markdown export: it fails until `export.ts` holds `markdown`. */
 const MARKDOWN_TEST = [
   "import { test } from 'node:test'",
@@ -463,6 +648,77 @@ describe('A carried Spec proof the user edited in Review', () => {
         .flatMap((one) => one.scenarios)
         .find((one) => one.scenario === 'R1.S2')
       expect(proof?.state).not.toBe('red_recorded')
+    },
+  )
+})
+
+describe('A carried Spec proof the user deleted in Review', () => {
+  test(
+    'a round’s start does not put back the test of a carried Spec proof the user deleted in Review, hands its Builder no conflict, and says deleted, not changed',
+    SLOW,
+    async () => {
+      const { world, run } = rounding(data, work)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              SPEC_PROOFS,
+            )
+            const missionId = mission.id
+            const builder = yield* builderOf(missionId)
+            yield* proofIn(missionId, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* throughEnd(world, missionId)
+            const testFile = join(yield* workspaceOf(missionId), 'api', 'tests', 'export.test.mjs')
+            rmSync(testFile)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            yield* roundBuilderOf(missionId, builder.session.lineage)
+            yield* until(
+              Effect.map(
+                eventsOf(missionId, 'building.proofs_written'),
+                (events) => events.length === 2,
+              ),
+              LONG,
+            )
+            const [, round] = yield* eventsOf(missionId, 'building.proofs_written')
+            const [deleted] = yield* eventsOf(missionId, 'building.proofs_deleted')
+            const line =
+              deleted === undefined
+                ? null
+                : yield* (
+                    BUILDING_MAPPERS.get('building.proofs_deleted')?.(deleted) ??
+                      Effect.succeed(null)
+                  )
+            return {
+              there: existsSync(testFile),
+              payload: round?.payload,
+              deleted: deleted?.payload,
+              kept: yield* eventsOf(missionId, 'building.proofs_kept'),
+              line: line?.text,
+              told: yield* deliveredTo(missionId, 'builder'),
+            }
+          }),
+        ),
+      )
+      expect(seen.there).toBe(false)
+      expect(seen.payload).toMatchObject({ conflicts: [] })
+      expect(seen.deleted).toEqual({ scenarios: ['R1.S2'] })
+      expect(seen.kept).toEqual([])
+      expect(seen.line).toBe(
+        'Hemera did not put back the proof tests of R1.S2: deleted since their Building.',
+      )
+      expect(seen.told.filter((line) => line.includes('could not be written'))).toEqual([])
     },
   )
 })

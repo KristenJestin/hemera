@@ -1440,8 +1440,10 @@ export const roundsLayer = (settings: RoundsSettings) =>
         })
 
       /**
-       * A feedback a mission was started from, closed in its round as moved, with the link. One
-       * its round still grills or builds stays the round's until the round is answered.
+       * A feedback a mission was started from, linked to it as soon as the mission exists, so a
+       * second start is refused whatever the feedback is by then. One its round still grills or
+       * builds stays the round's until the round is answered; a withdrawn one stays withdrawn and
+       * says where it went; any other closes as moved, with the link.
        */
       const movedIn = (missionId: string, feedbackId: string) =>
         provided(
@@ -1460,17 +1462,28 @@ export const roundsLayer = (settings: RoundsSettings) =>
               if (
                 created === undefined ||
                 row === undefined ||
-                row.movedTo !== null ||
                 row.missionId !== created.originId ||
-                row.state === 'withdrawn' ||
-                row.state === 'in_round'
+                (row.movedTo !== null && row.movedTo !== missionId)
               ) {
                 return { result: undefined, events: [] }
               }
               const moved = secrets.mask(`Moved to a new mission: ${keyOf(created)}.`)
+              const closes =
+                row.state !== 'in_round' &&
+                row.state !== 'withdrawn' &&
+                !(row.state === 'resolved' && row.answer === moved)
+              const says = row.state === 'withdrawn' && row.answer !== moved
+              if (row.movedTo !== null && !closes && !says) {
+                return { result: undefined, events: [] }
+              }
               yield* transaction
                 .update(reviewFeedback)
-                .set({ state: 'resolved', movedTo: missionId, answer: moved, updatedAt: now() })
+                .set({
+                  state: closes ? 'resolved' : row.state,
+                  movedTo: missionId,
+                  answer: closes || says ? moved : row.answer,
+                  updatedAt: now(),
+                })
                 .where(eq(reviewFeedback.id, feedbackId))
                 .pipe(Effect.mapError(refusedWhile('closing a feedback')))
               return {
@@ -1556,6 +1569,8 @@ export const roundsLayer = (settings: RoundsSettings) =>
       const grilledCaughtUp = (missionId: string) =>
         Effect.gen(function* () {
           yield* ensureGriller(missionId)
+          // The need holds the Planner like every other caller: its Retry comes back here.
+          if (yield* workspaceWaits(missionId)) return
           const prepared = yield* provided(prepareDeliveries(missionId))
           const left = (yield* provided(queuedForPlanner(missionId))).filter(
             (queued) => !prepared.some((ready_) => ready_.id === queued.id),
