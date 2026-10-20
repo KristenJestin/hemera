@@ -33,6 +33,15 @@
  *   never done, until a find can say; it is never created again blind.
  * - **Failures** are an error need on the mission with Git's or the forge's message verbatim
  *   (masked) and Retry; one repository failing stops none of the others.
+ * - **Images** (R7, `./images.ts`): where GitHub on github.com hosts them (gh 2.99.0 or later, an
+ *   account that may push), `{images}` becomes Markdown images uploaded with the pull request
+ *   (`--attach`, 50 at most per call, the rest by `gh pr edit`); anywhere else, a list of file
+ *   names and why. A public repository asks first: the pull request opens with the list, and is
+ *   edited once the user answers Publish; the answer is kept for the mission. The description is
+ *   read back and each copy's URL recorded next to its evidence (CT-54); an image not found there
+ *   is "not published" with the CLI's message, the step failed, and Retry sends only what is
+ *   missing: an image whose URL is in the description is never sent again. Images added once the
+ *   pull request is open are not added to it, since its description is written once.
  */
 
 import { join } from 'node:path'
@@ -57,14 +66,17 @@ import {
   type DeliveryRulesUnreadable,
   type Mission,
   type MissionPushes,
+  NotPublishable,
   NothingToRetry,
   type Project,
   PullRequestStatus,
+  type PushImage,
   type PushState,
   type RepositoryPush,
+  UnknownEvidence,
   UnknownMission,
 } from '@hemera/ipc'
-import { and, asc, desc, eq, inArray, isNotNull, like, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import {
   Context,
   Effect,
@@ -82,9 +94,18 @@ import { Checkpoints } from '../building/checkpoints.ts'
 import { copySection, missionCopies } from '../delivery-rules.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { ForgePort } from '../forges/port.ts'
-import { createPullRequest, findPullRequest, pullRequestStatus } from '../forges/pull-requests.ts'
+import {
+  attachToPullRequest,
+  createPullRequest,
+  findPullRequest,
+  pullRequestBody,
+  pullRequestStatus,
+  repositoryAccess,
+} from '../forges/pull-requests.ts'
+import { GITHUB_HOST } from '../forges/identity.ts'
 import type { GitBytesSpawn, GitRefusal } from '../git.ts'
 import type { DomainEvent, NewEvent } from '../journal.ts'
+import { missionFolder, missionKeyOf } from '../memory/files.ts'
 import { type MissionActivity, getMission } from '../missions.ts'
 import {
   DeliveryFailed,
@@ -93,6 +114,7 @@ import {
   needService,
   withdrawNeed,
 } from '../needs.ts'
+import { ProfileHome } from '../profile-home.ts'
 import { getProject } from '../projects.ts'
 import { Diffs, type Place } from '../review/diffs.ts'
 import { Secrets } from '../secrets.ts'
@@ -105,6 +127,7 @@ import {
 import {
   buildings,
   checkpointRepositories,
+  deliveryImages,
   deliveryPushes,
   effectfulActions,
   memoryEvidence,
@@ -113,6 +136,16 @@ import {
 } from '../storage/schema.ts'
 import { beginAction, settleActionIn } from '../tools/actions.ts'
 import { mutate } from '../transaction.ts'
+import {
+  ATTACH_AT_ONCE,
+  type ChosenImage,
+  IMAGE_TYPES,
+  chosenImages,
+  copyIn,
+  imageLines,
+  nameList,
+  unreadable,
+} from './images.ts'
 
 /** The service the pushes' needs belong to. */
 export const DELIVERY_NEEDS = needService('delivery')
@@ -134,6 +167,11 @@ export interface PushesService {
   ) => Effect.Effect<MissionPushes, PushesFailure | NothingToRetry>
   /** The mission's pushes now, then after each change. */
   readonly changes: (missionId: string) => Stream.Stream<MissionPushes, PushesFailure>
+  /** The user's mark on an image of a mission's evidence: sent in its pull requests, or not (R7). */
+  readonly setPublishable: (
+    evidenceId: string,
+    publishable: boolean,
+  ) => Effect.Effect<void, UnknownEvidence | NotPublishable | DatabaseError>
   /** What a stop left, then each committed event of the stream, for as long as it lasts. */
   readonly follow: (events: Stream.Stream<DomainEvent>) => Effect.Effect<void>
 }
@@ -156,6 +194,15 @@ const literal = (path: string) => `:(literal)${path}`
 
 const PUSH_ANYWAY = 'Push them anyway'
 const KEEP_OUT = 'Keep them out'
+
+/** The answers of a public repository's question on images (R7). */
+const PUBLISH = 'Publish'
+const LIST_NAMES = 'List the file names instead'
+/**
+ * Where a public repository's question stands on a row: `ask` asked and unanswered (asked again
+ * when the need was let go), `publish`, or `list`.
+ */
+type ImagesAnswer = 'ask' | 'publish' | 'list'
 
 /** The line a missing identity's need shows: Hemera never sets it. */
 const IDENTITY_FIX: Readonly<Record<IdentityKey, string>> = {
@@ -214,6 +261,14 @@ const STEP_WORDS = new Map([
   ['pull-request', 'pull request'],
 ])
 
+/** Where an image of a pull request may stand, as recorded. */
+const IMAGE_STATES: ReadonlyArray<PushImage['state']> = [
+  'pending',
+  'published',
+  'listed',
+  'not-published',
+]
+
 /** Whether a stack pushes or opens a pull request: what this ticket runs it for. */
 const delivers = (steps: ReadonlyArray<DeliveryAction>) =>
   steps.some((step) => step.kind === 'push' || step.kind === 'pull-request')
@@ -239,14 +294,29 @@ export const pushesLayer = (settings: PushesSettings) => {
       const secrets = yield* Secrets
       const diffs = yield* Diffs
       const checkpoints = yield* Checkpoints
+      const home = yield* ProfileHome
       const context = yield* Effect.context<
-        Database | DomainEvents | Secrets | ForgePort | Diffs | Checkpoints | MissionActivity
+        | Database
+        | DomainEvents
+        | Secrets
+        | ForgePort
+        | Diffs
+        | Checkpoints
+        | MissionActivity
+        | ProfileHome
       >()
       const provided = <A, E>(
         effect: Effect.Effect<
           A,
           E,
-          Database | DomainEvents | Secrets | ForgePort | Diffs | Checkpoints | MissionActivity
+          | Database
+          | DomainEvents
+          | Secrets
+          | ForgePort
+          | Diffs
+          | Checkpoints
+          | MissionActivity
+          | ProfileHome
         >,
       ) => Effect.provide(effect, context)
       const scope = yield* Effect.scope
@@ -548,18 +618,8 @@ export const pushesLayer = (settings: PushesSettings) => {
             .orderBy(desc(buildings.startedAt))
             .limit(1)
             .pipe(Effect.mapError(refusedWhile('reading the Builder’s summary')))
-          // `{images}` lists the mission's images by name until R7 hosts them.
-          const images = yield* database
-            .select({ name: memoryEvidence.name })
-            .from(memoryEvidence)
-            .where(
-              and(
-                eq(memoryEvidence.missionId, mission.id),
-                like(memoryEvidence.mediaType, 'image/%'),
-              ),
-            )
-            .orderBy(asc(memoryEvidence.addedAt))
-            .pipe(Effect.mapError(refusedWhile('reading the mission’s images')))
+          // Masked as everything the forge is sent.
+          const images = yield* provided(chosenImages(mission.id, secrets.mask))
           const values: TemplateFields = {
             key: mission.key,
             title: mission.title,
@@ -567,9 +627,12 @@ export const pushesLayer = (settings: PushesSettings) => {
             branch,
             summary: building?.summary ?? '',
           }
-          const list = images.map((image) => `- ${image.name}`).join('\n')
-          return (template: string) =>
-            renderTemplate(template, values).text.replaceAll(IMAGES_SLOT, list)
+          // `{images}` is the chosen images' names unless told what the forge shows of them.
+          return {
+            images,
+            render: (template: string, shown: string = nameList(images)) =>
+              renderTemplate(template, values).text.replaceAll(IMAGES_SLOT, shown),
+          }
         })
 
       // --- needs ---------------------------------------------------------------------------------
@@ -589,13 +652,16 @@ export const pushesLayer = (settings: PushesSettings) => {
         readonly repositoryId: string
         readonly name: string
         readonly entry: PreparationCopy['repositories'][number]
-        readonly render: (template: string) => string
+        /** A template rendered, `{images}` as given (the images' names otherwise). */
+        readonly render: (template: string, images?: string) => string
+        /** The mission's images chosen for its pull requests (R7). */
+        readonly images: ReadonlyArray<ChosenImage>
         readonly branch: string
         readonly remote: string | null
         readonly base: string
       }
 
-      const reread = (one: Run) =>
+      const reread = (one: Pick<Run, 'mission' | 'repositoryId'>) =>
         Effect.flatMap(rowOf(one.mission.id, one.repositoryId), (row) =>
           row === null
             ? Effect.fail(stopped('failed', 'The push was removed.'))
@@ -905,6 +971,420 @@ export const pushesLayer = (settings: PushesSettings) => {
 
       const forgeSaid = (failure: { readonly message: string }) => failure.message
 
+      // --- the images of a pull request (R7) ---------------------------------------------------
+
+      type ImageRow = typeof deliveryImages.$inferSelect & { readonly name: string }
+
+      /** The images recorded for a repository's pull request, in their order, with their names. */
+      const imageRowsOf = (missionId: string, repositoryId: string) =>
+        database
+          .select({ image: deliveryImages, name: memoryEvidence.name })
+          .from(deliveryImages)
+          .innerJoin(memoryEvidence, eq(memoryEvidence.id, deliveryImages.evidenceId))
+          .where(
+            and(
+              eq(deliveryImages.missionId, missionId),
+              eq(deliveryImages.repositoryId, repositoryId),
+            ),
+          )
+          .orderBy(asc(deliveryImages.position))
+          .pipe(
+            Effect.mapError(refusedWhile('reading the images of a pull request')),
+            Effect.map((rows) => rows.map((one): ImageRow => ({ ...one.image, name: one.name }))),
+          )
+
+      /** Where the evidence files of a mission are. */
+      const evidenceFolderOf = (missionId: string) =>
+        Effect.map(provided(missionKeyOf(missionId)), (key) =>
+          join(missionFolder(home.dataFolder, key), 'evidence'),
+        )
+
+      /** A repository as its forge names it, `owner/repository`. */
+      const fullNameOf = (projectId: string, repositoryId: string) =>
+        Effect.map(
+          ForgePort.use((port) => port.status(projectId)).pipe(Effect.provide(context)),
+          (statuses) => {
+            const status = statuses.find((one) => one.repositoryId === repositoryId)
+            return `${status?.owner ?? ''}/${status?.slug ?? ''}`
+          },
+        )
+
+      /**
+       * Whether the forge shows a repository's images, or why they are listed by name instead;
+       * `ask` when a public repository's question is still to answer.
+       */
+      interface Hosting {
+        readonly reason: string | null
+        readonly ask: boolean
+        readonly full: string
+      }
+
+      const hostingOf = (one: Run, answer: string | null) =>
+        Effect.gen(function* () {
+          const port = yield* ForgePort
+          const status = (yield* port.status(one.mission.projectId)).find(
+            (found) => found.repositoryId === one.repositoryId,
+          )
+          const full = `${status?.owner ?? ''}/${status?.slug ?? ''}`
+          const byName = (reason: string): Hosting => ({ reason, ask: false, full })
+          const forge = status?.forge ?? 'unknown'
+          if (forge === 'bitbucket-cloud' || forge === 'bitbucket-datacenter') {
+            return byName('Bitbucket cannot host images: the file names are listed.')
+          }
+          if (forge !== 'github')
+            return byName('This forge cannot host images: the file names are listed.')
+          const host = status?.host ?? ''
+          if (host.toLowerCase() !== GITHUB_HOST) {
+            return byName(
+              `GitHub Enterprise Server (${host}) cannot host images through gh: the file names are listed.`,
+            )
+          }
+          const capabilities = yield* port.capabilities(one.repositoryId)
+          if (!capabilities.attachImage) {
+            return byName(
+              `gh ${capabilities.cliVersion ?? 'of an unknown version'} cannot attach images (2.99.0 or later can): the file names are listed.`,
+            )
+          }
+          const access = yield* repositoryAccess(one.repositoryId).pipe(Effect.result)
+          if (Result.isFailure(access)) {
+            return byName(
+              `Hemera could not read whether your account may push to ${full}: ${forgeSaid(access.failure)} The file names are listed.`,
+            )
+          }
+          if (!access.success.push) {
+            return byName(
+              `Your account cannot push to ${full}, which hosting images needs: the file names are listed.`,
+            )
+          }
+          if (access.success.visibility !== 'public' || answer === 'publish') {
+            return { reason: null, ask: false, full } satisfies Hosting
+          }
+          if (answer === 'list') return byName(listedByChoice(full))
+          return {
+            reason: `${full} is public: the file names are listed until you answer whether to publish the images.`,
+            ask: true,
+            full,
+          } satisfies Hosting
+        }).pipe(Effect.provide(context))
+
+      const listedByChoice = (full: string) =>
+        `${full} is public and you chose to list the file names instead of publishing the images.`
+
+      /** The images chosen for a pull request about to open, recorded before it is sent. */
+      const recordImages = (one: Run, hosting: Hosting | null) =>
+        provided(
+          mutate('recording the images of a pull request', (transaction) =>
+            Effect.gen(function* () {
+              const where = and(
+                eq(deliveryImages.missionId, one.mission.id),
+                eq(deliveryImages.repositoryId, one.repositoryId),
+              )
+              yield* transaction
+                .delete(deliveryImages)
+                .where(where)
+                .pipe(Effect.mapError(refusedWhile('replacing the images of a pull request')))
+              for (const [position, image] of one.images.entries()) {
+                yield* transaction
+                  .insert(deliveryImages)
+                  .values({
+                    missionId: one.mission.id,
+                    repositoryId: one.repositoryId,
+                    evidenceId: image.evidenceId,
+                    position,
+                    file: image.file,
+                    alt: secrets.mask(image.alt),
+                    state: hosting?.reason === null ? 'pending' : 'listed',
+                    updatedAt: now(),
+                  })
+                  .pipe(Effect.mapError(refusedWhile('recording the images of a pull request')))
+              }
+              yield* setIn(
+                transaction,
+                { missionId: one.mission.id, repositoryId: one.repositoryId },
+                {
+                  imagesReason:
+                    hosting?.reason === null || hosting === null
+                      ? null
+                      : secrets.mask(hosting.reason),
+                },
+              )
+              return { result: undefined, events: [] }
+            }),
+          ),
+        )
+
+      /** The question a public repository asks before its first images are published. */
+      const askPublic = (
+        one: Pick<Run, 'mission' | 'repositoryId'>,
+        full: string,
+        names: ReadonlyArray<string>,
+      ) =>
+        provided(
+          Effect.gen(function* () {
+            const counted = names.length === 1 ? '1 image' : `${String(names.length)} images`
+            const write = yield* createNeedIn(
+              DELIVERY_NEEDS,
+              MissionOwner.make({
+                projectId: one.mission.projectId,
+                missionId: one.mission.id,
+                taskId: null,
+              }),
+              DecisionFields.make({
+                question: [
+                  `Publish ${counted} in the public pull request of ${full}?`,
+                  ...names,
+                ].join('\n'),
+                options: [PUBLISH, LIST_NAMES],
+                recommended: {
+                  option: LIST_NAMES,
+                  reason:
+                    'Anyone can see an image published in a public pull request, and its copy stays on the forge. The evidence stays with the mission either way.',
+                },
+              }),
+            )
+            yield* mutate('asking whether to publish images', (transaction) =>
+              Effect.gen(function* () {
+                const made = yield* write(transaction)
+                yield* setIn(
+                  transaction,
+                  { missionId: one.mission.id, repositoryId: one.repositoryId },
+                  { imagesAnswer: 'ask' satisfies ImagesAnswer, imagesNeedId: made.id },
+                )
+                return { result: undefined, events: made.events }
+              }),
+            )
+          }),
+        )
+
+      /**
+       * Sends a pull request's images not in its description yet, then records where each stands
+       * from the description read back (CT-54). An image whose copy is there already is never sent
+       * again; `tried`, sent by the create that answered `said`, is not sent twice in one run.
+       * With `replace`, the description is first rewritten (the file names become the images).
+       * Answers why some images are not published, or null.
+       */
+      const sendImages = (
+        one: Pick<Run, 'mission' | 'repositoryId' | 'name'>,
+        pullRequest: { readonly number: number; readonly url: string },
+        tried: ReadonlyArray<string>,
+        told: string | null,
+        replace: { readonly from: string; readonly to: string } | null,
+      ) =>
+        Effect.gen(function* () {
+          const missionId = one.mission.id
+          const rows = (yield* imageRowsOf(missionId, one.repositoryId)).filter(
+            (row) => row.state === 'pending' || row.state === 'not-published',
+          )
+          if (rows.length === 0) return null
+          const folder = yield* evidenceFolderOf(missionId)
+          const bodyNow = pullRequestBody(one.repositoryId, pullRequest.number).pipe(
+            Effect.provide(context),
+            Effect.result,
+          )
+          const before = yield* bodyNow
+          const there = (body: Result.Result<string, { readonly message: string }>, alt: string) =>
+            Result.isSuccess(body) ? copyIn(body.success, alt) : null
+          const refused = new Map<string, string>()
+          const sendable = rows.filter((row) => {
+            if (Result.isFailure(before)) return false
+            if (there(before, row.alt) !== null || tried.includes(row.file)) return false
+            const why = unreadable(folder, row)
+            if (why !== null) refused.set(row.evidenceId, why)
+            return why === null
+          })
+          let failed = told
+          let body =
+            replace === null || Result.isFailure(before) || !before.success.includes(replace.from)
+              ? null
+              : before.success.replace(replace.from, replace.to)
+          for (let at = 0; at < sendable.length; at += ATTACH_AT_ONCE) {
+            const answer = yield* attachToPullRequest(
+              one.repositoryId,
+              pullRequest.number,
+              sendable
+                .slice(at, at + ATTACH_AT_ONCE)
+                .map((row) => `${join(folder, row.file)}#${row.alt}`),
+              body,
+            ).pipe(Effect.provide(context), Effect.result)
+            body = null
+            if (Result.isFailure(answer)) failed = forgeSaid(answer.failure)
+            else if (answer.success.code !== 0) {
+              failed =
+                answer.success.stderr === ''
+                  ? `gh ended with ${String(answer.success.code)}.`
+                  : answer.success.stderr
+            }
+          }
+          const after = sendable.length === 0 ? before : yield* bodyNow
+          const status = Option.getOrNull(readStatus((yield* reread(one)).pullRequest ?? ''))
+          const left: Array<string> = []
+          let published = 0
+          const settled = rows.map((row) => {
+            const url = there(after, row.alt)
+            if (url !== null) {
+              if (row.state !== 'published') published += 1
+              return {
+                row,
+                set: {
+                  state: 'published',
+                  url,
+                  forge: status?.forge ?? null,
+                  host: status?.host ?? null,
+                  number: pullRequest.number,
+                  message: null,
+                } satisfies Partial<ImageRow>,
+              }
+            }
+            const message =
+              refused.get(row.evidenceId) ??
+              (Result.isFailure(after)
+                ? `The description could not be read back: ${forgeSaid(after.failure)}`
+                : (failed ?? 'gh did not show it in the description.'))
+            left.push(message)
+            return {
+              row,
+              set: { state: 'not-published', url: null, message: secrets.mask(message) },
+            }
+          })
+          yield* provided(
+            mutate('recording the images of a pull request', (transaction) =>
+              Effect.gen(function* () {
+                for (const { row, set } of settled) {
+                  yield* transaction
+                    .update(deliveryImages)
+                    .set({ ...set, updatedAt: now() })
+                    .where(
+                      and(
+                        eq(deliveryImages.missionId, missionId),
+                        eq(deliveryImages.repositoryId, one.repositoryId),
+                        eq(deliveryImages.evidenceId, row.evidenceId),
+                      ),
+                    )
+                    .pipe(Effect.mapError(refusedWhile('recording the images of a pull request')))
+                }
+                return {
+                  result: undefined,
+                  events:
+                    published === 0
+                      ? []
+                      : [
+                          pushEvent(missionId, 'delivery.images_published', {
+                            repository: one.name,
+                            count: published,
+                            url: pullRequest.url,
+                          }),
+                        ],
+                }
+              }),
+            ),
+          )
+          const [first] = left
+          if (first === undefined) return null
+          return `${left.length === 1 ? '1 image was' : `${String(left.length)} images were`} not published: ${first}`
+        })
+
+      /**
+       * The images of a pull request found or opened: a public repository's question asked again
+       * when it was let go, then what is still to send sent. A failure stops the step.
+       */
+      const imagesStep = (
+        one: Run,
+        pullRequest: { readonly number: number; readonly url: string },
+        tried: ReadonlyArray<string>,
+        told: string | null,
+        hosting: Hosting | null,
+      ) =>
+        Effect.gen(function* () {
+          const row = yield* reread(one)
+          const rows = yield* imageRowsOf(one.mission.id, one.repositoryId)
+          const onList = rows.filter((image) => image.state === 'listed')
+          if (
+            onList.length > 0 &&
+            row.imagesNeedId === null &&
+            (hosting?.ask === true || (hosting === null && row.imagesAnswer === 'ask'))
+          ) {
+            yield* askPublic(
+              one,
+              hosting?.full ?? (yield* fullNameOf(one.mission.projectId, one.repositoryId)),
+              onList.map((image) => image.name),
+            )
+          }
+          const left = yield* sendImages(one, pullRequest, tried, told, null)
+          if (left === null) return
+          return yield* stopped(
+            'failed',
+            left,
+            errorNeed(`Some images of ${one.name} were not published in its pull request.`, [
+              { what: 'gh pr edit --attach', output: left },
+            ]),
+          )
+        })
+
+      /**
+       * A public repository's question answered: Publish edits the description, its file names
+       * becoming the images; the list keeps the names and says why.
+       */
+      const answerImages = (missionId: string, repositoryId: string) =>
+        Effect.gen(function* () {
+          const row = yield* rowOf(missionId, repositoryId)
+          if (row === null || row.pullRequest === null) return
+          const pullRequest = Option.getOrNull(readStatus(row.pullRequest))
+          if (pullRequest === null) return
+          const mission = yield* getMission(missionId).pipe(Effect.provide(context))
+          const one = { mission, repositoryId, name: row.repository }
+          if (row.imagesAnswer === 'list') {
+            const full = yield* fullNameOf(mission.projectId, repositoryId)
+            yield* setRow(row, { imagesReason: secrets.mask(listedByChoice(full)) })
+            return
+          }
+          if (row.imagesAnswer !== 'publish') return
+          const onList = (yield* imageRowsOf(missionId, repositoryId)).filter(
+            (image) => image.state === 'listed',
+          )
+          if (onList.length === 0) return
+          yield* provided(
+            mutate('publishing the images of a pull request', (transaction) =>
+              Effect.gen(function* () {
+                yield* transaction
+                  .update(deliveryImages)
+                  .set({ state: 'pending', message: null, updatedAt: now() })
+                  .where(
+                    and(
+                      eq(deliveryImages.missionId, missionId),
+                      eq(deliveryImages.repositoryId, repositoryId),
+                      eq(deliveryImages.state, 'listed'),
+                    ),
+                  )
+                  .pipe(Effect.mapError(refusedWhile('publishing the images of a pull request')))
+                yield* setIn(transaction, row, { imagesReason: null })
+                return { result: undefined, events: [] }
+              }),
+            ),
+          )
+          const left = yield* sendImages(one, pullRequest, [], null, {
+            from: nameList(onList),
+            to: imageLines(onList),
+          })
+          if (left === null) return
+          yield* stopRow(
+            one,
+            'pull-request',
+            stopped(
+              'failed',
+              left,
+              errorNeed(
+                `Some images of ${row.repository} were not published in its pull request.`,
+                [{ what: 'gh pr edit --attach', output: left }],
+              ),
+            ),
+          )
+        }).pipe(
+          Semaphore.withPermits(turnOf(`${missionId}\u0000${repositoryId}`), 1),
+          Effect.catchCause((cause) =>
+            said(`the images of ${repositoryId} were not published: ${String(cause)}`),
+          ),
+        )
+
       const pullRequestStep = (one: Run) =>
         Effect.gen(function* () {
           const missionId = one.mission.id
@@ -971,9 +1451,28 @@ export const pushesLayer = (settings: PushesSettings) => {
             yield* settleLeft(missionId, 'delivery.pull_request', one.name, 'done')
             const opened = row.pullRequest === null
             yield* keep(found.value.number, found.value.url, found.value.head, null, opened)
+            // Its images still to send (a Retry); none added since it opened (R7).
+            yield* imagesStep(one, found.value, [], null, null)
             return
           }
           yield* settleLeft(missionId, 'delivery.pull_request', one.name, 'failed')
+          // What the description shows of the images (R7), recorded before it is sent.
+          const hosting = one.images.length === 0 ? null : yield* hostingOf(one, row.imagesAnswer)
+          const shown =
+            hosting === null
+              ? ''
+              : hosting.reason === null
+                ? imageLines(one.images)
+                : nameList(one.images)
+          yield* recordImages(one, hosting)
+          const folder = yield* evidenceFolderOf(missionId)
+          // The first 50 go with the create; the rest, and what cannot be read, after it.
+          const sent =
+            hosting?.reason === null
+              ? one.images
+                  .slice(0, ATTACH_AT_ONCE)
+                  .filter((image) => unreadable(folder, image) === null)
+              : []
           const id = yield* begin(missionId, 'delivery.pull_request', {
             repository: one.name,
             head: one.branch,
@@ -984,11 +1483,17 @@ export const pushesLayer = (settings: PushesSettings) => {
             base: one.base,
             head: one.branch,
             title: one.render(one.entry.pullRequestTitle),
-            body: one.render(one.entry.pullRequestBody),
+            body: one.render(one.entry.pullRequestBody, shown),
             reviewers: one.entry.reviewers,
+            attachments: sent.map((image) => `${join(folder, image.file)}#${image.alt}`),
           }).pipe(Effect.provide(context), Effect.result)
-          if (Result.isFailure(created) && Predicate.isTagged(created.failure, 'ForgeError')) {
-            // The forge answered: it said no.
+          if (
+            Result.isFailure(created) &&
+            Predicate.isTagged(created.failure, 'ForgeError') &&
+            sent.length === 0
+          ) {
+            // The forge answered: it said no. With images, a failed upload still opens it: a find
+            // says which.
             const output = forgeSaid(created.failure)
             yield* settle(id, 'failed', output, row)
             return yield* stopped(
@@ -1010,6 +1515,13 @@ export const pushesLayer = (settings: PushesSettings) => {
               true,
             )
             yield* hold('opened', one.name)
+            yield* imagesStep(
+              one,
+              again.success.value,
+              sent.map((image) => image.file),
+              Result.isFailure(created) ? forgeSaid(created.failure) : null,
+              hosting,
+            )
             return
           }
           if (Result.isSuccess(again) && Result.isFailure(created)) {
@@ -1145,6 +1657,7 @@ export const pushesLayer = (settings: PushesSettings) => {
                 `The Workspace of ${row.repository} is on no branch: there is nothing to push.`,
               )
             }
+            const values = yield* valuesOf(mission, branch)
             const one: Run = {
               mission,
               project,
@@ -1152,7 +1665,8 @@ export const pushesLayer = (settings: PushesSettings) => {
               repositoryId,
               name: row.repository,
               entry,
-              render: yield* valuesOf(mission, branch),
+              render: values.render,
+              images: values.images,
               branch,
               remote: repository.remote,
               base: repository.baseBranch,
@@ -1346,7 +1860,7 @@ export const pushesLayer = (settings: PushesSettings) => {
             : `Push ${listed(names)}?`
           if (!copy.reviewDrafts) return asked
           const branch = buildingBranchName(mission.key, mission.title)
-          const render = yield* valuesOf(mission, branch)
+          const { render } = yield* valuesOf(mission, branch)
           const drafts = entries.map((entry) =>
             [
               `${entry.name}: ${render(entry.pullRequestTitle)}`,
@@ -1367,6 +1881,28 @@ export const pushesLayer = (settings: PushesSettings) => {
             need.answer !== null && Predicate.isTagged(need.answer, 'Chosen')
               ? need.answer.option
               : null
+          // A public repository's question on images (R7): its rows keep the answer.
+          const imagesAnswer: ImagesAnswer =
+            option === PUBLISH ? 'publish' : option === LIST_NAMES ? 'list' : 'ask'
+          const asked = yield* transaction
+            .update(deliveryPushes)
+            .set({ imagesAnswer, imagesNeedId: null, updatedAt: now() })
+            .where(
+              and(
+                eq(deliveryPushes.missionId, missionId),
+                eq(deliveryPushes.imagesNeedId, need.id),
+              ),
+            )
+            .returning({ repository: deliveryPushes.repository })
+            .pipe(Effect.mapError(refusedWhile('taking an answer on images')))
+          if (asked.length > 0) {
+            return [
+              pushEvent(missionId, 'delivery.images_answered', {
+                repositories: asked.map((row) => row.repository).join(','),
+                option: option ?? '',
+              }),
+            ]
+          }
           const state: RowState = option === NOT_NOW || option === null ? 'declined' : 'running'
           const answer = option === PUSH_ANYWAY ? 'push' : option === KEEP_OUT ? 'keep' : undefined
           const set: Partial<Row> = { state, needId: null, updatedAt: now() }
@@ -1427,13 +1963,22 @@ export const pushesLayer = (settings: PushesSettings) => {
        */
       const leaveReview = (missionId: string) =>
         Effect.gen(function* () {
-          const held = (yield* rowsOf(missionId)).filter((row) => row.needId !== null)
+          const held = (yield* rowsOf(missionId)).filter(
+            (row) => row.needId !== null || row.imagesNeedId !== null,
+          )
           if (held.length === 0) return
-          const ids = [...new Set(held.flatMap((row) => (row.needId === null ? [] : [row.needId])))]
+          const ids = [
+            ...new Set(
+              held.flatMap((row) => [row.needId, row.imagesNeedId].filter((id) => id !== null)),
+            ),
+          ]
           for (const row of held) {
+            // A public repository's question let go is asked again at the next return to Review.
             yield* setRow(
               row,
-              row.state === 'waiting' ? { needId: null, state: 'declined' } : { needId: null },
+              row.state === 'waiting' && row.needId !== null
+                ? { needId: null, state: 'declined', imagesNeedId: null }
+                : { needId: null, imagesNeedId: null },
             )
           }
           const pending = yield* database
@@ -1455,6 +2000,18 @@ export const pushesLayer = (settings: PushesSettings) => {
           }
           if (event.type === 'mission.moved' && event.payload['from'] === 'review') {
             return yield* leaveReview(event.entityId)
+          }
+          if (event.type === 'delivery.images_answered') {
+            const named = String(event.payload['repositories'] ?? '').split(',')
+            for (const row of yield* rowsOf(event.entityId)) {
+              if (named.includes(row.repository)) {
+                yield* answerImages(event.entityId, row.repositoryId).pipe(
+                  Effect.forkIn(scope),
+                  Effect.asVoid,
+                )
+              }
+            }
+            return
           }
           if (event.type === 'delivery.answered') {
             for (const row of yield* rowsOf(event.entityId)) {
@@ -1487,7 +2044,12 @@ export const pushesLayer = (settings: PushesSettings) => {
           .selectDistinct({ missionId: deliveryPushes.missionId })
           .from(deliveryPushes)
           .innerJoin(missions, eq(missions.id, deliveryPushes.missionId))
-          .where(and(isNotNull(deliveryPushes.needId), ne(missions.stage, 'review')))
+          .where(
+            and(
+              or(isNotNull(deliveryPushes.needId), isNotNull(deliveryPushes.imagesNeedId)),
+              ne(missions.stage, 'review'),
+            ),
+          )
           .pipe(Effect.mapError(refusedWhile('reading the pushes')))
         for (const one of holding) yield* leaveReview(one.missionId)
       })
@@ -1528,6 +2090,36 @@ export const pushesLayer = (settings: PushesSettings) => {
               const row = rows.find((one) => one.repositoryId === repository.id)
               return row === undefined ? [] : [row]
             })
+            const chosen = yield* chosenImages(missionId, secrets.mask)
+            const images = new Map<string, ReadonlyArray<PushImage>>()
+            for (const row of ordered) {
+              const kept = yield* imageRowsOf(missionId, row.repositoryId)
+              // Chosen since the pull request opened: never added to its description.
+              const later =
+                row.pullRequest === null
+                  ? []
+                  : chosen.filter(
+                      (image) => !kept.some((one) => one.evidenceId === image.evidenceId),
+                    )
+              images.set(row.repositoryId, [
+                ...kept.map((image): PushImage => ({
+                  evidenceId: image.evidenceId,
+                  name: image.name,
+                  alt: image.alt,
+                  state: IMAGE_STATES.find((one) => one === image.state) ?? 'pending',
+                  url: image.url,
+                  message: image.message,
+                })),
+                ...later.map((image): PushImage => ({
+                  evidenceId: image.evidenceId,
+                  name: image.name,
+                  alt: image.alt,
+                  state: 'not-in-pull-request',
+                  url: null,
+                  message: null,
+                })),
+              ])
+            }
             return {
               missionId,
               rulesVersion: copy?.version ?? null,
@@ -1553,6 +2145,8 @@ export const pushesLayer = (settings: PushesSettings) => {
                   pushedAt: row.pushedAt,
                   pullRequest:
                     row.pullRequest === null ? null : Option.getOrNull(readStatus(row.pullRequest)),
+                  images: images.get(row.repositoryId) ?? [],
+                  imagesReason: row.imagesReason,
                 } satisfies RepositoryPush
               }),
             } satisfies MissionPushes
@@ -1561,6 +2155,42 @@ export const pushesLayer = (settings: PushesSettings) => {
 
       const service: PushesService = {
         pushes,
+        setPublishable: (evidenceId, publishable) =>
+          provided(
+            Effect.gen(function* () {
+              const [found] = yield* database
+                .select()
+                .from(memoryEvidence)
+                .where(eq(memoryEvidence.id, evidenceId))
+                .pipe(Effect.mapError(refusedWhile('reading an evidence')))
+              if (found === undefined) return yield* new UnknownEvidence({ id: evidenceId })
+              if (!IMAGE_TYPES.includes(found.mediaType)) {
+                return yield* new NotPublishable({ evidenceId })
+              }
+              yield* mutate('marking an image publishable', (transaction) =>
+                transaction
+                  .update(memoryEvidence)
+                  .set({ publishable: publishable ? 1 : 0 })
+                  .where(eq(memoryEvidence.id, evidenceId))
+                  .pipe(
+                    Effect.mapError(refusedWhile('marking an image publishable')),
+                    Effect.as({
+                      result: undefined,
+                      events: [
+                        {
+                          type: 'delivery.image_marked',
+                          entityKind: 'mission',
+                          entityId: found.missionId,
+                          source: 'ui',
+                          author: 'human',
+                          payload: { evidenceId, name: found.name, publishable },
+                        } satisfies NewEvent,
+                      ],
+                    }),
+                  ),
+              )
+            }),
+          ),
         retry: (missionId, repository) =>
           Effect.gen(function* () {
             yield* getMission(missionId).pipe(Effect.provide(context))

@@ -1,10 +1,11 @@
 /**
  * The delivery's lines in a mission's Journal (R6): each the projection of the domain event
  * written with what it records. The preparation copied, a commit, a push, a pull request opened, a
- * step that failed with its message (masked when it was written).
+ * step that failed with its message (masked when it was written), images published in a pull
+ * request, and the user's mark on an image (R7).
  */
 
-import { HemeraAuthor, type MemoryAuthor } from '@hemera/ipc'
+import { HemeraAuthor, type MemoryAuthor, UserAuthor } from '@hemera/ipc'
 import { Effect, Option, Schema } from 'effect'
 
 import type { DomainEvent, EventPayload } from '../journal.ts'
@@ -12,6 +13,7 @@ import type { JournalMapper } from '../memory/index.ts'
 
 const readString = Schema.decodeUnknownOption(Schema.String)
 const readNumber = Schema.decodeUnknownOption(Schema.Number)
+const readBoolean = Schema.decodeUnknownOption(Schema.Boolean)
 
 const stringOf = (payload: EventPayload, key: string): string =>
   Option.getOrElse(readString(payload[key]), () => '')
@@ -78,6 +80,26 @@ export const DELIVERY_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map<stri
         : `The ${stringOf(payload, 'step')} step of ${stringOf(payload, 'repository')} failed: ${stringOf(payload, 'message')}`,
     ),
   ],
+  [
+    'delivery.images_published',
+    line((payload) => {
+      const count = numberOf(payload, 'count') ?? 0
+      return `Hemera published ${count === 1 ? '1 image' : `${String(count)} images`} in the pull request of ${stringOf(payload, 'repository')}: ${stringOf(payload, 'url')}`
+    }),
+  ],
+  [
+    'delivery.image_marked',
+    (event) =>
+      Effect.succeed({
+        missionId: event.entityId,
+        kind: 'delivery',
+        author: UserAuthor.make({}),
+        text: Option.getOrElse(readBoolean(event.payload['publishable']), () => false)
+          ? `${stringOf(event.payload, 'name')} is marked publishable in the pull requests.`
+          : `${stringOf(event.payload, 'name')} is marked not to be published.`,
+      }),
+  ],
   // The user's answer is the need's own line.
   ['delivery.answered', () => Effect.succeed(null)],
+  ['delivery.images_answered', () => Effect.succeed(null)],
 ])

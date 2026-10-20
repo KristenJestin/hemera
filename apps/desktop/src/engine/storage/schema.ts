@@ -1013,6 +1013,11 @@ export const memoryEvidence = sqliteTable(
     authorRole: text('author_role'),
     authorSession: text('author_session'),
     addedAt: text('added_at').notNull(),
+    /**
+     * The user's mark on an image (R7): 1 publishable in the mission's pull requests, 0 not; null
+     * unmarked, where a feedback image of the user's is publishable and any other is not.
+     */
+    publishable: integer('publishable'),
   },
   (table) => [index('evidence_by_mission').on(table.missionId, table.addedAt)],
 )
@@ -3445,7 +3450,44 @@ export const deliveryPushes = sqliteTable(
     remote: text('remote'),
     branch: text('branch'),
     pullRequest: text('pull_request'),
+    /** Why the pull request's images are listed by name rather than shown (R7), in words. */
+    imagesReason: text('images_reason').$type<Masked<string>>(),
+    /** The user's answer for a public repository (R7): `publish`, or `list` the names instead. */
+    imagesAnswer: text('images_answer'),
+    /** The decision need that asks it, while it is pending. */
+    imagesNeedId: text('images_need_id'),
     updatedAt: text('updated_at').notNull(),
   },
   (table) => [primaryKey({ columns: [table.missionId, table.repositoryId] })],
+)
+
+/**
+ * The images of a repository's pull request (R7, CT-54): the evidence images chosen when it was
+ * opened, in their order, each with the file attached (named by its content) and its alt text, and
+ * where it stands: `pending` (to send), `published` (the copy's forge, host, pull request and URL,
+ * read back from the description), `listed` (by name), `not-published` (the CLI's message, masked).
+ * The evidence stays the truth: this is the address of a copy.
+ */
+export const deliveryImages = sqliteTable(
+  'delivery_images',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    evidenceId: text('evidence_id')
+      .notNull()
+      .references(() => memoryEvidence.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    file: text('file').notNull(),
+    alt: text('alt').$type<Masked<string>>().notNull(),
+    state: text('state').notNull(),
+    forge: text('forge'),
+    host: text('host'),
+    number: integer('number'),
+    url: text('url'),
+    message: text('message').$type<Masked<string>>(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repositoryId, table.evidenceId] })],
 )

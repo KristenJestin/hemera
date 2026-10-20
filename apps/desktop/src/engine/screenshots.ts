@@ -1,6 +1,7 @@
 /**
- * Hemera's own screenshots (#253): the folder of the data folder they are written to, and the
- * check that a path names one of them, the only files a forge CLI may attach to a pull request.
+ * Hemera's own images: its screenshots (#253), in the folder of the data folder they are written
+ * to, and the images of a mission's evidence (R7), in `missions/<key>/evidence/`; and the check
+ * that a path names one of them, the only files a forge CLI may attach to a pull request.
  */
 
 import { realpathSync } from 'node:fs'
@@ -47,4 +48,18 @@ export const screenshotIn =
     if (real === null || root === null) return null
     const inside = relative(root, real)
     return inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? real : null
+  }
+
+/**
+ * The real path of a file of a mission's evidence a path names, or null: under the missions
+ * folder by its words, and resolved to a file whose real path is `<key>/evidence/<file>` in it.
+ */
+export const evidenceIn =
+  (missions: string, resolve: (path: string) => string | null = realPathOf) =>
+  (path: string): string | null => {
+    const real = screenshotIn(missions, resolve)(path)
+    const root = resolve(missions)
+    if (real === null || root === null) return null
+    const parts = relative(root, real).split(sep)
+    return parts.length === 3 && parts[1] === 'evidence' ? real : null
   }

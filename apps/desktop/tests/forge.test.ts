@@ -2110,6 +2110,78 @@ describe('An image is attached from Hemera’s own screenshot folder only', () =
   )
 })
 
+describe('An image of a mission’s evidence is attached; every file of a call is checked (R7)', () => {
+  const ATTACH_OK = { cli: 'gh', when: ['pr', 'edit'], stdout: 'attached\n' } as const
+  const attachAll = (paths: ReadonlyArray<string>) =>
+    Effect.flatMap(runner, (forgeRunner) =>
+      forgeRunner.run({
+        cli: 'gh',
+        forge: 'github',
+        host: 'github.com',
+        projectId: 'p',
+        args: [
+          'pr',
+          'edit',
+          '7',
+          '--repo',
+          'github.com/acme/shop',
+          ...paths.flatMap((path) => ['--attach', `${path}#An image`]),
+        ],
+      }),
+    )
+  const evidence = () => join(data, 'missions', 'ACME-1', 'evidence')
+
+  test('two images of the evidence are attached in one call, each by its real path', async () => {
+    const fake = fakeForge([...ghReady(), ATTACH_OK])
+    await withForge(
+      fake,
+      () =>
+        Effect.gen(function* () {
+          mkdirSync(evidence(), { recursive: true })
+          writeFileSync(join(evidence(), 'a.png'), 'png')
+          writeFileSync(join(evidence(), 'b.png'), 'png')
+          return yield* attachAll([join(evidence(), 'a.png'), join(evidence(), 'b.png')])
+        }),
+      { shop: REMOTES.shop },
+    )
+    const [edit] = fake.calls().filter((call) => call.args[0] === 'pr')
+    const real = realpathSync.native(evidence())
+    expect(edit?.args.filter((_arg, at, all) => all[at - 1] === '--attach')).toEqual([
+      `${join(real, 'a.png')}#An image`,
+      `${join(real, 'b.png')}#An image`,
+    ])
+  })
+
+  test.each([
+    ['a file elsewhere after one of the evidence', () => join(work, 'id_ed25519')],
+    [
+      'a file of the mission’s folder outside its evidence',
+      () => join(data, 'missions', 'ACME-1', 'notes.md'),
+    ],
+    [
+      'a folder of the evidence',
+      () => join(data, 'missions', 'ACME-1', 'evidence', 'deeper', 'c.png'),
+    ],
+  ])('%s is refused before spawning: no file of the call is sent', async (_case, path) => {
+    const fake = fakeForge([...ghReady(), ATTACH_OK])
+    const refused = await withForge(
+      fake,
+      () =>
+        Effect.gen(function* () {
+          writeFileSync(join(work, 'id_ed25519'), 'secret')
+          mkdirSync(join(evidence(), 'deeper'), { recursive: true })
+          writeFileSync(join(evidence(), 'a.png'), 'png')
+          writeFileSync(join(evidence(), 'deeper', 'c.png'), 'png')
+          writeFileSync(join(data, 'missions', 'ACME-1', 'notes.md'), 'notes')
+          return yield* Effect.flip(attachAll([join(evidence(), 'a.png'), path()]))
+        }),
+      { shop: REMOTES.shop },
+    )
+    expect(refused).toBeInstanceOf(ForgeCommandRefused)
+    expect(fake.calls().filter((call) => call.args[0] === 'pr')).toEqual([])
+  })
+})
+
 describe('The line to copy is quoted for the shell of the platform', () => {
   test.each([
     [
