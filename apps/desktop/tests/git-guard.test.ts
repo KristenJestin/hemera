@@ -1495,6 +1495,119 @@ describe('An index the guard cannot read for its submodules asks, never taken as
   })
 })
 
+describe('The Git guard’s follow-ups after #499 (#500)', () => {
+  /** A clean filter: a program Git runs on the files of a checkout, `git status` included. */
+  const FILTER = '[filter "x"]\n\tclean = sh ./gotcha.sh\n'
+
+  test('1. a linked index allowed once: a clean filter written afterwards into the config of an embedded repository it names stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        repository(join(main, 'vendor'))
+        git(main, 'add', 'vendor')
+        git(main, 'commit', '-q', '-m', 'vendor')
+        yield* engineStatus(main)
+        const index = join(main, '.git', 'index')
+        renameSync(index, join(work, 'index'))
+        symlinkSync(join(work, 'index'), index)
+        const held = yield* engineStatus(main)
+        const [first] = yield* asked
+        if (first !== undefined) yield* allow(first)
+        const allowed = yield* engineStatus(main)
+        appendFileSync(join(main, 'vendor', '.git', 'config'), FILTER)
+        return { held, allowed, status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.held).toContain('Hemera stopped its Git')
+    expect(result.allowed).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/vendor/.git/config')
+  })
+
+  test('3. a worktree the engine adds again at a checkout path the guard knows: an index it cannot read, written during the call, asks', async () => {
+    const main = repository(join(work, 'acme'))
+    const other = join(work, 'acme-other')
+    git(main, 'worktree', 'add', '-q', other, '-b', 'side')
+    const armed = join(work, 'armed')
+    const started = join(work, 'started')
+    const release = join(work, 'release')
+    // The engine's `worktree add` is held inside, once armed, by the repository's own hook.
+    git(main, 'config', 'core.hooksPath', join(main, '.git', 'hooks'))
+    writeFileSync(
+      join(main, '.git', 'hooks', 'post-checkout'),
+      `#!/bin/sh\nif [ -f "${armed}" ]; then\n  : > "${started}"\n  while [ ! -f "${release}" ]; do sleep 0.05; done\nfi\n`,
+      { mode: 0o755 },
+    )
+    const result = await reopen(
+      Effect.gen(function* () {
+        // The engine's first Git call there sees the repository with this checkout in it.
+        const first = yield* engineStatus(other)
+        yield* Git.use((service) => service.worktreeRemove(main, other))
+        writeFileSync(armed, '')
+        const adding = yield* Git.use((service) =>
+          service.worktreeAdd(main, 'mission/again', other, 'HEAD'),
+        ).pipe(Effect.forkChild)
+        if (
+          !(yield* until(
+            Effect.sync(() => existsSync(started)),
+            (there) => there,
+          ))
+        ) {
+          return yield* Effect.die(new Error('the worktree add was never held'))
+        }
+        writeFileSync(join(main, '.git', 'worktrees', 'acme-other', 'index'), 'not an index\n')
+        writeFileSync(release, '')
+        yield* Fiber.join(adding)
+        return { first, status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.first).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/worktrees/acme-other/index (added)')
+  })
+
+  test('4. with submodule.recurse=true, a worktree the engine adds on a commit with a submodule enters it in no call: the submodule’s filter never runs', async () => {
+    const main = repository(join(work, 'acme'))
+    const shared = repository(join(work, 'shared'))
+    writeFileSync(join(shared, 'f.txt'), 'f\n')
+    writeFileSync(join(shared, '.gitattributes'), '* filter=x\n')
+    git(shared, 'add', '.')
+    git(shared, 'commit', '-q', '-m', 'f')
+    git(main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', shared, 'shared')
+    git(main, 'commit', '-q', '-m', 'shared')
+    // A filter of the submodule's own Git folder, taken in the baseline: only where Git goes counts.
+    const entered = join(work, 'entered')
+    const mark = join(work, 'mark.sh')
+    writeFileSync(mark, `#!/bin/sh\n: > "${entered.replaceAll('\\', '/')}"\ncat\n`)
+    const config = join(main, '.git', 'modules', 'shared', 'config')
+    for (const kind of ['smudge', 'clean']) {
+      git(main, 'config', '-f', config, `filter.x.${kind}`, `sh "${mark.replaceAll('\\', '/')}"`)
+    }
+    git(main, 'config', 'submodule.recurse', 'true')
+    const other = join(work, 'acme-other')
+    const result = await reopen(
+      Effect.gen(function* () {
+        yield* createProject({ name: 'Acme', mainCheckout: main, repositories: [] })
+        yield* sighted(main)
+        const added = yield* Git.use((service) =>
+          service.worktreeAdd(main, 'mission/other', other, 'HEAD'),
+        ).pipe(
+          Effect.as('ran'),
+          Effect.catchTag('GitFailed', (refused) => Effect.succeed(String(refused.stderr))),
+        )
+        return { added, status: yield* engineStatus(other) }
+      }),
+    )
+    const enteredByEngine = existsSync(entered)
+    // The control: Git does run that filter once it works in the submodule's checkout.
+    rmSync(join(main, 'shared', 'f.txt'))
+    git(join(main, 'shared'), 'checkout', '--', 'f.txt')
+    expect(result).toEqual({ added: 'ran', status: 'ran' })
+    expect(enteredByEngine).toBe(false)
+    expect(existsSync(join(other, 'shared', '.git'))).toBe(false)
+    expect(existsSync(entered)).toBe(true)
+  })
+})
+
 describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
   test('an upstream pointed at another repository, taken without asking, never moves the engine’s fetch: it fetches the remote it names', async () => {
     const result = await withBuilder(({ main }) =>

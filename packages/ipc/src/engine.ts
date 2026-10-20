@@ -52,6 +52,7 @@ import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 import { AutoReviewRpcs } from './review.ts'
 import { ReviewRpcs } from './feedback.ts'
+import { ShipRpcs } from './ship.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -208,8 +209,11 @@ export const EngineForgeRpcs = ForgeRpcs
 /** A Project's delivery rules (#340), a layer of its own in the engine and in main (TS2589). */
 export const EngineDeliveryRulesRpcs = DeliveryRulesRpcs
 
-/** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
-export const EngineReviewRpcs = DiffRpcs
+/**
+ * The live diff of a mission (#249) and its automatic review (#147), which the Building page reads
+ * (#151): each a layer of its own in the engine and in main (TS2589).
+ */
+export const EngineReviewRpcs = DiffRpcs.merge(AutoReviewRpcs)
 
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
@@ -220,13 +224,8 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
 )
 
 /**
- * Everything the engine serves: what main asks, and the proofs (#144), the automatic review
- * (#147), Review's feedback (#341) and the pushes (R6), served apart until their screens (R10)
- * forward them; their handlers are layers of their own (TS2589).
+ * Everything the engine serves: what main asks, and the proofs (#144), Review's feedback (#341),
+ * the pushes (R6) and Ship (R9), served apart until their screens (R10) forward them; their
+ * handlers are layers of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(
-  ProofsRpcs,
-  AutoReviewRpcs,
-  ReviewRpcs,
-  DeliveryRpcs,
-)
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, ReviewRpcs, DeliveryRpcs, ShipRpcs)

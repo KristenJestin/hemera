@@ -3449,3 +3449,21 @@ export const deliveryPushes = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.missionId, table.repositoryId] })],
 )
+
+/**
+ * Ship (R9): one row per mission shipped, the record S3 checks every later change against: the
+ * checkpoint Ship took, each repository's frozen tree (JSON), the versions of the rules' copies it
+ * read (JSON), what the confirmation showed (JSON, masked), when, and when the mission was marked
+ * delivered with the Local preset (null otherwise).
+ */
+export const missionShips = sqliteTable('mission_ships', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  checkpointId: text('checkpoint_id').notNull(),
+  trees: text('trees').notNull(),
+  versions: text('versions').notNull(),
+  confirmation: text('confirmation').$type<Masked<string>>().notNull(),
+  shippedAt: text('shipped_at').notNull(),
+  deliveredAt: text('delivered_at'),
+})

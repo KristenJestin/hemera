@@ -423,6 +423,22 @@ export const BUILDING_MAPPERS: ReadonlyMap<string, JournalMapper> = new Map([
     }),
   ],
   [
+    'building.proofs_kept',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Hemera kept the proof tests of ${stringsOf(payload, 'scenarios').join(', ')} as they are in the Workspace, changed since their Building.`,
+    ),
+  ],
+  [
+    'building.proofs_deleted',
+    lineOf(
+      byHemera,
+      (payload) =>
+        `Hemera did not put back the proof tests of ${stringsOf(payload, 'scenarios').join(', ')}: deleted since their Building.`,
+    ),
+  ],
+  [
     'building.red_recorded',
     lineOf(byHemera, (payload) => `The red of ${stringOf(payload, 'scenario')} is recorded.`),
   ],

@@ -293,16 +293,12 @@ const copiesIn = (reader: EngineTransaction, projectId: string, missionId: strin
     )
 
 /**
- * Copies a section of the Project's rules into the mission, resolved, with the rules' version and
- * a `delivery.rules_copied` event; a section already copied answers its copy, unchanged. Whether
- * it was copied is read in the transaction that writes it, so two asked at once make one. `hold`
- * is where a suite holds a copy before that transaction; never held otherwise.
+ * What copies sections of the Project's rules into the mission, read for the Project as it is now:
+ * in the transaction given, a section resolved and written with the rules' version and a
+ * `delivery.rules_copied` event; a section already copied answers its copy, unchanged, and no event.
+ * Ship (R9) copies the waves and the End in the transaction that freezes the mission.
  */
-export const copySection = (
-  missionId: string,
-  section: DeliverySection,
-  hold: Effect.Effect<void> = Effect.void,
-) =>
+export const sectionCopier = (missionId: string) =>
   Effect.gen(function* () {
     const mission = yield* getMission(missionId)
     // A section already copied is answered from its copy: the forge is read only to make one.
@@ -312,13 +308,12 @@ export const copySection = (
     if (copied !== undefined) return copied
     const project = yield* getProject(mission.projectId)
     const delivery = yield* deliveryProjectOf(project)
-    yield* hold
-    return yield* mutate('copying the delivery rules into a mission', (transaction) =>
+    return (transaction: EngineTransaction, section: DeliverySection) =>
       Effect.gen(function* () {
         const kept = (yield* copiesIn(transaction, project.id, missionId)).find(
           (copy) => copy.section === section,
         )
-        if (kept !== undefined) return { result: kept, events: [] }
+        if (kept !== undefined) return { copy: kept, events: [] }
         const rules = yield* rulesIn(transaction, project.id)
         const copy = sectionOf(rules, delivery, section, new Date().toISOString())
         yield* transaction
@@ -339,9 +334,36 @@ export const copySection = (
           author: 'hemera',
           payload: { section, version: copy.version },
         }
-        return { result: copy, events: [event] }
-      }),
+        return { copy, events: [event] }
+      })
+  })
+
+/**
+ * Copies a section of the Project's rules into the mission (`sectionCopier`) in a transaction of
+ * its own. Whether it was copied is read in the transaction that writes it, so two asked at once
+ * make one. `hold` is where a suite holds a copy before that transaction; never held otherwise.
+ */
+export const copySection = (
+  missionId: string,
+  section: DeliverySection,
+  hold: Effect.Effect<void> = Effect.void,
+) =>
+  Effect.gen(function* () {
+    const copyIn = yield* sectionCopier(missionId)
+    yield* hold
+    return yield* mutate('copying the delivery rules into a mission', (transaction) =>
+      Effect.map(copyIn(transaction, section), ({ copy, events }) => ({ result: copy, events })),
     )
+  })
+
+/** A section of the Project's rules resolved as a copy would be now, written nowhere. */
+export const sectionNow = (missionId: string, section: DeliverySection) =>
+  Effect.gen(function* () {
+    const mission = yield* getMission(missionId)
+    const project = yield* getProject(mission.projectId)
+    const delivery = yield* deliveryProjectOf(project)
+    const rules = yield* reading((reader) => rulesIn(reader, project.id))
+    return sectionOf(rules, delivery, section, new Date().toISOString())
   })
 
 /** The sections the mission copied, in the order of the rules. */

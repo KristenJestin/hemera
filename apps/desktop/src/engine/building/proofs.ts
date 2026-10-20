@@ -821,7 +821,18 @@ export const buildingProofs = (parts: ProofParts) => {
         readonly status: 'A' | 'M'
       }
     | { readonly kind: 'there' }
-    | { readonly kind: 'conflict'; readonly said: string; readonly versions: string }
+    | {
+        readonly kind: 'conflict'
+        readonly said: string
+        readonly versions: string
+        /** The file the addition goes into is gone from the Workspace. */
+        readonly gone?: true
+      }
+
+  /** Whether a file is missing from the Workspace: a proof's test the user deleted since. */
+  const isGone = (placed: Placed) =>
+    (placed.kind === 'write' && placed.before === null) ||
+    (placed.kind === 'conflict' && placed.gone === true)
 
   const placeFile = (
     building: BuildingRow,
@@ -882,6 +893,7 @@ export const buildingProofs = (parts: ProofParts) => {
           kind: 'conflict',
           said: `${named} is not in the Workspace: the addition has nothing to go into`,
           versions: '',
+          gone: true,
         } satisfies Placed
       }
       const merged = yield* Git.use((git) =>
@@ -1008,6 +1020,9 @@ export const buildingProofs = (parts: ProofParts) => {
   /**
    * Writes every automated scenario's test and support files into the Workspace (CT-37), once: a
    * Building whose proofs were written writes nothing again. Each conflict is handed to the Builder.
+   * A round's Building writes only its own: a proof it carries has its test in the Workspace
+   * already, kept as the user left it in Review and said so (#485); one the user deleted is not put
+   * back, and is said deleted.
    */
   const writeProofs = (building: BuildingRow) =>
     Effect.gen(function* () {
@@ -1017,15 +1032,30 @@ export const buildingProofs = (parts: ProofParts) => {
       const rows = (yield* scenarioProofsIn(database, building.id)).filter(
         (row) => modeOf(row) === 'automated',
       )
+      const own =
+        building.round === null
+          ? null
+          : (yield* roundScenariosIn(database, building.missionId, building.round)).map(
+              (one) => one.id,
+            )
       const written: Array<{ repository: string; path: string; status: 'A' | 'M' }> = []
       const conflicts: Array<{ scenario: string; said: string; versions: string }> = []
       const scenarios: string[] = []
+      const kept: string[] = []
+      const deleted: string[] = []
       for (const row of rows) {
         const proof = yield* proofOf(building.missionId, row.scenario)
         if (proof === null) continue
         const files = filesOf(proof)
         const placed: Array<{ file: (typeof files)[number]; placed: Placed }> = []
         for (const file of files) placed.push({ file, placed: yield* placeFile(building, file) })
+        if (own !== null && !own.includes(row.scenario)) {
+          const left = placed.filter((one) => one.placed.kind !== 'there')
+          if (left.length > 0) {
+            ;(left.every((one) => isGone(one.placed)) ? deleted : kept).push(row.scenario)
+          }
+          continue
+        }
         const conflict = placed.find((one) => one.placed.kind === 'conflict')
         if (conflict !== undefined && conflict.placed.kind === 'conflict') {
           conflicts.push({
@@ -1083,6 +1113,16 @@ export const buildingProofs = (parts: ProofParts) => {
                 scenarios,
                 conflicts: conflicts.map((one) => one.scenario),
               }),
+              ...(kept.length === 0
+                ? []
+                : [buildingEvent(building.missionId, 'building.proofs_kept', { scenarios: kept })]),
+              ...(deleted.length === 0
+                ? []
+                : [
+                    buildingEvent(building.missionId, 'building.proofs_deleted', {
+                      scenarios: deleted,
+                    }),
+                  ]),
             ],
           }
         }),
