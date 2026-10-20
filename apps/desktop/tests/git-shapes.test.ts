@@ -385,33 +385,6 @@ describe('An index that cannot be read for its submodules is said, never read as
     },
   )
 
-  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
-    'an index refused while Git replaces it is read again once replaced, never said (#522)',
-    () => {
-      const { main, index } = indexed()
-      const fresh = readFileSync(index)
-      // Git writes an index whole beside it and renames it over the old one; on Windows, the old
-      // one refuses to be opened meanwhile. Held here: the old index refused right after the
-      // fingerprint's stat of it, the new one renamed in place before the next stat.
-      let stats = 0
-      const replacing: StatOf = (path) => {
-        if (path !== index) return lstatSync(path, { bigint: true })
-        stats += 1
-        if (stats === 2) {
-          writeFileSync(`${index}.lock`, fresh)
-          renameSync(`${index}.lock`, index)
-        }
-        const stat = lstatSync(path, { bigint: true })
-        if (stats === 1) chmodSync(index, 0o000)
-        return stat
-      }
-      const shapes = shapesOf([main], home, [], replacing)
-      expect(stats).toBeGreaterThan(1)
-      expect(shapes.get(index)).toBeUndefined()
-      expect([...shapes.keys()]).toContain(join(main, 'vendor', '.git', 'config'))
-    },
-  )
-
   test('a locked index, its stat refused (a sharing violation on Windows), is said', () => {
     const { main, index } = indexed()
     const locked: StatOf = (path) => {

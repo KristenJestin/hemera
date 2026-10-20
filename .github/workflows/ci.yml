@@ -209,8 +209,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [repository 1/3, repository 2/3, repository 3/3]
-        copy: [1, 2]
+        part: [checks and stories, repository 1/3, repository 2/3, repository 3/3]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -309,13 +308,7 @@ jobs:
         shell: bash
         env:
           PART: ${{ matrix.part }}
-        run: |
-          ( for i in 1 2 3 4; do pnpm exec vp test run --project repository apps/desktop/tests/ship.test.ts > "ship-$i.log" 2>&1 || echo "DIAG522 ship loop $i failed"; done ) &
-          loop=$!
-          pnpm test --project repository --shard="${PART#repository }" || echo "DIAG522 shard failed"
-          wait $loop
-          for f in ship-*.log; do echo "=== $f"; grep -E "Tests |FAIL|DIAG522" "$f" | head -20; done
-          for f in ship-*.log; do if grep -q "DIAG522" "$f"; then echo "=== DIAG522 lines of $f"; grep -A400 "DIAG522" "$f" | head -1500; fi; done
+        run: pnpm test --project repository --shard="${PART#repository }"
       #
       # The stall itself is not explained (#294). `@vitest/browser` waits on the iframe's `load`
       # and, once the run is acknowledged, on `response:execute`, neither with a timer; which one
