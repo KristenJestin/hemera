@@ -317,9 +317,8 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             return decided('deny', ['a deletion that touches a .git folder'])
           }
           if (call.session.missionId !== null) {
-            const commits = yield* CommitRights.use((rights) =>
-              rights.agentsCommit(call.session.projectId),
-            )
+            const missionId = call.session.missionId
+            const commits = yield* CommitRights.use((rights) => rights.agentsCommit(missionId))
             const refused = missionRefusal(action.sequences, commits)
             if (refused !== null) return decided('deny', [refused])
           }

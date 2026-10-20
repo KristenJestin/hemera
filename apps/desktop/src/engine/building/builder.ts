@@ -54,9 +54,16 @@ import {
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
+import type { ForgePort } from '../forges/port.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
-import { type CancelIn, type MissionCancels, cancelMissionIn, runStops } from '../missions.ts'
+import {
+  type CancelIn,
+  type MissionActivity,
+  type MissionCancels,
+  cancelMissionIn,
+  runStops,
+} from '../missions.ts'
 import {
   DeliveryFailed,
   type NeedHandler,
@@ -105,7 +112,7 @@ import { readyLine, readySaid } from './builder-role.ts'
 import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
-import { buildingLoop, fileOf, runningOf } from './loop.ts'
+import { AFTER_TASK, buildingLoop, fileOf, runningOf } from './loop.ts'
 import {
   CANCEL_MISSION,
   END_WITHOUT,
@@ -199,6 +206,8 @@ const HEARTBEAT = '15 seconds'
 
 type Needs =
   | Database
+  | ForgePort
+  | MissionActivity
   | DomainEvents
   | Secrets
   | Sessions
@@ -419,6 +428,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
        */
       const commitsLeft = (building: BuildingRow) =>
         loop.commitLeft(building).pipe(
+          // Every step done: an end that waited for them is judged again (#477), and only such
+          // an end: judged from every pass, it would run ahead of the proofs' own turns.
+          Effect.flatMap((state) =>
+            state === 'done' && heldBySteps.delete(building.id)
+              ? endIfReady(building)
+              : Effect.void,
+          ),
           provided,
           Effect.catchCause((cause) => said(`the commits were not made: ${String(cause)}`)),
           Effect.forkIn(layerScope),
@@ -894,6 +910,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
 
       // One end called at a time: a green and a task done together never call it twice.
       const endTurn = Semaphore.makeUnsafe(1)
+      /** The Buildings whose end last waited for an After each task step (#477). */
+      const heldBySteps = new Set<string>()
       /** What each Building's end was last said to wait on: said again only when it changes. */
       const endWaits = new Map<string, string>()
       /**
@@ -914,6 +932,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (row?.id !== building.id || row.tasksDoneAt === null) return
             const refreshing = row.endCalledAt !== null
             if (refreshing && row.phase !== 'refresh') return
+            // The last task's After each task steps are done before the end (#477): the pass runs
+            // here, and once a step it waits on is done, its own pass judges the end again.
+            if (!refreshing) {
+              // Marked before the pass: a pass of its own that ends meanwhile judges it again.
+              heldBySteps.add(row.id)
+              const stacks = yield* loop
+                .commitLeft(row)
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(said(`the end waits on the commits: ${String(cause)}`), 'stopped'),
+                  ),
+                )
+              if (stacks !== 'done') return
+              heldBySteps.delete(row.id)
+            }
             const red = yield* proofs.unproven(row, refreshing)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
@@ -1134,6 +1167,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   `refused: ${task.id} waits for the red of ${listed(reds)}: Hemera runs ${reds.length === 1 ? 'its proof' : 'their proofs'} before any task covering ${reds.length === 1 ? 'it' : 'them'} starts.`,
                 )
               : refusal(notAvailableSaid(task))
+          }
+          // A step of an After each task stack waiting holds every next task back (#477).
+          const step = yield* loop.stepWaiting(building)
+          if (step !== null) {
+            return refusal(
+              `${task.id} waits: ${step}. Start it again once that is done: Hemera tells you.`,
+            )
           }
           const holder = yield* holderIn(database, building.id, task)
           if (holder !== null) {
@@ -2033,7 +2073,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }),
           )
           if (outcome === null) return
-          if (outcome.decision.kind === 'commit') yield* commitsLeft(outcome.building)
+          if (outcome.decision.kind === 'commit' || outcome.decision.kind === AFTER_TASK)
+            yield* commitsLeft(outcome.building)
           // A question about the proofs the end waits on, ended unanswered: the end is judged
           // again, and asks again while they stay stuck.
           if (outcome.decision.kind === 'proofs_unproven') {

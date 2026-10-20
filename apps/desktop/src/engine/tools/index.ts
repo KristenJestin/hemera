@@ -56,7 +56,7 @@ import {
   type Judge,
   type MissionGrants,
   missionPlacesLayer,
-  noAgentCommits,
+  stepCommitRights,
 } from '../permissions/ports.ts'
 import {
   type TaskStates,
@@ -115,7 +115,7 @@ export interface ToolsParts {
   readonly delivery?: Layer.Layer<Delivery, never, Database | DomainEvents | Secrets>
   /** Whether a request's task still holds (later tickets); every task does otherwise. */
   readonly taskStates?: Layer.Layer<TaskStates>
-  /** The Project's "who commits" rule (B4, R5). */
+  /** Whether a mission's agents commit; while an After each task step asks them to otherwise. */
   readonly commitRights?: Layer.Layer<CommitRights>
   /** The urgent notes of the role sessions (#40); none otherwise. */
   readonly notes?: Layer.Layer<SessionNotes, never, Database | DomainEvents | Secrets>
@@ -294,7 +294,7 @@ export const toolsLayer = (log: Log, version: string, parts: ToolsParts = {}) =>
           sensitivePlacesLayer({ home, platform }).pipe(Layer.provide(missionPlacesLayer)),
         parts.judge ?? jevJudgeLayer({ log, home, platform }),
         parts.grants ?? missionGrantsLayer({ log, platform }),
-        parts.commitRights ?? noAgentCommits,
+        parts.commitRights ?? stepCommitRights,
       ),
     ),
     Layer.provideMerge(

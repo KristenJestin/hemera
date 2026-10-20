@@ -14,8 +14,12 @@
  * - **A restart (CT-09).** A file write found done is attributed; a command cut in the middle is
  *   indeterminate: its runner is told to check the real state, or, on an exclusive resource, the
  *   user is asked whether it ran. Nothing is run again.
- * - **Commits.** With the mission's copy saying one commit per task, a done task's own files are
- *   committed with the user's identity, as an action with its intent and outcome.
+ * - **After each task (#477).** The mission copies the After each task section of its delivery
+ *   rules at its first task done, and each repository's stack runs from that copy after every
+ *   task that changed it: Hemera commits the task's own files with the user's identity and the
+ *   repository's template, the user commits (a click, then a new commit on the branch), an agent
+ *   commits (allowed `git commit` until its commit is there), or the user confirms a step. Each
+ *   step is an action with its intent and outcome; one waiting holds the next task back.
  */
 
 import { posix } from 'node:path'
@@ -23,26 +27,32 @@ import { posix } from 'node:path'
 import {
   type AttemptResult,
   type AttemptScope,
+  type DeliveryAction,
   DecisionFields,
   EnvironmentFields,
   ErrorFields,
   DOCUMENTATION,
   MissionOwner,
   REDS_BEFORE_A_NEED,
+  type TasksCopy,
   type ToolArguments,
+  buildingBranchName,
   missionKey,
   outputTail,
   placeWords,
+  renderTemplate,
 } from '@hemera/core/domain'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNull } from 'drizzle-orm'
 import { Deferred, Effect, Exit, Option, Predicate, Result, Schema, Semaphore } from 'effect'
 
 import { getCommand } from '../catalogue.ts'
+import { copySection } from '../delivery-rules.ts'
 import { getProject } from '../projects.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { DeliveryFailed, type NeedService, createNeedIn, getNeed, reviseNeedIn } from '../needs.ts'
 import { Git } from '../git.ts'
+import { AGENT_COMMIT } from '../permissions/ports.ts'
 import { resourcesOf } from '../resources/declarations.ts'
 import { Secrets } from '../secrets.ts'
 import { storeDeliveryIn } from '../sessions/deliveries.ts'
@@ -64,7 +74,13 @@ import {
   effectfulActions,
   missions,
 } from '../storage/schema.ts'
-import { type EffectfulAction, actionDone, actionFailed, beginAction } from '../tools/actions.ts'
+import {
+  type EffectfulAction,
+  actionDone,
+  actionFailed,
+  beginAction,
+  settleActionIn,
+} from '../tools/actions.ts'
 import type { Grant } from '../tools/access.ts'
 import { answered, refusal } from '../tools/files.ts'
 import type { CommandAsked, CommandWatch, WritingFile, WrittenFile } from '../tools/ports.ts'
@@ -107,7 +123,6 @@ import {
   writeStrings,
   writeTrees,
 } from './tasks.ts'
-import { commitRuleOf, validationSettingsOf } from './validation.ts'
 
 type Reader = EngineTransaction | Database['Service']
 
@@ -198,6 +213,20 @@ const readParsed = Schema.decodeUnknownOption(ActionDetails)
 const CommittedIn = Schema.Struct({ repository: Schema.String })
 const readCommitted = Schema.decodeUnknownOption(Schema.fromJsonString(CommittedIn))
 const readCommittedParsed = Schema.decodeUnknownOption(CommittedIn)
+
+/** The kind of decision a step of an After each task stack asks the user with (#477). */
+export const AFTER_TASK = 'after_task'
+/** The action a `commit-by-me` step records while it waits for the user's commit. */
+const USER_COMMIT = 'delivery.commit_by_me'
+/** The action a step the user confirmed records. */
+const STEP_TAKEN = 'delivery.step_taken'
+/** What a step's action records: its repository, its id, and HEAD when it began, if it waits. */
+const StepDetails = Schema.Struct({
+  repository: Schema.String,
+  step: Schema.String,
+  head: Schema.NullOr(Schema.String),
+})
+const readStep = Schema.decodeUnknownOption(Schema.fromJsonString(StepDetails))
 
 export const buildingLoop = (parts: LoopParts) => {
   const { locks, said, hold, deliver } = parts
@@ -372,7 +401,9 @@ export const buildingLoop = (parts: LoopParts) => {
       const key = task === null ? null : goingKey(building.id, task.id)
       let counting = false
       const uncount = Effect.suspend(() => {
-        if (!counting || key === null) return Effect.void
+        // A command of no task may be the commit an After each task step waits for (#477).
+        if (key === null) return parts.ran(building)
+        if (!counting) return Effect.void
         counting = false
         const left = (going.get(key) ?? 1) - 1
         if (left <= 0) going.delete(key)
@@ -901,6 +932,8 @@ export const buildingLoop = (parts: LoopParts) => {
       readonly proposer: string | null
       /** The scope whose reds the need stops, for a scope's error need; null otherwise. */
       readonly scope: { readonly scope: string; readonly subject: string | null } | null
+      /** What the need is about when it has no scope: an After each task step's key (#477). */
+      readonly subject?: string
     },
   ) =>
     Effect.gen(function* () {
@@ -923,7 +956,7 @@ export const buildingLoop = (parts: LoopParts) => {
           requestedAt: now(),
           proposer: asked.proposer,
           scope: asked.scope?.scope ?? null,
-          subject: asked.scope?.subject ?? null,
+          subject: asked.scope?.subject ?? asked.subject ?? null,
         })
         .pipe(Effect.mapError(refusedWhile('keeping the decision')))
       const blocked = yield* blockIn(
@@ -944,6 +977,7 @@ export const buildingLoop = (parts: LoopParts) => {
           projectId: missions.projectId,
           prefix: missions.keyPrefix,
           number: missions.keyNumber,
+          title: missions.title,
         })
         .from(missions)
         .where(eq(missions.id, building.missionId))
@@ -955,6 +989,7 @@ export const buildingLoop = (parts: LoopParts) => {
           taskId,
         }),
         key: mission === undefined ? '' : missionKey(mission.prefix, mission.number),
+        title: mission?.title ?? '',
         projectId: mission?.projectId ?? '',
       }
     })
@@ -1877,7 +1912,7 @@ export const buildingLoop = (parts: LoopParts) => {
    * The repositories a task has its commit in: a `git.commit` of it there done, or perhaps done.
    * One that failed, or never began, is committed again.
    */
-  const committedIn = (missionId: string, taskId: string) =>
+  const committedIn = (building: BuildingRow, taskId: string) =>
     Effect.gen(function* () {
       const rows = yield* (yield* Database)
         .select({ details: effectfulActions.details })
@@ -1886,9 +1921,11 @@ export const buildingLoop = (parts: LoopParts) => {
           and(
             eq(effectfulActions.kind, 'git.commit'),
             eq(effectfulActions.ownerKind, 'mission'),
-            eq(effectfulActions.ownerId, missionId),
+            eq(effectfulActions.ownerId, building.missionId),
             eq(effectfulActions.taskId, taskId),
             inArray(effectfulActions.state, ['done', 'started', 'indeterminate']),
+            // An earlier Building's task of the same id is not this one (#477).
+            gte(effectfulActions.startedAt, building.startedAt),
           ),
         )
         .pipe(Effect.mapError(refusedWhile('reading the commits')))
@@ -1900,12 +1937,150 @@ export const buildingLoop = (parts: LoopParts) => {
       )
     })
 
-  /** One commit pass at a time: a task is never committed twice. */
+  /** One pass at a time: a task's stack is never run twice at once. */
   const committing = Semaphore.makeUnsafe(1)
 
   /**
-   * Each done task without its commit committed, when the mission's copy asks for one commit
-   * per task: after a task is done, and at each start (a stop between a done and its commit).
+   * The records of every step of the Building's After each task stacks, by task: those an earlier
+   * Building of the mission left, done or open, are not its own.
+   */
+  const stepRecordsOf = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const rows = yield* (yield* Database)
+        .select({
+          id: effectfulActions.id,
+          kind: effectfulActions.kind,
+          taskId: effectfulActions.taskId,
+          state: effectfulActions.state,
+          details: effectfulActions.details,
+        })
+        .from(effectfulActions)
+        .where(
+          and(
+            inArray(effectfulActions.kind, [USER_COMMIT, AGENT_COMMIT, STEP_TAKEN]),
+            eq(effectfulActions.ownerKind, 'mission'),
+            eq(effectfulActions.ownerId, building.missionId),
+            gte(effectfulActions.startedAt, building.startedAt),
+          ),
+        )
+        .pipe(Effect.mapError(refusedWhile('reading the After each task steps')))
+      return rows.flatMap((row) => {
+        const details = Option.getOrNull(readStep(row.details))
+        return details === null || row.taskId === null
+          ? []
+          : [{ id: row.id, kind: row.kind, taskId: row.taskId, state: row.state, ...details }]
+      })
+    })
+
+  /** The last question of a step to the user, by its key, with what became of it. */
+  const stepQuestionsOf = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const rows = yield* (yield* Database)
+        .select({ subject: buildingDecisions.subject, state: buildingDecisions.state })
+        .from(buildingDecisions)
+        .where(
+          and(
+            eq(buildingDecisions.buildingId, building.id),
+            eq(buildingDecisions.kind, AFTER_TASK),
+          ),
+        )
+        .orderBy(asc(buildingDecisions.requestedAt))
+        .pipe(Effect.mapError(refusedWhile('reading the After each task questions')))
+      return new Map(rows.map((row) => [row.subject ?? '', row.state]))
+    })
+
+  /**
+   * What holds the next task back: a step of an After each task stack waiting for the user, or
+   * for an agent's commit; null when none does (#477: the next task waits).
+   */
+  const stepWaiting = (building: BuildingRow) =>
+    Effect.gen(function* () {
+      const pending = yield* (yield* Database)
+        .select({ question: buildingDecisions.question })
+        .from(buildingDecisions)
+        .where(
+          and(
+            eq(buildingDecisions.buildingId, building.id),
+            eq(buildingDecisions.kind, AFTER_TASK),
+            eq(buildingDecisions.state, 'pending'),
+          ),
+        )
+        .pipe(Effect.mapError(refusedWhile('reading the After each task questions')))
+      if (pending[0] !== undefined) return pending[0].question
+      const agent = (yield* stepRecordsOf(building)).find(
+        (one) =>
+          one.kind === AGENT_COMMIT && (one.state === 'started' || one.state === 'indeterminate'),
+      )
+      return agent === undefined
+        ? null
+        : `${agent.taskId}'s commit in ${agent.repository} is the agent's to make first`
+    })
+
+  /** A step asked of the user once, under its key: an environment need its Retry answers. */
+  const askStep = (
+    building: BuildingRow,
+    taskId: string,
+    key: string,
+    missing: string,
+    action: string,
+  ) =>
+    Effect.gen(function* () {
+      const { owner } = yield* ownerOf(building, taskId)
+      const write = yield* createNeedIn(
+        parts.needs,
+        owner,
+        EnvironmentFields.make({ missing, action, settingsSection: null }),
+      )
+      yield* mutate('asking for an After each task step', (transaction) =>
+        Effect.map(
+          hemeraNeedIn(transaction, building, write, {
+            kind: AFTER_TASK,
+            tasks: [],
+            question: missing,
+            options: [],
+            proposer: null,
+            scope: null,
+            subject: key,
+          }),
+          (made) => ({ result: undefined, events: made.events }),
+        ),
+      )
+    })
+
+  /** Whether the branch has a commit its head at the step's start did not: HEAD on it, ahead. */
+  const committedSince = (base: BuildingBase, head: string) =>
+    Effect.gen(function* () {
+      const status = yield* Git.use((git) => git.status(base.folder)).pipe(Effect.result)
+      if (Result.isFailure(status) || status.success.branch !== base.branch) return false
+      const moved = yield* Git.use((git) => git.aheadBehind(base.folder, head)).pipe(Effect.result)
+      return Result.isSuccess(moved) && moved.success.ahead > 0
+    })
+
+  /** The commit HEAD is on now, the start of a step that waits for a new one. */
+  const headOf = (base: BuildingBase) =>
+    Effect.map(Git.use((git) => git.status(base.folder)).pipe(Effect.result), (status) =>
+      Result.isSuccess(status) ? status.success.commit : null,
+    )
+
+  /** A step's record settled done, whether a restart left it started or indeterminate. */
+  const stepDone = (id: string, outcome: string) =>
+    Effect.gen(function* () {
+      const secrets = yield* Secrets
+      yield* mutate('recording an After each task step done', (transaction) =>
+        Effect.map(settleActionIn(transaction, id, 'done', secrets.mask(outcome)), (events) => ({
+          result: undefined,
+          events,
+        })),
+      )
+    })
+
+  /**
+   * Each done task's After each task stacks run, from the mission's copy of that section, taken
+   * at the first task done (CT-47): after a task is done, after a task's command ends, at each
+   * start (a stop between a done and its steps), and once the user answers a step. In each
+   * repository the task changed, its steps run in order; the first that is not done (it waits, or
+   * failed) stops that repository's stack, for this task and the ones after it, until a later pass.
+   * Answers `done` once every stack of every done task is done: the end waits for it.
    */
   const commitLeft = (building: BuildingRow) =>
     Semaphore.withPermits(
@@ -1913,25 +2088,206 @@ export const buildingLoop = (parts: LoopParts) => {
       1,
     )(
       Effect.gen(function* () {
-        const settings = yield* validationSettingsOf(building.missionId)
-        const rule = settings === null ? null : commitRuleOf(settings.sections)
-        if (rule === null) return
-        const tasks = yield* tasksIn(yield* Database, building.id)
-        for (const task of tasks.filter((one) => one.state === 'done')) {
-          // A command of its own still going may still write what is to be committed: its end
-          // makes the commit then.
-          if (going.has(goingKey(building.id, task.id))) continue
-          yield* commitTask(building, task, rule.template)
+        const database = yield* Database
+        const done = (yield* tasksIn(database, building.id)).filter((one) => one.state === 'done')
+        if (done.length === 0) return 'done' satisfies StepState
+        const copy = yield* copySection(building.missionId, 'tasks')
+        if (copy.section !== 'tasks') return 'done' satisfies StepState
+        let settled: StepState = 'done'
+        const { projectId } = yield* ownerOf(building, null)
+        const project = yield* getProject(projectId)
+        for (const entry of copy.repositories) {
+          if (entry.steps.length === 0) continue
+          const path = project.repositories.find((one) => one.id === entry.repositoryId)?.path
+          const base = basesOf(building).find((one) => one.repository === path)
+          if (base === undefined) continue
+          for (const task of done) {
+            // A command of its own still going may still write what is to be committed: its end
+            // runs the steps then.
+            if (going.has(goingKey(building.id, task.id))) {
+              settled = 'stopped'
+              continue
+            }
+            const paths = yield* ownPaths(building, task, base.repository)
+            if (paths.length === 0) continue
+            if ((yield* stackOf(building, task, base, entry, paths)) !== 'done') {
+              settled = 'stopped'
+              break
+            }
+          }
         }
+        return settled
       }),
     )
 
-  /** A done task's own files committed with the user's identity, on its branch only. */
-  const commitTask = (building: BuildingRow, task: TaskNow, template: string) =>
+  /** What a step came to in a pass: done, or not (it waits, or failed): the stack stops there. */
+  type StepState = 'done' | 'stopped'
+
+  /** One repository's stack, for one task, in order. */
+  const stackOf = (
+    building: BuildingRow,
+    task: TaskNow,
+    base: BuildingBase,
+    entry: TasksCopy['repositories'][number],
+    paths: ReadonlyArray<string>,
+  ) =>
     Effect.gen(function* () {
-      yield* hold('committing')
+      for (const step of entry.steps) {
+        const state = yield* stepOf(building, task, base, entry.commitTemplate, step, paths)
+        if (state !== 'done') return state
+      }
+      return 'done' satisfies StepState
+    })
+
+  /** The message a commit of a task takes: the repository's template, rendered for the task. */
+  const messageOf = (building: BuildingRow, task: TaskNow, base: BuildingBase, template: string) =>
+    Effect.gen(function* () {
+      const { key, title } = yield* ownerOf(building, task.id)
+      const summary = (yield* attemptsIn(yield* Database, building.id)).findLast(
+        (one) => one.taskId === task.id,
+      )?.summary
+      return renderTemplate(template, {
+        key,
+        title: task.title,
+        slug: buildingBranchName(key, title),
+        branch: base.branch ?? '',
+        summary: summary ?? '',
+      }).text
+    })
+
+  /** One step of a task's stack in one repository, run or checked again. */
+  const stepOf = (
+    building: BuildingRow,
+    task: TaskNow,
+    base: BuildingBase,
+    template: string,
+    step: DeliveryAction,
+    paths: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const key = `${task.id}\u0000${base.repository}\u0000${step.id}`
+      const records = (yield* stepRecordsOf(building)).filter(
+        (one) =>
+          one.taskId === task.id && one.repository === base.repository && one.step === step.id,
+      )
+      if (records.some((one) => one.state === 'done')) return 'done'
+      const open = records.find((one) => one.state === 'started' || one.state === 'indeterminate')
+      const asked = (yield* stepQuestionsOf(building)).get(key)
+      if (asked === 'pending') return 'stopped'
+      const where = `${base.repository} (After each task, “${step.id}”)`
+      // A click before what Hemera or an agent does: asked once, then the step runs.
+      if (
+        step.mode === 'click' &&
+        (step.kind === 'commit-by-hemera' || step.kind === 'commit-by-agent') &&
+        open === undefined &&
+        asked !== 'withdrawn'
+      ) {
+        yield* askStep(
+          building,
+          task.id,
+          key,
+          `${task.id} is done: ${where} waits for your click`,
+          step.kind === 'commit-by-hemera'
+            ? `Confirm to let Hemera commit ${task.id} in ${base.repository}.`
+            : `Confirm to let the agent commit ${task.id} in ${base.repository}.`,
+        )
+        return 'stopped'
+      }
+      switch (step.kind) {
+        case 'commit-by-hemera': {
+          if ((yield* committedIn(building, task.id)).has(base.repository)) return 'done'
+          const message = yield* messageOf(building, task, base, template)
+          return yield* commitTask(building, task, base, paths, message, key)
+        }
+        case 'commit-by-me': {
+          if (!(yield* onItsBranch(building, task.id, base))) return 'stopped'
+          const ask = (missing: string) =>
+            askStep(
+              building,
+              task.id,
+              key,
+              missing,
+              `Commit ${task.id} in ${base.repository} (${base.folder}) on ${base.branch ?? 'its branch'}, then confirm.`,
+            )
+          if (open === undefined) {
+            const head = yield* headOf(base)
+            yield* beginAction(
+              USER_COMMIT,
+              { kind: 'mission', missionId: building.missionId, taskId: task.id },
+              { repository: base.repository, step: step.id, head },
+            )
+            yield* ask(`${task.id} is done: Hemera waits for you to commit it in ${where}`)
+            return 'stopped'
+          }
+          if (open.head !== null && (yield* committedSince(base, open.head))) {
+            yield* stepDone(open.id, 'a new commit is on the branch')
+            return 'done'
+          }
+          yield* ask(
+            `There is no new commit on ${base.branch ?? 'the branch'} in ${base.repository} since ${task.id} was done: Hemera does not go on until there is one`,
+          )
+          return 'stopped'
+        }
+        case 'commit-by-agent': {
+          if (!(yield* onItsBranch(building, task.id, base))) return 'stopped'
+          if (open === undefined) {
+            const head = yield* headOf(base)
+            const message = yield* messageOf(building, task, base, template)
+            yield* beginAction(
+              AGENT_COMMIT,
+              { kind: 'mission', missionId: building.missionId, taskId: task.id },
+              { repository: base.repository, step: step.id, head },
+            )
+            yield* deliver(
+              building,
+              task.runner === null ? { role: 'builder' } : { lineage: task.runner },
+              'commit',
+              `${task.id} is done: commit it in ${where} now. Run \`git commit\` with commands_run in ${base.repository}, with the message “${message}”, for what ${task.id} changed; never --amend nor --no-verify. No task starts before the commit is on ${base.branch ?? 'the branch'}.`,
+              `commit-${key}`,
+            )
+            return 'stopped'
+          }
+          if (open.head !== null && (yield* committedSince(base, open.head))) {
+            yield* stepDone(open.id, 'the agent’s commit is on the branch')
+            return 'done'
+          }
+          return 'stopped'
+        }
+        default: {
+          // A step the user confirms: a confirm, or what Hemera cannot run after a task yet.
+          if (asked === 'withdrawn') {
+            const taken = yield* beginAction(
+              STEP_TAKEN,
+              { kind: 'mission', missionId: building.missionId, taskId: task.id },
+              { repository: base.repository, step: step.id, head: null },
+            )
+            yield* actionDone(taken, 'confirmed by the user')
+            return 'done'
+          }
+          yield* step.kind === 'confirm'
+            ? askStep(
+                building,
+                task.id,
+                key,
+                `${task.id} is done: confirm that ${step.what} in ${where}`,
+                'Confirm once it is done.',
+              )
+            : askStep(
+                building,
+                task.id,
+                key,
+                `${task.id} is done: Hemera cannot run “${step.id}” (${step.kind}) after each task yet, in ${where}`,
+                `Do it yourself in ${base.repository} if it matters, then confirm.`,
+              )
+          return 'stopped'
+        }
+      }
+    })
+
+  /** The files a done task wrote in a repository and no other running task also wrote. */
+  const ownPaths = (building: BuildingRow, task: TaskNow, repository: string) =>
+    Effect.gen(function* () {
       const database = yield* Database
-      const done = yield* committedIn(building.missionId, task.id)
       const tasks = yield* tasksIn(database, building.id)
       const attempts = yield* attemptsIn(database, building.id)
       const filesOf = (ids: ReadonlyArray<string>) =>
@@ -1949,78 +2305,107 @@ export const buildingLoop = (parts: LoopParts) => {
         .map((one) => one.id)
       // A file another running task also wrote is left for that task's commit.
       const theirs = new Set(yield* filesOf(running))
-      const mine = [...new Set(yield* filesOf([task.id]))].filter((one) => !theirs.has(one))
-      const { key, owner } = yield* ownerOf(building, task.id)
-      const message = template
-        .replaceAll('{key}', key)
-        .replaceAll('{task}', task.id)
-        .replaceAll('{title}', task.title)
-      const planned = basesOf(building)
-        .map((base) => ({
-          base,
-          paths: mine
-            .filter((one) => one.startsWith(`${base.repository}\u0000`))
-            .map((one) => one.slice(base.repository.length + 1)),
-        }))
-        .filter((one) => one.paths.length > 0 && !done.has(one.base.repository))
-      // Never on another branch than the Building's: a repository switched away is the user's,
-      // and one taken on a detached HEAD has no branch to commit on.
-      const left = new Set<string>()
-      for (const { base, paths } of planned) {
-        if (base.branch === null) {
-          // Never committable by Hemera: the user is told once, and the commit is theirs.
-          yield* offBranch(building, owner, task.id, base.repository, null, null)
-          const intent = yield* beginAction(
-            'git.commit',
-            { kind: 'mission', missionId: building.missionId, taskId: task.id },
-            { repository: base.repository, paths: [...paths], message },
-          )
-          yield* actionDone(intent, 'left to the user: no branch for this Building')
-          left.add(base.repository)
-          continue
-        }
-        const status = yield* Git.use((git) => git.status(base.folder)).pipe(Effect.result)
-        const onBranch = Result.isSuccess(status) ? status.success.branch : null
-        if (onBranch === base.branch) continue
-        yield* offBranch(building, owner, task.id, base.repository, base.branch, onBranch)
-        return
-      }
-      for (const { base, paths } of planned.filter((one) => !left.has(one.base.repository))) {
-        const intent = yield* beginAction(
-          'git.commit',
-          { kind: 'mission', missionId: building.missionId, taskId: task.id },
-          { repository: base.repository, paths: [...paths], message },
+      return [...new Set(yield* filesOf([task.id]))]
+        .filter((one) => !theirs.has(one) && one.startsWith(`${repository}\u0000`))
+        .map((one) => one.slice(repository.length + 1))
+    })
+
+  /**
+   * Whether a repository is on its Building's branch, for a step that commits; asked once to come
+   * back when it is not. Never on another branch than the Building's: a repository switched away
+   * is the user's.
+   */
+  const onItsBranch = (building: BuildingRow, taskId: string, base: BuildingBase) =>
+    Effect.gen(function* () {
+      if (base.branch === null) return true
+      const status = yield* Git.use((git) => git.status(base.folder)).pipe(Effect.result)
+      const branch = Result.isSuccess(status) ? status.success.branch : null
+      if (branch === base.branch) return true
+      const { owner } = yield* ownerOf(building, taskId)
+      yield* offBranch(building, owner, taskId, base.repository, base.branch, branch)
+      return false
+    })
+
+  /** A done task's own files in one repository committed with the user's identity, on its branch. */
+  const commitTask = (
+    building: BuildingRow,
+    task: TaskNow,
+    base: BuildingBase,
+    paths: ReadonlyArray<string>,
+    message: string,
+    key: string,
+  ) =>
+    Effect.gen(function* () {
+      yield* hold('committing')
+      const owner = { kind: 'mission', missionId: building.missionId, taskId: task.id } as const
+      if (base.branch === null) {
+        // Never committable by Hemera, one taken on a detached HEAD having no branch: the user is
+        // told once, and the commit is theirs.
+        yield* offBranch(
+          building,
+          (yield* ownerOf(building, task.id)).owner,
+          task.id,
+          base.repository,
+          null,
+          null,
         )
-        yield* hold('mid-commit')
-        const committed = yield* Git.use((git) =>
-          git.commitPaths(base.folder, paths, message),
-        ).pipe(Effect.result)
-        if (Result.isFailure(committed)) {
-          yield* actionFailed(intent, committed.failure.message)
-          yield* said(
-            `${task.id} was not committed in ${base.repository}: ${committed.failure.message}`,
-          )
-          continue
-        }
-        const commit = committed.success
-        if (commit === null) {
-          yield* actionDone(intent, 'nothing left to commit')
-          continue
-        }
-        yield* mutate('saying a task was committed', () =>
-          Effect.succeed({
-            result: undefined,
-            events: [
-              buildingEvent(building.missionId, 'building.commit', {
-                task: task.id,
-                commit,
-                repository: base.repository,
-              }),
-            ],
-          }),
-        )
-        yield* actionDone(intent, `committed ${commit}`)
+        const intent = yield* beginAction('git.commit', owner, {
+          repository: base.repository,
+          paths: [...paths],
+          message,
+        })
+        yield* actionDone(intent, 'left to the user: no branch for this Building')
+        return 'done' satisfies StepState
       }
+      if (!(yield* onItsBranch(building, task.id, base))) return 'stopped' satisfies StepState
+      const intent = yield* beginAction('git.commit', owner, {
+        repository: base.repository,
+        paths: [...paths],
+        message,
+      })
+      yield* hold('mid-commit')
+      // A Cancel while the commit was on its way: nothing more is committed for the mission.
+      if ((yield* activeBuildingIn(yield* Database, building.missionId)) === null) {
+        yield* actionFailed(intent, 'the mission was cancelled before its commit')
+        return 'stopped' satisfies StepState
+      }
+      const committed = yield* Git.use((git) => git.commitPaths(base.folder, paths, message)).pipe(
+        Effect.result,
+      )
+      if (Result.isFailure(committed)) {
+        yield* actionFailed(intent, committed.failure.message)
+        const failed = `${task.id} was not committed in ${base.repository}: ${committed.failure.message}`
+        yield* said(failed)
+        // The user is asked, in Git's words (a hook that refused it, a lock): the stack, and the
+        // end after the last task, wait for the Retry, which commits again.
+        yield* askStep(
+          building,
+          task.id,
+          key,
+          failed,
+          'Fix what stopped the commit, then choose Retry: Hemera commits it again.',
+        )
+        return 'stopped' satisfies StepState
+      }
+      const commit = committed.success
+      if (commit === null) {
+        yield* actionDone(intent, 'nothing left to commit')
+        return 'done' satisfies StepState
+      }
+      yield* mutate('saying a task was committed', () =>
+        Effect.succeed({
+          result: undefined,
+          events: [
+            buildingEvent(building.missionId, 'building.commit', {
+              task: task.id,
+              commit,
+              repository: base.repository,
+            }),
+          ],
+        }),
+      )
+      yield* actionDone(intent, `committed ${commit}`)
+      return 'done' satisfies StepState
     })
 
   /**
@@ -2102,6 +2487,7 @@ export const buildingLoop = (parts: LoopParts) => {
     restarted,
     cut,
     commitLeft,
+    stepWaiting,
   }
 }
 

@@ -735,12 +735,10 @@ describe('The launch prepares the Workspace, then moves the mission to Building'
         writeGlobs: ['coverage/**'],
       },
     ])
-    expect(seen.copy?.sections['commits']).toBe('Hemera does not commit during Building')
     // The safety rules are never copied: they always apply in their current version.
     expect(Object.keys(seen.copy?.sections ?? {}).sort()).toEqual([
       'catalogue',
       'checks',
-      'commits',
       'doc-recipes',
       'resources',
     ])
