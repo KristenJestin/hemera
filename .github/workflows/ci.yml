@@ -302,11 +302,6 @@ jobs:
       # every file, each once. The split follows the time each file took on these runners
       # (`tools/test-shards.ts`), not the hash of its path, which had put the two slowest files
       # in the same half of two: that half took 13 to 15 minutes, the other 8 to 10 (#359).
-      - name: DIAG522 probe
-        if: startsWith(matrix.part, 'repository')
-        working-directory: source/apps/desktop
-        shell: bash
-        run: node diag-522.mjs
       - name: Test the repository suites
         if: startsWith(matrix.part, 'repository')
         working-directory: source
@@ -314,7 +309,13 @@ jobs:
         shell: bash
         env:
           PART: ${{ matrix.part }}
-        run: pnpm test --project repository --shard="${PART#repository }"
+        run: |
+          ( for i in 1 2 3 4; do pnpm exec vp test run --project repository apps/desktop/tests/ship.test.ts > "ship-$i.log" 2>&1 || echo "DIAG522 ship loop $i failed"; done ) &
+          loop=$!
+          pnpm test --project repository --shard="${PART#repository }" || echo "DIAG522 shard failed"
+          wait $loop
+          for f in ship-*.log; do echo "=== $f"; grep -E "Tests |FAIL|DIAG522" "$f" | head -20; done
+          for f in ship-*.log; do if grep -q "DIAG522" "$f"; then echo "=== DIAG522 lines of $f"; grep -A400 "DIAG522" "$f" | head -1500; fi; done
       #
       # The stall itself is not explained (#294). `@vitest/browser` waits on the iframe's `load`
       # and, once the run is acknowledged, on `response:execute`, neither with a timer; which one
