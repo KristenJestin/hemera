@@ -30,6 +30,7 @@ import {
   LONG,
   SLOW,
   type ShipWorld,
+  pauseAt,
   pushedIn,
   rulesWith,
   shipReady,
@@ -437,6 +438,136 @@ describe('Ship pushes the frozen trees', () => {
       expect(pushesTo(world, 'api', seen.mission.branch)).toBe(1)
       expect(pushesTo(world, 'web', seen.mission.branch)).toBe(0)
       expect(world.pullRequests()).toHaveLength(2)
+    },
+    SLOW,
+  )
+})
+
+/** What a need says the Workspace did after Ship froze it. */
+const CHANGED_AFTER_SHIP = 'changed after Ship froze it'
+
+/** Waits for a pending error need of the mission that says the Workspace changed after Ship. */
+const changedNeedOf = (missionId: string) =>
+  Effect.gen(function* () {
+    const said = (need: Need) => JSON.stringify(need.fields).includes(CHANGED_AFTER_SHIP)
+    yield* until(
+      Effect.map(pendingOf(missionId, 'Error'), (found) => found.some(said)),
+      LONG,
+    )
+    return (yield* pendingOf(missionId, 'Error')).filter(said)
+  })
+
+/** A file written in `api` once Ship froze it. */
+const writtenLater = (mission: InReview) =>
+  Effect.sync(() => writeFileSync(join(mission.api, 'later.ts'), 'export const later = 1\n'))
+
+describe('Only the frozen trees leave', () => {
+  test(
+    'a file written between the freeze and the push is not pushed: the need says the Workspace changed after Ship',
+    async () => {
+      const world = shipWorld()
+      const paused = pauseAt('pushing')
+      const { run } = engineOf(world, { ship: paused.hold })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* shipReady(world)
+            recordPushes(world)
+            yield* changedInBoth(mission)
+            const shipping = yield* Effect.forkChild(shipNow(mission.missionId))
+            yield* paused.reached
+            yield* writtenLater(mission)
+            yield* paused.release
+            yield* Fiber.join(shipping)
+            return {
+              mission,
+              stage: (yield* getMission(mission.missionId)).stage,
+              pushes: yield* pushesOf(mission.missionId),
+              said: yield* changedNeedOf(mission.missionId),
+            }
+          }),
+        ),
+      )
+      expect(seen.stage).toBe('shipping')
+      expect(seen.pushes.repositories.map((one) => [one.repository, one.state])).toEqual([
+        ['api', 'failed'],
+        ['web', 'done'],
+      ])
+      expect(seen.said).toHaveLength(1)
+      expect(pushesTo(world, 'api', seen.mission.branch)).toBe(0)
+      expect(pushesTo(world, 'web', seen.mission.branch)).toBe(1)
+    },
+    SLOW,
+  )
+
+  test(
+    'a file written after the freeze, then a restart: nothing of it is pushed, the need says why',
+    async () => {
+      const world = shipWorld()
+      const stopped = stopAt('pushing')
+      const first = engineOf(world, { ship: stopped.hold })
+      const mission = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const ready = yield* shipReady(world)
+            recordPushes(world)
+            yield* changedInBoth(ready)
+            yield* Effect.forkDetach(Effect.result(shipNow(ready.missionId)))
+            yield* stopped.reached
+            yield* writtenLater(ready)
+            return ready
+          }),
+        ),
+      )
+      const second = engineOf(world)
+      const said = await second.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* pushedIn(mission.missionId, 'web', 'done')
+            return yield* changedNeedOf(mission.missionId)
+          }),
+        ),
+      )
+      expect(said).toHaveLength(1)
+      expect(pushesTo(world, 'api', mission.branch)).toBe(0)
+      expect(pushesTo(world, 'web', mission.branch)).toBe(1)
+    },
+    SLOW,
+  )
+
+  test(
+    'a commit that failed, a file written, then Retry: nothing of it is pushed, the need says why',
+    async () => {
+      const world = shipWorld()
+      const paused = pauseAt('pushing')
+      const { run } = engineOf(world, { ship: paused.hold })
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* shipReady(world)
+            recordPushes(world)
+            yield* changedInBoth(mission)
+            const shipping = yield* Effect.forkChild(shipNow(mission.missionId))
+            yield* paused.reached
+            // HEAD on another branch: Hemera commits nothing, and says so.
+            git(mission.api, 'symbolic-ref', 'HEAD', 'refs/heads/elsewhere')
+            yield* paused.release
+            yield* Fiber.join(shipping)
+            const stopped = yield* needOf(mission.missionId, 'Error')
+            git(mission.api, 'symbolic-ref', 'HEAD', `refs/heads/${mission.branch}`)
+            yield* writtenLater(mission)
+            yield* chosen(stopped, 'Retry')
+            return { mission, said: yield* changedNeedOf(mission.missionId) }
+          }),
+        ),
+      )
+      expect(seen.said).toHaveLength(1)
+      expect(pushesTo(world, 'api', seen.mission.branch)).toBe(0)
+      expect(pushesTo(world, 'web', seen.mission.branch)).toBe(1)
     },
     SLOW,
   )

@@ -11,7 +11,8 @@
  * - **At Ship** (R9): every repository whose stack pushes or opens a pull request and that changed
  *   since its last push, whatever the round, runs it once Ship froze the mission, in Shipping. Ship
  *   hands them over in the freeze's own transaction, so a stop between the two is pushed at the
- *   next start; Ship is the click, so none asks. A failure holds its need in Shipping.
+ *   next start; Ship is the click, so none asks. A failure holds its need in Shipping. Nothing
+ *   leaves but the tree Ship froze: a Workspace changed since stops the push with an error need.
  * - **Hemera commits** (`commit-by-hemera`): a checkpoint of the repository first (#140), what this
  *   push pushes; then the whole working tree is committed (untracked non-ignored files included)
  *   with the commit template, as the user's Git identity, which Hemera reads and never sets. The
@@ -96,6 +97,7 @@ import {
 
 import type { Log } from '../../main/diagnostic.ts'
 import { Checkpoints } from '../building/checkpoints.ts'
+import { readTrees } from '../building/proof-store.ts'
 import { copySection, missionCopies } from '../delivery-rules.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { ForgePort } from '../forges/port.ts'
@@ -136,6 +138,7 @@ import {
   deliveryPushes,
   effectfulActions,
   memoryEvidence,
+  missionShips,
   missions,
   needs,
 } from '../storage/schema.ts'
@@ -773,6 +776,27 @@ export const pushesLayer = (settings: PushesSettings) => {
           return fresh
         })
 
+      /** The tree Ship froze for a repository of the mission; null before Ship (R9). */
+      const frozenOf = (one: Run) =>
+        database
+          .select({ trees: missionShips.trees })
+          .from(missionShips)
+          .where(eq(missionShips.missionId, one.mission.id))
+          .pipe(
+            Effect.mapError(refusedWhile('reading the frozen trees')),
+            Effect.map(
+              ([shipped]) =>
+                readTrees(shipped?.trees ?? null).find((tree) => tree.repository === one.name)
+                  ?.tree ?? null,
+            ),
+          )
+
+      /** Shipped, nothing leaves but the tree Ship froze: what moved since stops the push. */
+      const changedAfterShip = (one: Run, what: string) => {
+        const output = `The Workspace of ${one.name} changed after Ship froze it: nothing was pushed.`
+        return stopped('failed', output, errorNeed(output, [{ what, output }]))
+      }
+
       const commitStep = (one: Run) =>
         Effect.gen(function* () {
           const { folder } = one.place
@@ -838,6 +862,10 @@ export const pushesLayer = (settings: PushesSettings) => {
                   { what: 'git commit', output: changedOut },
                 ]),
               )
+            }
+            const frozen = yield* frozenOf(one)
+            if (frozen !== null && recorded !== frozen) {
+              return yield* changedAfterShip(one, 'git commit')
             }
             const expected = trees.kept
             yield* setRow(row, { checkpointId, tree: expected })
@@ -905,6 +933,17 @@ export const pushesLayer = (settings: PushesSettings) => {
           const head = (yield* git(folder, ['rev-parse', '--verify', '--quiet', ref]).pipe(
             Effect.mapError(failedWith(`git rev-parse ${ref}`)),
           )).trim()
+          // A Hemera commit was checked against the frozen tree; any other commit is checked here.
+          if (!one.entry.steps.some((step) => step.kind === 'commit-by-hemera')) {
+            const frozen = yield* frozenOf(one)
+            const tree = (yield* git(folder, [
+              'rev-parse',
+              '--verify',
+              '--quiet',
+              `${head}^{tree}`,
+            ]).pipe(Effect.mapError(failedWith(`git rev-parse ${head}^{tree}`)))).trim()
+            if (frozen !== null && tree !== frozen) return yield* changedAfterShip(one, 'git push')
+          }
           const there = yield* remoteHeadOf(folder, remote, one.branch).pipe(
             Effect.orElseSucceed(() => null),
           )
