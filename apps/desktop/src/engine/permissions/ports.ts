@@ -9,12 +9,12 @@
  */
 
 import { evidenceExtension, missionKey } from '@hemera/core/domain'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, gte, inArray } from 'drizzle-orm'
 import type { JudgeScores } from '@hemera/core/domain'
 import { Context, Effect, Layer } from 'effect'
 
 import { Database } from '../storage/database.ts'
-import { effectfulActions, memoryEvidence, missions } from '../storage/schema.ts'
+import { buildings, effectfulActions, memoryEvidence, missions } from '../storage/schema.ts'
 import type { JudgedCall } from '../tools/ports.ts'
 
 /** How a judge rated a call, as its decision records it. */
@@ -82,8 +82,9 @@ export const AGENT_COMMIT = 'delivery.commit_by_agent'
 
 /**
  * A mission's agents commit only while one of its After each task steps waits for an agent's
- * commit (`commit-by-agent`): never before the step, never once it is done. A mission whose steps
- * cannot be read commits nothing.
+ * commit (`commit-by-agent`) in its active Building: never before the step, never once it is
+ * done, nor once the Building is over (a Cancel, its end), nor in a later Building. A mission
+ * whose steps cannot be read commits nothing.
  */
 export const stepCommitRights = Layer.effect(
   CommitRights,
@@ -94,12 +95,17 @@ export const stepCommitRights = Layer.effect(
         database
           .select({ id: effectfulActions.id })
           .from(effectfulActions)
+          .innerJoin(
+            buildings,
+            and(eq(buildings.missionId, missionId), eq(buildings.state, 'active')),
+          )
           .where(
             and(
               eq(effectfulActions.kind, AGENT_COMMIT),
               eq(effectfulActions.ownerKind, 'mission'),
               eq(effectfulActions.ownerId, missionId),
               inArray(effectfulActions.state, ['started', 'indeterminate']),
+              gte(effectfulActions.startedAt, buildings.startedAt),
             ),
           )
           .pipe(

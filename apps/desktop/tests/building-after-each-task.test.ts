@@ -33,7 +33,7 @@ import {
 } from '../src/engine/delivery-rules.ts'
 import { cancelMissionIn, getMission } from '../src/engine/missions.ts'
 import { retryNeed } from '../src/engine/needs.ts'
-import { Judge } from '../src/engine/permissions/ports.ts'
+import { CommitRights, Judge, stepCommitRights } from '../src/engine/permissions/ports.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { effectfulActions, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
@@ -586,5 +586,32 @@ describe('After each task: an agent commits', () => {
     expect(seen.log).toBe('ACME-1')
     // The agent's commit, not Hemera's.
     expect(seen.commits).toEqual([])
+  })
+
+  test('a Cancel while commit-by-agent waits closes the right to commit', async () => {
+    const seen = await engine().run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId } = yield* building([AGENT])
+          const commits = Effect.provide(
+            CommitRights.use((rights) => rights.agentsCommit(mission.id)),
+            stepCommitRights,
+          )
+          yield* t1Done(mission.id, grantId)
+          yield* until(Effect.map(actionsOf('delivery.commit_by_agent'), (rows) => rows.length > 0))
+          const open = yield* commits
+          yield* mutate('cancelling in a test', (transaction) =>
+            Effect.map(cancelMissionIn(transaction, mission.id), (events) => ({
+              result: undefined,
+              events,
+            })),
+          )
+          return { open, cancelled: yield* commits }
+        }),
+      ),
+    )
+    expect(seen.open).toBe(true)
+    expect(seen.cancelled).toBe(false)
   })
 })
