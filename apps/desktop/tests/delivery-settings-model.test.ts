@@ -49,6 +49,7 @@ const repository = (id: string, path: string, remote: string | null) => ({
   remote,
   baseBranch: 'main',
   lastFetchedAt: null,
+  testReporting: null,
 })
 
 const ACME: Project = {

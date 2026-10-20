@@ -1,0 +1,1 @@
+ALTER TABLE `project_repositories` ADD `test_reporting` text;

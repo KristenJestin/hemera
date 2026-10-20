@@ -91,6 +91,7 @@ import {
   upToDateBase,
 } from './repositories.ts'
 import { checkLine, listCommands, removeCommand, saveCommand } from './catalogue.ts'
+import { setTestReporting, testGuessOf } from './repository-tests.ts'
 import { beginPreparation } from './preparation.ts'
 import { checkRecipe, getRecipe, saveRecipe } from './recipe.ts'
 import { listRuns, restartRun, runChanges, runOutput, startRun, stopRun } from './runs.ts'
@@ -330,6 +331,10 @@ export const engineHandlers = (
       use(setRemote(edit)).pipe(observed('repositories.setRemote', log)),
     'repositories.setBaseBranch': (edit) =>
       use(setBaseBranch(edit)).pipe(observed('repositories.setBaseBranch', log)),
+    'repositories.testGuess': ({ id }) =>
+      use(testGuessOf(id)).pipe(observed('repositories.testGuess', log)),
+    'repositories.setTestReporting': (edit) =>
+      use(setTestReporting(edit)).pipe(observed('repositories.setTestReporting', log)),
     'repositories.upToDateBase': ({ id }) =>
       use(upToDateBase(id)).pipe(observed('repositories.upToDateBase', log)),
     'repositories.changes': () =>

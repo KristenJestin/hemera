@@ -31,6 +31,8 @@ export const SILENT_LINK: Link = {
   remotes: never,
   setRemote: never,
   setBaseBranch: never,
+  testGuess: never,
+  setTestReporting: never,
   upToDateBase: never,
   onRepositoryChanges: silent,
   recipe: never,

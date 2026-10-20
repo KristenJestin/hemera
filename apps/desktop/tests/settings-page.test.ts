@@ -27,6 +27,7 @@ const repository = (id: string, path: string, lastFetchedAt: string | null = nul
   remote: 'origin',
   baseBranch: 'develop',
   lastFetchedAt,
+  testReporting: null,
 })
 
 const ACME: Project = {

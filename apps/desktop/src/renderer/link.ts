@@ -19,6 +19,7 @@ import {
   type AutomaticBackups,
   type BootstrapRun,
   type BaseBranchEdit,
+  type TestReportingEdit,
   type ChatChanged,
   type ChatLine,
   type ChatPage,
@@ -136,6 +137,7 @@ import type {
   ProviderStatus,
   PrototypeVerdict,
   SpecMode,
+  TestGuess,
 } from '@hemera/core/domain'
 import { Cause, Effect, Exit, Option, Predicate, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -180,6 +182,10 @@ export interface Link {
   readonly remotes: (id: string) => Promise<ReadonlyArray<Remote>>
   readonly setRemote: (edit: RemoteEdit) => Promise<Project>
   readonly setBaseBranch: (edit: BaseBranchEdit) => Promise<Project>
+  /** The runner a repository's files point to, with the file whose rule named it (#421). */
+  readonly testGuess: (id: string) => Promise<TestGuess | null>
+  /** Its runner and report by hand, null back to the guess; refused with the field and why. */
+  readonly setTestReporting: (edit: TestReportingEdit) => Promise<Project>
   /** Fetches the base now, and answers the commit it gives and how fresh it is. */
   readonly upToDateBase: (id: string) => Promise<UpToDateBase>
   /** Each change of a repository's readability, for as long as the listener listens. */
@@ -741,6 +747,8 @@ export function linkOver(port: Port): Link {
     remotes: (id) => call((ready) => ready['repositories.remotes']({ id })),
     setRemote: (edit) => call((ready) => ready['repositories.setRemote'](edit)),
     setBaseBranch: (edit) => call((ready) => ready['repositories.setBaseBranch'](edit)),
+    testGuess: (id) => call((ready) => ready['repositories.testGuess']({ id })),
+    setTestReporting: (edit) => call((ready) => ready['repositories.setTestReporting'](edit)),
     upToDateBase: (id) => call((ready) => ready['repositories.upToDateBase']({ id })),
     onRepositoryChanges: (listener, onEnd) =>
       follow(
