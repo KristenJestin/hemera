@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   lstatSync,
+  renameSync,
   readFileSync,
   mkdirSync,
   realpathSync,
@@ -159,6 +160,120 @@ describe('What shapes the engine’s Git in a checkout is fingerprinted (#457)',
     const before = shapesOf([main], home)
     chmodSync(hook, 0o755)
     expect(shapeChanges(before, shapesOf([main], home)).map((one) => one.path)).toEqual([hook])
+  })
+})
+
+/** Adds a submodule, cloned from a repository on the same disk, and commits it. */
+const submodule = (main: string, from: string, path: string) => {
+  git(main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', from, path)
+  git(
+    main,
+    '-c',
+    'protocol.file.allow=always',
+    'submodule',
+    'update',
+    '-q',
+    '--init',
+    '--recursive',
+  )
+  git(main, 'commit', '-q', '-m', path)
+}
+
+/** A repository with a submodule of its own, `deep`. */
+const withDeep = (path: string) => {
+  const outer = repository(path)
+  submodule(outer, repository(join(work, 'deep')), 'deep')
+  return outer
+}
+
+describe('A submodule’s own Git folder is part of what shapes Git (#470)', () => {
+  test('a submodule’s Git folder under .git/modules, and one nested in it: its config, its hooks, its info, and the .git file of each checkout', () => {
+    const main = repository(join(work, 'acme'))
+    submodule(main, withDeep(join(work, 'shared')), 'shared')
+    const modules = join(main, '.git', 'modules')
+    const seen = paths([main])
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        join(modules, 'shared', 'config'),
+        join(modules, 'shared', 'hooks', 'pre-commit.sample'),
+        join(modules, 'shared', 'info', 'exclude'),
+        join(modules, 'shared', 'modules', 'deep', 'config'),
+        join(main, 'shared', '.git'),
+        join(main, 'shared', 'deep', '.git'),
+      ]),
+    )
+  })
+
+  test('a submodule’s Git folder that is a link (a junction on Windows) to a folder outside is read where it leads', () => {
+    const main = repository(join(work, 'acme'))
+    submodule(main, repository(join(work, 'shared')), 'shared')
+    const outside = join(work, 'kept')
+    renameSync(join(main, '.git', 'modules', 'shared'), outside)
+    symlinkSync(
+      outside,
+      join(main, '.git', 'modules', 'shared'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+    expect(paths([main])).toEqual(
+      expect.arrayContaining([
+        join(outside, 'config'),
+        join(outside, 'hooks', 'pre-commit.sample'),
+      ]),
+    )
+  })
+
+  test('a submodule’s Git folder whose checkout is not there (not initialised) is still read', () => {
+    const main = repository(join(work, 'acme'))
+    submodule(main, repository(join(work, 'shared')), 'shared')
+    git(main, 'submodule', 'deinit', '-q', '-f', 'shared')
+    expect(paths([main])).toContain(join(main, '.git', 'modules', 'shared', 'config'))
+  })
+
+  test.each([
+    ['version 2', [], false],
+    [
+      'version 3, an entry with extended flags before it',
+      ['update-index', '--index-version', '3'],
+      true,
+    ],
+    [
+      'version 4, an entry with extended flags before it',
+      ['update-index', '--index-version', '4'],
+      true,
+    ],
+    ['a split index', ['update-index', '--split-index'], false],
+  ])(
+    'a repository the index holds as a submodule, its .git folder inside the checkout, is read: an index of %s',
+    (_, args, extended) => {
+      const main = repository(join(work, 'acme'))
+      writeFileSync(join(main, 'a.txt'), 'a\n')
+      repository(join(main, 'vendor'))
+      // An entry added with --intent-to-add carries extended flags: two bytes more before its name.
+      git(main, 'add', ...(extended ? ['--intent-to-add'] : []), 'a.txt')
+      git(main, 'add', 'vendor')
+      if (args.length > 0) git(main, ...args)
+      // Another entry after it, so a split index keeps the submodule in its shared part.
+      writeFileSync(join(main, 'b.txt'), 'b\n')
+      git(main, 'add', 'b.txt')
+      expect(paths([main])).toEqual(
+        expect.arrayContaining([
+          join(main, 'vendor', '.git', 'config'),
+          join(main, 'vendor', '.git', 'hooks', 'pre-commit.sample'),
+        ]),
+      )
+    },
+  )
+
+  test('a repository whose objects are named by sha256 has its submodules read from its index', () => {
+    const main = join(work, 'acme')
+    mkdirSync(main)
+    git(main, 'init', '-q', '--object-format=sha256', '-b', 'trunk')
+    const vendor = join(main, 'vendor')
+    mkdirSync(vendor)
+    git(vendor, 'init', '-q', '--object-format=sha256', '-b', 'trunk')
+    git(vendor, 'commit', '-q', '--allow-empty', '-m', 'base')
+    git(main, 'add', 'vendor')
+    expect(paths([main])).toContain(join(vendor, '.git', 'config'))
   })
 })
 

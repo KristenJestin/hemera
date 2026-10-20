@@ -12,6 +12,11 @@
  * any of them names, whole, relative to each checkout and linked worktree, or from the home. What the engine's own Git writes (the
  * index, the refs, `ORIG_HEAD`, `FETCH_HEAD`, the logs, `packed-refs`, the objects) is none of it.
  *
+ * A submodule's own Git folder is read as the repository's (#470): each one under the common
+ * folder's `modules/`, nested ones under theirs, and each one a checkout's `.git` leads to, for every
+ * submodule its index names (its gitlinks), as `git status` walks into them. Its checkout is where
+ * its hooks run from.
+ *
  * Every file is read on the engine's own behalf (`readOwnSync`): never a link as its last name,
  * never waiting on a pipe, never more than `SHAPE_CAP`; a hooks folder is walked to `WALKED`
  * entries at most, a link to a folder walked where it leads. A link is fingerprinted by what it says
@@ -30,7 +35,7 @@ import {
   readlinkSync,
   realpathSync,
 } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 import { Result } from 'effect'
 
@@ -44,6 +49,9 @@ const TEXT_KEPT = 64 * 1024
 
 /** The most entries walked under one hooks folder: past it, the folder stands as one, too large. */
 const WALKED = 20_000
+
+/** The most of an index that is read for its submodules: past it, they are not looked for. */
+const INDEX_CAP = 64 * 1024 * 1024
 
 /** How deep includes are followed: Git's own limit (`MAX_INCLUDE_DEPTH`). */
 const INCLUDE_DEPTH = 10
@@ -127,8 +135,8 @@ const hashed = new Map<
 >()
 
 /**
- * What a configuration file of this digest includes, where it sets the hooks, and its steady
- * digest, parsed once.
+ * What a configuration file of this digest includes, where it sets the hooks, its steady digest,
+ * and whether its objects are named by sha256, parsed once.
  */
 const configNames = new Map<
   string,
@@ -136,6 +144,17 @@ const configNames = new Map<
     readonly includes: ReadonlyArray<string>
     readonly hooksPaths: ReadonlyArray<string>
     readonly steady: string | null
+    readonly sha256: boolean
+  }
+>()
+
+/** The submodules an index names, by its path, with the stat it had: read again once it changed. */
+const indexed = new Map<
+  string,
+  {
+    readonly stat: string
+    readonly settled: boolean
+    readonly gitlinks: ReadonlyArray<string>
   }
 >()
 
@@ -157,6 +176,16 @@ export type ShapeStat = Pick<
 export type StatOf = (path: string) => ShapeStat
 
 const lstatOf: StatOf = (path) => lstatSync(path, { bigint: true })
+
+/** What a file's stat says of it: one that says the same has not been rewritten, once settled. */
+const statKey = (named: ShapeStat): string =>
+  [named.size, named.mtimeNs, named.ctimeNs, named.ino, named.dev, named.mode].join(':')
+
+/** Whether a file's last change is long enough ago that a rewrite would change its stat. */
+const settledOf = (named: ShapeStat): boolean =>
+  BigInt(Date.now()) * 1_000_000n -
+    (named.mtimeNs > named.ctimeNs ? named.mtimeNs : named.ctimeNs) >=
+  SETTLED_NS
 
 /**
  * One path as it stands, and its bytes when it is a file read (a link's, where it leads). Only a
@@ -194,15 +223,12 @@ function entryOf(
     const digest = `over:${String(named.size)}:${String(named.mtimeNs)}:${String(named.ctimeNs)}`
     return { shape: shapeOf('over', digest), bytes: null }
   }
-  const stat = [named.size, named.mtimeNs, named.ctimeNs, named.ino, named.dev, named.mode].join(
-    ':',
-  )
+  const stat = statKey(named)
   const known = trusted ? hashed.get(path) : undefined
   if (known !== undefined && known.settled && known.stat === stat) {
     return { shape: known.shape, bytes: null }
   }
-  const changed = named.mtimeNs > named.ctimeNs ? named.mtimeNs : named.ctimeNs
-  const settled = BigInt(Date.now()) * 1_000_000n - changed >= SETTLED_NS
+  const settled = settledOf(named)
   const read = bytesOf(path)
   if (Result.isFailure(read)) {
     return { shape: shapeOf('other', `unread:${read.failure}`), bytes: null }
@@ -264,6 +290,107 @@ function commonDirOf(gitDir: string): string {
   const line = lineOf(join(gitDir, 'commondir'))
   return line === null || line === '' ? gitDir : resolve(gitDir, line)
 }
+
+/** What an index says of its submodules. */
+interface IndexRead {
+  readonly gitlinks: ReadonlyArray<string>
+  /** The name of the shared index a split index builds on, or null. */
+  readonly shared: string | null
+}
+
+/**
+ * The paths of the submodules an index names (its gitlinks), in its versions 2 to 4, and the shared
+ * index a split index builds on. An index Git would refuse names none: Git walks into none.
+ */
+function indexOf(bytes: Buffer, hash: number): IndexRead {
+  const none: IndexRead = { gitlinks: [], shared: null }
+  if (bytes.length < 12 || bytes.toString('latin1', 0, 4) !== 'DIRC') return none
+  const version = bytes.readUInt32BE(4)
+  if (version < 2 || version > 4) return none
+  const gitlinks: string[] = []
+  let at = 12
+  let previous: Buffer<ArrayBufferLike> = Buffer.alloc(0)
+  try {
+    for (let left = bytes.readUInt32BE(8); left > 0; left -= 1) {
+      const start = at
+      const mode = bytes.readUInt32BE(at + 24)
+      const flags = bytes.readUInt16BE(at + 40 + hash)
+      at += 42 + hash + (version >= 3 && (flags & 0x4000) !== 0 ? 2 : 0)
+      let name: Buffer
+      if (version === 4) {
+        // The name is the end of the one before, cut by a varint, then its own NUL-ended rest.
+        let byte = bytes.readUInt8(at)
+        at += 1
+        let cut = byte & 127
+        while ((byte & 128) !== 0) {
+          byte = bytes.readUInt8(at)
+          at += 1
+          cut = ((cut + 1) << 7) + (byte & 127)
+        }
+        const end = bytes.indexOf(0, at)
+        if (end < 0 || cut > previous.length) return none
+        name = Buffer.concat([previous.subarray(0, previous.length - cut), bytes.subarray(at, end)])
+        at = end + 1
+      } else {
+        const end = bytes.indexOf(0, at)
+        if (end < 0) return none
+        name = bytes.subarray(at, end)
+        at = start + ((at - start + name.length + 8) & ~7)
+      }
+      if ((mode & 0o170000) === 0o160000) gitlinks.push(name.toString('utf8'))
+      previous = name
+    }
+    let shared: string | null = null
+    while (at + 8 <= bytes.length - hash) {
+      if (bytes.toString('latin1', at, at + 4) === 'link') {
+        shared = bytes.toString('hex', at + 8, at + 8 + hash)
+      }
+      at += 8 + bytes.readUInt32BE(at + 4)
+    }
+    return { gitlinks, shared: shared === null || /^0+$/.test(shared) ? null : shared }
+  } catch {
+    // An entry past the end: the index is cut, and Git would refuse it.
+    return none
+  }
+}
+
+/**
+ * The submodules the index of a Git folder names, and its shared index's, if a split index; read
+ * again only once the index's stat changed, as a hooks folder's files are.
+ */
+function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): ReadonlyArray<string> {
+  const path = join(gitDir, 'index')
+  let named: ShapeStat
+  try {
+    named = statOf(path)
+  } catch {
+    return []
+  }
+  const stat = statKey(named)
+  const known = indexed.get(path)
+  if (known !== undefined && known.settled && known.stat === stat) return known.gitlinks
+  const settled = settledOf(named)
+  const own = indexIn(path, hash)
+  const shared =
+    own.shared === null ? [] : indexIn(join(gitDir, `sharedindex.${own.shared}`), hash).gitlinks
+  const gitlinks = [...own.gitlinks, ...shared]
+  if (indexed.size >= REMEMBERED) indexed.clear()
+  indexed.set(path, { stat, settled, gitlinks })
+  return gitlinks
+}
+
+/** An index file read on the engine's own behalf, or none where it cannot be. */
+function indexIn(path: string, hash: number): IndexRead {
+  try {
+    return indexOf(readOwnSync(path, INDEX_CAP).bytes, hash)
+  } catch {
+    return { gitlinks: [], shared: null }
+  }
+}
+
+/** Whether a path is a folder or under it. */
+const inside = (folder: string, path: string): boolean =>
+  path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep)
 
 /** The names in a folder, none when it cannot be listed. */
 function namesIn(folder: string): ReadonlyArray<string> {
@@ -344,6 +471,44 @@ export function shapesOf(
   }
   const configs: string[] = []
   const commons = new Set<string>()
+  /** The folders under a `modules/` already looked into, by their real path. */
+  const looked = new Set<string>()
+  /** The configuration of a file read so far, parsed once per digest. */
+  const parsed = (path: string) => {
+    const shape = shapes.get(path)
+    if (shape === undefined || (shape.kind !== 'file' && shape.kind !== 'link')) return null
+    const known = configNames.get(shape.digest)
+    if (known !== undefined) return known
+    // A large file trusted on its stat comes without its bytes: read again here.
+    const text = (bytes.get(path) ?? textOf(realOrNull(path) ?? path))?.toString('utf8')
+    if (text === undefined) return null
+    const names = {
+      includes: includesOf(text),
+      hooksPaths: hooksPathsOf(text),
+      steady: steadyOf(text),
+      sha256: entriesOf(text).some(
+        (entry) =>
+          entry.section === 'extensions' &&
+          entry.subsection === null &&
+          entry.key === 'objectformat' &&
+          entry.value?.toLowerCase() === 'sha256',
+      ),
+    }
+    if (configNames.size >= REMEMBERED) configNames.clear()
+    configNames.set(shape.digest, names)
+    return names
+  }
+  /** The submodules' Git folders under a `modules/`, a name perhaps holding slashes. */
+  const modulesIn = (folder: string): void => {
+    const real = realOf(folder)
+    if (looked.has(real)) return
+    looked.add(real)
+    if (isGitFolder(real)) {
+      commonOnce(real)
+      return
+    }
+    for (const name of namesIn(real)) modulesIn(join(real, name))
+  }
   /** Where hooks run from: every checkout, and every linked worktree of their repositories. */
   const tops = new Set<string>()
   const commonOnce = (common: string): void => {
@@ -369,15 +534,24 @@ export function shapesOf(
       add(named)
       tops.add(dirname(named))
     }
+    for (const name of namesIn(join(common, 'modules'))) modulesIn(join(common, 'modules', name))
   }
-  for (const checkout of checkouts.map(realOf)) {
+  // Each checkout, and each submodule its index names, as `git status` walks into them.
+  const pending = checkouts.map(realOf)
+  const visited = new Set<string>()
+  for (let checkout = pending.shift(); checkout !== undefined; checkout = pending.shift()) {
+    if (visited.has(checkout)) continue
+    visited.add(checkout)
     tops.add(checkout)
     add(join(checkout, '.git'))
     const gitDir = gitDirOf(checkout)
     if (gitDir === null) continue
     for (const name of ['commondir', 'gitdir', 'config.worktree']) add(join(gitDir, name))
     configs.push(join(gitDir, 'config.worktree'))
-    commonOnce(realOf(commonDirOf(gitDir)))
+    const common = realOf(commonDirOf(gitDir))
+    commonOnce(common)
+    const hash = parsed(join(common, 'config'))?.sha256 === true ? 32 : 20
+    for (const path of gitlinksAt(gitDir, hash, statOf)) pending.push(realOf(join(checkout, path)))
   }
   for (const common of repositories) commonOnce(common)
   const homeConfigs = [join(home.home, '.gitconfig'), join(home.configHome, 'git', 'config')]
@@ -397,19 +571,8 @@ export function shapesOf(
     const seen = `${String(next.everywhere)}\0${next.path}`
     if (followed.has(seen)) continue
     followed.add(seen)
-    const shape = shapes.get(next.path)
-    if (shape === undefined || (shape.kind !== 'file' && shape.kind !== 'link')) continue
-    let names = configNames.get(shape.digest)
-    if (names === undefined) {
-      // A large file trusted on its stat comes without its bytes: read again here.
-      const text = (bytes.get(next.path) ?? textOf(realOrNull(next.path) ?? next.path))?.toString(
-        'utf8',
-      )
-      if (text === undefined) continue
-      names = { includes: includesOf(text), hooksPaths: hooksPathsOf(text), steady: steadyOf(text) }
-      if (configNames.size >= REMEMBERED) configNames.clear()
-      configNames.set(shape.digest, names)
-    }
+    const names = parsed(next.path)
+    if (names === null) continue
     read.push({ hooksPaths: names.hooksPaths, everywhere: next.everywhere })
     steadies.set(next.path, names.steady)
     for (const named of names.includes) {
@@ -593,6 +756,58 @@ function steadyOf(text: string): string | null {
     (entry) => entry.subsection === null || EVERYDAY.get(entry.section)?.has(entry.key) !== true,
   )
   return sha256(Buffer.from(JSON.stringify(kept)))
+}
+
+/**
+ * What `git clone` writes into the configuration of the repository it makes, beside the everyday
+ * entries: its format, how it reads the disk, its work tree, its remote. None of it runs anything.
+ */
+const CLONED: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    'core',
+    new Set([
+      'repositoryformatversion',
+      'filemode',
+      'bare',
+      'logallrefupdates',
+      'worktree',
+      'symlinks',
+      'ignorecase',
+      'precomposeunicode',
+    ]),
+  ],
+  ['extensions', new Set(['objectformat'])],
+])
+
+/**
+ * Whether a file added to a repository's fingerprint is part of a submodule's Git folder as `git
+ * submodule` clones it, which runs nothing: a folder under the common folder's `modules/`, a
+ * sample hook or `info/exclude` there, a `config` holding only what a clone writes, or a
+ * checkout's `.git` file. Anything else a submodule brings is asked about.
+ */
+export function asCloned(common: string, path: string, shape: Shape): boolean {
+  const modules = join(common, 'modules')
+  if (inside(modules, path)) {
+    if (shape.kind === 'folder') return true
+    if (shape.kind !== 'file') return false
+    const name = basename(path)
+    const parent = basename(dirname(path))
+    if (parent === 'hooks' && name.endsWith('.sample')) return true
+    if (parent === 'info' && name === 'exclude') return true
+    if (name !== 'config' || shape.text === null) return false
+    const { entries, whole } = configOf(shape.text)
+    return (
+      whole &&
+      entries.every((entry) =>
+        entry.subsection === null
+          ? CLONED.get(entry.section)?.has(entry.key) === true
+          : (entry.section === 'remote' && (entry.key === 'url' || entry.key === 'fetch')) ||
+            EVERYDAY.get(entry.section)?.has(entry.key) === true,
+      )
+    )
+  }
+  // What it names is part of the fingerprint, and judged there.
+  return basename(path) === '.git' && shape.kind === 'file'
 }
 
 /** One entry of a Git configuration: its section and key lowercased, the subsection as written. */
