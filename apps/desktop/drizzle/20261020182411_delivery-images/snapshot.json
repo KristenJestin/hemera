@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "e77347bf-3c21-41a5-b995-30b6e5c5e29c",
-  "prevIds": ["34fd7f3d-64c6-4865-a4e1-6a526b87ccf6"],
+  "id": "24958688-7c9d-4d6f-9de7-9a94550d164b",
+  "prevIds": ["b68b6ea3-2380-4187-8702-e9b3efe854c9"],
   "ddl": [
     {
       "name": "agent_sessions",
@@ -8877,6 +8877,16 @@
       "default": null,
       "generated": null,
       "name": "last_fetched_at",
+      "entityType": "columns",
+      "table": "project_repositories"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "test_reporting",
       "entityType": "columns",
       "table": "project_repositories"
     },
