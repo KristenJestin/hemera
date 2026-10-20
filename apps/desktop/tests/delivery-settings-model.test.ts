@@ -705,6 +705,26 @@ describe('The gestures of the delivery rules (#502)', () => {
     ])
   })
 
+  test('a step moved after the step of its own that followed it', () => {
+    const added = withStepAdded(defaultDeliveryRules(), DELIVERY, 'r-api', 'waves', undefined, {
+      id: 'chk',
+      kind: 'confirm',
+      mode: 'click',
+      what: 'The release is checked',
+    })
+    const after = withStepMoved(added, DELIVERY, 'r-api', 'ci', 'waves', 'chk')
+    expect(shownOf(world({ draft: after })).elsewhere).toBeUndefined()
+    expect(stepsOf(after, 'api').slice(3)).toEqual([
+      'waves:merge:merge:preset',
+      'waves:chk:confirm:added',
+      'waves:ci:ci:changed',
+    ])
+    // What stood after it keeps its place when it moves away.
+    expect(
+      stepsOf(withStepMoved(added, DELIVERY, 'r-api', 'ci', 'waves', null), 'api').slice(3),
+    ).toEqual(['waves:ci:ci:changed', 'waves:merge:merge:preset', 'waves:chk:confirm:added'])
+  })
+
   test('reordering a step of its own: moved to another moment, after the step named', () => {
     const added = withStepAdded(defaultDeliveryRules(), DELIVERY, 'r-api', 'tasks', null, {
       id: 'check',

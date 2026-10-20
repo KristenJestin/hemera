@@ -935,15 +935,18 @@ export function withStepMoved(
   const own = overridesIn(draft, from, repositoryId).added.find((one) => one.step.id === stepId)
   const lifted =
     own === undefined
-      ? withEveryPart(draft, repositoryId, (overrides) =>
-          withoutMoved(
-            {
-              ...overrides,
-              off: overrides.off.filter((id) => id !== stepId),
-              changed: overrides.changed.filter((one) => one.id !== stepId),
-            },
-            stepId,
-          ),
+      ? withEveryPart(
+          withFollowersKept(draft, project, repositoryId, stepId, from),
+          repositoryId,
+          (overrides) =>
+            withoutMoved(
+              {
+                ...overrides,
+                off: overrides.off.filter((id) => id !== stepId),
+                changed: overrides.changed.filter((one) => one.id !== stepId),
+              },
+              stepId,
+            ),
         )
       : withRepository(draft, project, from, repositoryId, (overrides) => ({
           ...overrides,
@@ -962,6 +965,34 @@ export function withStepMoved(
       ? { ...overrides, moved: [...(overrides.moved ?? []), placed] }
       : { ...overrides, added: [...overrides.added, placed] },
   )
+}
+
+/**
+ * A preset's step about to leave its place, never moved before: the steps placed after it keep
+ * their place, after the step it followed (null: first).
+ */
+function withFollowersKept(
+  draft: DeliveryRulesDraft,
+  project: DeliveryProject,
+  repositoryId: string,
+  stepId: string,
+  from: DeliveryMoment,
+): DeliveryRulesDraft {
+  if (movedMomentOf(draft, repositoryId, stepId) !== undefined) return draft
+  const { preset } = wavesIn(draft, project, repositoryId)
+  const drawn = placedIn(
+    draft[from].presets[preset],
+    overridesIn(draft, from, repositoryId),
+    from,
+    awayIn(draft, repositoryId),
+  ).map((one) => one.action.id)
+  const followed = drawn[drawn.indexOf(stepId) - 1] ?? null
+  const anchored = <P extends { readonly after: string | null }>(one: P): P =>
+    one.after === stepId ? Object.assign({}, one, { after: followed }) : one
+  return withRepository(draft, project, from, repositoryId, (overrides) => {
+    const rest = { ...overrides, added: overrides.added.map(anchored) }
+    return overrides.moved === undefined ? rest : { ...rest, moved: overrides.moved.map(anchored) }
+  })
 }
 
 /** A dependency accepted taken back: the repository no longer waits for the other. */
