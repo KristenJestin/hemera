@@ -7,7 +7,7 @@
  * Builders and the round's Planner driven through their grants, Acme's `api` in temporary folders.
  */
 
-import { readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { START_A_MISSION } from '@hemera/core/domain'
@@ -648,6 +648,77 @@ describe('A carried Spec proof the user edited in Review', () => {
         .flatMap((one) => one.scenarios)
         .find((one) => one.scenario === 'R1.S2')
       expect(proof?.state).not.toBe('red_recorded')
+    },
+  )
+})
+
+describe('A carried Spec proof the user deleted in Review', () => {
+  test(
+    'a round’s start does not put back the test of a carried Spec proof the user deleted in Review, hands its Builder no conflict, and says deleted, not changed',
+    SLOW,
+    async () => {
+      const { world, run } = rounding(data, work)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { mission } = yield* launched(
+              work,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              SPEC_PROOFS,
+            )
+            const missionId = mission.id
+            const builder = yield* builderOf(missionId)
+            yield* proofIn(missionId, 'R1.S2', 'red_recorded')
+            yield* builtAll(builder.grantId)
+            yield* throughEnd(world, missionId)
+            const testFile = join(yield* workspaceOf(missionId), 'api', 'tests', 'export.test.mjs')
+            rmSync(testFile)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerRound(planner.grantId, [one.id])
+            yield* roundBuilding(missionId, 1)
+            yield* roundBuilderOf(missionId, builder.session.lineage)
+            yield* until(
+              Effect.map(
+                eventsOf(missionId, 'building.proofs_written'),
+                (events) => events.length === 2,
+              ),
+              LONG,
+            )
+            const [, round] = yield* eventsOf(missionId, 'building.proofs_written')
+            const [deleted] = yield* eventsOf(missionId, 'building.proofs_deleted')
+            const line =
+              deleted === undefined
+                ? null
+                : yield* (
+                    BUILDING_MAPPERS.get('building.proofs_deleted')?.(deleted) ??
+                      Effect.succeed(null)
+                  )
+            return {
+              there: existsSync(testFile),
+              payload: round?.payload,
+              deleted: deleted?.payload,
+              kept: yield* eventsOf(missionId, 'building.proofs_kept'),
+              line: line?.text,
+              told: yield* deliveredTo(missionId, 'builder'),
+            }
+          }),
+        ),
+      )
+      expect(seen.there).toBe(false)
+      expect(seen.payload).toMatchObject({ conflicts: [] })
+      expect(seen.deleted).toEqual({ scenarios: ['R1.S2'] })
+      expect(seen.kept).toEqual([])
+      expect(seen.line).toBe(
+        'Hemera did not put back the proof tests of R1.S2: deleted since their Building.',
+      )
+      expect(seen.told.filter((line) => line.includes('could not be written'))).toEqual([])
     },
   )
 })
