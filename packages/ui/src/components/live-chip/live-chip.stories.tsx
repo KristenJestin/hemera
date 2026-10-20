@@ -165,6 +165,31 @@ export const WaitsForYou: Story = {
 }
 
 /**
+ * Words of its own, and no duration: for what Hemera did not start and cannot time, the chip
+ * shows no seconds, and its legend is the plain sentence it is given rather than its state.
+ */
+export const WordsOfItsOwn: Story = {
+  args: {
+    name: 'claude · pid 48213',
+    state: 'stuck',
+    calls: true,
+    startedAt: null,
+    endedAt: null,
+    legend: 'An agent still running that Hemera could not stop.',
+  },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', {
+      name: 'claude · pid 48213, An agent still running that Hemera could not stop.',
+    })
+    expect(chip).toHaveTextContent('claude · pid 48213')
+    expect(chip.textContent).not.toMatch(/\d+s$/)
+    expect(await legendOf(chip)).toBe(
+      'claude · pid 48213 · An agent still running that Hemera could not stop.',
+    )
+  },
+}
+
+/**
  * Stuck (proposed, to validate): a session with no event for five minutes in the middle of a
  * turn. The breath stops — nothing is moving, so nothing on the chip moves — the seconds go on,
  * and its icon gives way to a paused clock in the warning tone. The legend says it in words.

@@ -125,6 +125,8 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'cold_reads',
       'command_runs',
       'deliveries_by_target',
+      'delivery_rule_copies',
+      'delivery_rules',
       'dependencies_on_mission',
       'dependency_once',
       'discussion_messages',
@@ -142,9 +144,12 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'exclusive_resource_commands',
       'exclusive_resources',
       'file_contents',
+      'forge_needs',
       'freeze_files',
       'freeze_once_per_cycle',
       'freezes',
+      'git_baselines',
+      'git_holds',
       'grants_by_mission',
       'helper_of_lineage',
       'helpers',
@@ -219,6 +224,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'queued_by_owner',
       'queued_deliveries',
       'queued_results',
+      'repository_forges',
       'repository_trees',
       'requests_by_need',
       'requests_by_state',
@@ -226,12 +232,24 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'resource_commands_by_command',
       'resources_by_key',
       'review_changed_after',
+      'review_checkpoints',
+      'review_feedback',
+      'review_feedback_images',
+      'review_feedback_of_mission',
+      'review_feedback_source',
+      'review_feedback_versions',
       'review_findings',
       'review_findings_of_building',
       'review_pass_of_lineage',
       'review_passes',
       'review_passes_of_building',
+      'review_rounds',
       'role_models',
+      'round_decisions',
+      'round_decisions_of_mission',
+      'round_points',
+      'round_scenarios',
+      'round_tasks',
       'runner_leases',
       'runs_by_place',
       'scenario_proofs',
@@ -456,6 +474,85 @@ describe('A data folder from before the Freeze took its snapshot through the sna
         tree: null,
       },
     ])
+  })
+})
+
+describe('A data folder from before the review checkpoint’s keys', () => {
+  test('a migration test shows both foreign keys: its Building and review pass keep their checkpoint, which can no longer be dropped', async () => {
+    const data = temporaryFolder('before-review-keys')
+    const before = temporaryFolder('migrations-before-review-keys')
+    const shipped = readdirSync(SHIPPED).toSorted()
+    const keys = shipped.find((name) => name.endsWith('_review-checkpoint-keys'))
+    expect(keys).toBeDefined()
+    for (const name of shipped.filter((one) => one < (keys ?? ''))) {
+      cpSync(join(SHIPPED, name), join(before, name), { recursive: true })
+    }
+    await on(data, openProfile(data, before, '1.0.0'))
+    const at = '2026-10-01T10:00:00.000Z'
+    const file = new DatabaseSync(join(data, DATABASE_FILE))
+    file
+      .prepare(
+        'INSERT INTO projects (id, name, main_checkout, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run('project-1', 'Acme', '/acme', at, at, 1)
+    file
+      .prepare(
+        'INSERT INTO missions (id, project_id, key_prefix, key_number, title, idea_sentence, type, stage, round, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run('mission-1', 'project-1', 'ACME', 4, 'Export', 'As CSV', 'feature', 'review', 0, at, at)
+    file
+      .prepare('INSERT INTO checkpoints (id, mission_id, kind, taken_at) VALUES (?, ?, ?, ?)')
+      .run('checkpoint-1', 'mission-1', 'review', at)
+    file
+      .prepare(
+        'INSERT INTO buildings (id, mission_id, label, bases, phase, state, started_at, review_checkpoint_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run('building-1', 'mission-1', 'Building', '[]', 'review', 'active', at, 'checkpoint-1')
+    file
+      .prepare('INSERT INTO building_activity (building_id, started_at, seen_at) VALUES (?, ?, ?)')
+      .run('building-1', at, at)
+    file
+      .prepare(
+        'INSERT INTO review_passes (id, mission_id, building_id, checkpoint_id, reviewer, lineage, state, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        'pass-1',
+        'mission-1',
+        'building-1',
+        'checkpoint-1',
+        'code-reviewer',
+        'lineage-1',
+        'done',
+        at,
+      )
+    file.close()
+
+    await on(data, openProfile(data, SHIPPED, '1.0.0'))
+    const after = new DatabaseSync(join(data, DATABASE_FILE))
+    after.exec('PRAGMA foreign_keys = ON')
+    const keysOf = (table: string) =>
+      after
+        .prepare(`SELECT "from", "table", "to" FROM pragma_foreign_key_list('${table}')`)
+        .all()
+        .filter((row) => row.table === 'checkpoints')
+    const seen = {
+      buildings: keysOf('buildings'),
+      passes: keysOf('review_passes'),
+      building: after.prepare('SELECT review_checkpoint_id FROM buildings').all(),
+      pass: after.prepare('SELECT checkpoint_id FROM review_passes').all(),
+      activity: after.prepare('SELECT building_id FROM building_activity').all(),
+    }
+    const dropped = () => after.prepare("DELETE FROM checkpoints WHERE id = 'checkpoint-1'").run()
+    expect(dropped).toThrow(/FOREIGN KEY/)
+    after.close()
+    expect(seen.buildings).toEqual([
+      { from: 'review_checkpoint_id', table: 'checkpoints', to: 'id' },
+    ])
+    expect(seen.passes).toEqual([{ from: 'checkpoint_id', table: 'checkpoints', to: 'id' }])
+    expect(seen.building).toEqual([{ review_checkpoint_id: 'checkpoint-1' }])
+    expect(seen.pass).toEqual([{ checkpoint_id: 'checkpoint-1' }])
+    // A table that points to the rebuilt Buildings keeps its rows.
+    expect(seen.activity).toEqual([{ building_id: 'building-1' }])
   })
 })
 

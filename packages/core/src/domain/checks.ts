@@ -163,6 +163,24 @@ export function checkProblem(draft: CheckDraft, taken: ReadonlyArray<string>): s
   return checkRefusal(draft, taken)?.sentence ?? null
 }
 
+/**
+ * How long a proof may run before Hemera ends it, in minutes (#321): the Project's setting beside
+ * its checks, this default while it has none. Some proofs run for hours (a long migration, a
+ * soak test); a day is the bound, so a forgotten value never holds a Building for days.
+ */
+export const DEFAULT_PROOF_MINUTES = 10
+export const MAX_PROOF_MINUTES = 24 * 60
+
+/** Why a proof's time limit cannot be kept, as the settings show it, or null when it can. */
+export function proofLimitRefusal(minutes: number): string | null {
+  if (!Number.isInteger(minutes)) return 'Write a whole number of minutes.'
+  if (minutes < 1) return 'A proof needs at least 1 minute.'
+  if (minutes > MAX_PROOF_MINUTES) {
+    return `A proof may run ${String(MAX_PROOF_MINUTES)} minutes (24 hours) at most.`
+  }
+  return null
+}
+
 /** The command types a check is proposed from, and when and where each runs by default. */
 const PROPOSED: Partial<Record<CommandType, Pick<CheckDraft, 'when' | 'where'>>> = {
   lint: { when: 'task', where: 'changed' },

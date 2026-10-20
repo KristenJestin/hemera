@@ -32,10 +32,12 @@ import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject } from '../src/engine/projects.ts'
 import { saveResources } from '../src/engine/resources/declarations.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { SessionPost } from '../src/engine/sessions/post.ts'
 import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
+  buildingDecisions,
   buildings,
   commandRuns,
   domainEvents,
@@ -46,9 +48,10 @@ import {
 import { actionDone, beginAction } from '../src/engine/tools/actions.ts'
 import { type JudgedCall, Verdicts } from '../src/engine/tools/ports.ts'
 import { fingerprintOf } from '../src/engine/tools/read.ts'
-import { call, eventsOf, grantOf } from './building-world.ts'
+import { acmeAt, call, eventsOf, grantOf } from './building-world.ts'
 import { builderAgents, builderOf, buildingNow, launched, taskIn } from './builder-world.ts'
 import { nodeLine } from './commands-engine.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
 import { git } from './repositories.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import { ALLOW, verdictsSaying } from './tools-world.ts'
@@ -892,6 +895,42 @@ describe('Three reds become an error need', () => {
     expect(seen.events).toHaveLength(1)
   })
 
+  test('need_propose with an option holding a quoted credential and a known value stores nothing of either, and still JSON (#397)', async () => {
+    const checks = checksSaying((asked) => (asked.subject === 'T1' ? [red()] : []))
+    const { run } = builderEngine(data, work, { checks })
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          ;(yield* Secrets).register('project-variables:suite', [KNOWN_SECRET])
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          for (const summary of ['One.', 'Two.', 'Three.']) {
+            yield* call(grantId, 'task_finished', { task: 'T1', summary })
+          }
+          const [need] = (yield* getMission(mission.id)).needs
+          const proposed = yield* call(grantId, 'need_propose', {
+            need: need?.id ?? '',
+            options: [
+              { label: 'Sign in', detail: `With ${QUOTED_SECRET} and ${KNOWN_SECRET}.` },
+              { label: 'Drop the test', detail: 'It tests nothing of R1.' },
+            ],
+            recommended: 'Drop the test',
+            reason: 'The failure names the account.',
+          })
+          const [row] = yield* (yield* Database)
+            .select({ options: buildingDecisions.options })
+            .from(buildingDecisions)
+            .where(eq(buildingDecisions.kind, 'error'))
+          return { proposed, stored: row?.options }
+        }),
+      ),
+    )
+    expect(seen.proposed).not.toMatch(/^refused/)
+    expectMaskedJson(seen.stored)
+  })
+
   test('need_propose is refused for a need it was not asked for', async () => {
     const { run } = builderEngine(data, work)
     const refused = await run(({ profile }) =>
@@ -1182,6 +1221,17 @@ describe('An action cut by a restart (CT-09)', () => {
 })
 
 describe('Commits per task', () => {
+  /**
+   * Acme, its api set to the user's own identity, as their machine has it, before Hemera knows the
+   * repository: set later, it is a change of what shapes its Git, which the guard asks about (#457).
+   */
+  const userAcme = (folder: string) =>
+    acmeAt(folder, 'acme', (api) => {
+      git(api, 'config', 'user.name', 'Ada Lovelace')
+      git(api, 'config', 'user.email', 'ada@example.com')
+      git(api, 'config', 'commit.gpgsign', 'false')
+    })
+
   /** The mission's copy of the validation settings, its "who commits" section set to `value`. */
   const commitsSay = (missionId: string, value: typeof ONE_COMMIT_PER_TASK) =>
     Effect.gen(function* () {
@@ -1199,14 +1249,11 @@ describe('Commits per task', () => {
 
   const builtWith = (perTask: boolean) =>
     Effect.gen(function* () {
-      const { mission } = yield* launched(work)
+      const { mission } = yield* launched(work, undefined, undefined, undefined, userAcme)
       if (perTask) yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
       const { session, grantId } = yield* builderOf(mission.id)
       const api = join(session.folder, 'api')
       // The user's own identity, as their machine has it.
-      git(api, 'config', 'user.name', 'Ada Lovelace')
-      git(api, 'config', 'user.email', 'ada@example.com')
-      git(api, 'config', 'commit.gpgsign', 'false')
       const head = git(api, 'rev-parse', 'HEAD')
       const helper = yield* helperOf(mission.id, session.folder)
       yield* call(grantId, 'task_start', { task: 'T1' })
@@ -1239,13 +1286,16 @@ describe('Commits per task', () => {
     more: { readonly before?: (projectId: string) => Effect.Effect<void> } = {},
   ) =>
     Effect.gen(function* () {
-      const { project, mission } = yield* launched(work, more.before)
+      const { project, mission } = yield* launched(
+        work,
+        more.before,
+        undefined,
+        undefined,
+        userAcme,
+      )
       yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
       const { session, grantId } = yield* builderOf(mission.id)
       const api = join(session.folder, 'api')
-      git(api, 'config', 'user.name', 'Ada Lovelace')
-      git(api, 'config', 'user.email', 'ada@example.com')
-      git(api, 'config', 'commit.gpgsign', 'false')
       const head = git(api, 'rev-parse', 'HEAD')
       yield* call(grantId, 'task_start', { task: 'T1' })
       yield* call(grantId, 'fs_read', { repository: 'api', path: 'invoices.ts' })
@@ -1380,13 +1430,16 @@ describe('Commits per task', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { project, mission } = yield* launched(work)
+          const { project, mission } = yield* launched(
+            work,
+            undefined,
+            undefined,
+            undefined,
+            userAcme,
+          )
           yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
           const { session, grantId } = yield* builderOf(mission.id)
           const api = join(session.folder, 'api')
-          git(api, 'config', 'user.name', 'Ada Lovelace')
-          git(api, 'config', 'user.email', 'ada@example.com')
-          git(api, 'config', 'commit.gpgsign', 'false')
           // A watch of T2's that never ends, writing only under dist/.
           const watching = yield* apiCommand(project.id, 'watch', ['dist/app.js=built'], {
             release,

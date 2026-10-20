@@ -1,0 +1,47 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ interp.test.ts (3 tests | 2 failed) 6ms
+   × exports csv 5ms
+   × exports md 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  interp.test.ts > exports csv
+AssertionError: expected 'csv' to be 'txt' // Object.is equality
+
+Expected: "txt"
+Received: "csv"
+
+ ❯ interp.test.ts:5:59
+      3| const label = (row: { kind: string }) => row.kind
+      4| for (const kind of ['csv', 'md']) {
+      5|   test(`exports ${label({ kind })}`, () => { expect(kind).toBe('txt') …
+       |                                                           ^
+      6| }
+      7| test('exports csv', () => { expect(1).toBe(1) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  interp.test.ts > exports md
+AssertionError: expected 'md' to be 'txt' // Object.is equality
+
+Expected: "txt"
+Received: "md"
+
+ ❯ interp.test.ts:5:59
+      3| const label = (row: { kind: string }) => row.kind
+      4| for (const kind of ['csv', 'md']) {
+      5|   test(`exports ${label({ kind })}`, () => { expect(kind).toBe('txt') …
+       |                                                           ^
+      6| }
+      7| test('exports csv', () => { expect(1).toBe(1) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  15:35:46
+   Duration  111ms (transform 45%, import 24%, tests 22%, worker 9%)
+

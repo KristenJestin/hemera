@@ -14,7 +14,11 @@
  * A crash ends nothing, so the roots are also written to a durable registry while they run (their
  * pid, their program and arguments, what owns them, and the engine that started them). At the next
  * start, a root a previous engine left is ended as a tree if it is still alive and still the same
- * program; a pid now held by another program is not ours and is never touched.
+ * program; a pid now held by another program is not ours and is never touched. The machine is
+ * asked once what every root left runs, and the roots are ended side by side, so that many cost
+ * about the time of one. One that cannot be ended (what
+ * it runs could not be said in time, or its kill did not end it) is kept: listed, watched until it
+ * is gone, and tried again at the next start.
  *
  * A child can also be started elsewhere and handed over by its pid (main forks the agents'
  * processes for the engine): the same policy applies to it. What a child writes on its standard
@@ -28,8 +32,18 @@ import { basename, extname } from 'node:path'
 import type { Readable } from 'node:stream'
 
 import { and, eq, ne } from 'drizzle-orm'
-import { Context, Deferred, Duration, Effect, Layer, Option, Ref, Schema } from 'effect'
-import type { Scope } from 'effect'
+import {
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+  SubscriptionRef,
+} from 'effect'
+import type { Scope, Stream } from 'effect'
 
 import { Database, refusedWhile } from './storage/database.ts'
 import { supervisedProcesses } from './storage/schema.ts'
@@ -54,9 +68,12 @@ export interface ExitObservation {
   readonly when: string
 }
 
-/** What owns a supervised root: a run of a command, an agent's session, or a `gh` call (#95). */
+/**
+ * What owns a supervised root: a run of a command, an agent's session, a `gh` call of the ticket
+ * providers (#95), or a forge CLI's call (#253).
+ */
 export interface ProcessOwner {
-  readonly kind: 'run' | 'session' | 'tickets'
+  readonly kind: 'run' | 'session' | 'tickets' | 'forge'
   readonly id: string
 }
 
@@ -74,8 +91,11 @@ export interface Supervised {
   readonly kill: Effect.Effect<void>
   /** Each line it writes on its standard output, as it arrives. */
   readonly onStdout: (read: (line: string) => void, done?: () => void) => void
-  /** Each line it writes on its standard error, as it arrives (the diagnostic has them too). */
-  readonly onStderr: (read: (line: string) => void) => void
+  /**
+   * Each line it writes on its standard error, as it arrives (the diagnostic has them too); `done`
+   * once that output is closed, after the last line.
+   */
+  readonly onStderr: (read: (line: string) => void, done?: () => void) => void
 }
 
 /** What a process can be told. */
@@ -106,7 +126,7 @@ export interface HostProcess {
   readonly onFailure: (failed: (reason: string) => void) => void
   /** Each line of its standard output; `done` once the output is closed, after the last line. */
   readonly onStdout: (read: (line: string) => void, done?: () => void) => void
-  readonly onStderr: (read: (line: string) => void) => void
+  readonly onStderr: (read: (line: string) => void, done?: () => void) => void
 }
 
 /** The machine: starting a child, ending a tree, and asking about a pid. */
@@ -124,8 +144,13 @@ export interface HostProcessesService {
   readonly killTree: (pid: number, grouped: boolean) => Effect.Effect<void>
   /** Whether a pid names a living process. */
   readonly alive: (pid: number) => boolean
-  /** The command line a living pid runs, as the system says it, or null when it cannot say. */
-  readonly commandLineOf: (pid: number) => Effect.Effect<string | null>
+  /**
+   * The command lines living pids run, as the system says them, asked once for all of them; a pid
+   * the system cannot say is not in the answer.
+   */
+  readonly commandLinesOf: (
+    pids: ReadonlyArray<number>,
+  ) => Effect.Effect<ReadonlyMap<number, string>>
 }
 
 export class HostProcesses extends Context.Service<HostProcesses, HostProcessesService>()(
@@ -198,36 +223,94 @@ const taskkill = (pid: number) =>
     )
   })
 
-/** How long Windows may take to say what a pid runs: PowerShell and its first CIM query are slow. */
+/**
+ * How long Windows may take to say what pids run: PowerShell and its first CIM query are slow.
+ * The orphans' sweep bounds its one lookup by it, on every system: one cut is unknown command lines.
+ */
 export const WINDOWS_COMMAND_LINE_MS = 20_000
 
-/** What Windows says a pid runs: PowerShell is the one program every Windows has that tells it. */
-const windowsCommandLine = (pid: number) =>
+/**
+ * What a program prints once it ends, or null when it printed nothing or did not end within
+ * `millis`: what a program cut by the bound had printed is no answer, its last line may be half
+ * of one. It is ended when the bound passes, or when the one waiting on it gives up first: a
+ * lookup cut leaves nothing running behind it.
+ */
+export const outputOf = (program: string, args: ReadonlyArray<string>, millis: number) =>
   Effect.callback<string | null>((resume) => {
-    execFile(
+    const child = execFile(program, [...args], { windowsHide: true }, (_error, stdout) => {
+      const text = String(stdout).trim()
+      resume(Effect.succeed(text === '' ? null : text))
+    })
+    return Effect.sync(() => {
+      child.kill()
+    })
+  }).pipe(Effect.timeoutOption(Duration.millis(millis)), Effect.map(Option.getOrNull))
+
+/** `<pid> <command line>` lines, as the two lookups below print them; one without a line is left out. */
+const linesByPid = (text: string | null): ReadonlyMap<number, string> =>
+  new Map(
+    (text ?? '').split('\n').flatMap((row) => {
+      const found = /^\s*(\d+)\s+(\S.*)$/.exec(row.trimEnd())
+      return found === null ? [] : [[Number(found[1]), found[2] ?? ''] as const]
+    }),
+  )
+
+/**
+ * What Windows says the pids run, in one PowerShell for all of them: PowerShell is the one program
+ * every Windows has that tells it, and starting it is the slow part.
+ */
+const windowsCommandLines = (pids: ReadonlyArray<number>, millis: number) =>
+  Effect.map(
+    outputOf(
       'powershell.exe',
       [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `(Get-CimInstance Win32_Process -Filter 'ProcessId=${String(pid)}').CommandLine`,
+        `Get-CimInstance Win32_Process -Filter '${pids.map((pid) => `ProcessId=${String(pid)}`).join(' OR ')}' | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`,
       ],
-      { windowsHide: true, timeout: WINDOWS_COMMAND_LINE_MS },
-      (error, stdout) => {
-        const line = String(stdout).trim()
-        resume(Effect.succeed(error !== null || line === '' ? null : line))
-      },
-    )
-  })
+      millis,
+    ),
+    linesByPid,
+  )
 
-/** What macOS and the other POSIX systems say a pid runs. */
-const psCommandLine = (pid: number) =>
-  Effect.callback<string | null>((resume) => {
-    execFile('ps', ['-o', 'command=', '-p', String(pid)], (error, stdout) => {
-      const line = String(stdout).trim()
-      resume(Effect.succeed(error !== null || line === '' ? null : line))
-    })
-  })
+/** What macOS and the other POSIX systems say the pids run, in one `ps`. */
+const psCommandLines = (pids: ReadonlyArray<number>, millis: number) =>
+  Effect.map(outputOf('ps', ['-o', 'pid=,command=', '-p', pids.join(',')], millis), linesByPid)
+
+/** What Linux says a pid runs: the very words it was started with. */
+const procCommandLine = (pid: number): string | null => {
+  try {
+    const read = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8')
+    return read === '' ? null : read.replace(/\0$/, '').split('\0').join(' ')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * What this machine says the pids run, in one query bounded by `millis` (Linux reads it at once):
+ * the engine's lookup, with the bound a suite on a loaded machine can widen.
+ */
+export const machineCommandLines = (
+  pids: ReadonlyArray<number>,
+  millis: number,
+): Effect.Effect<ReadonlyMap<number, string>> => {
+  if (pids.length === 0) return Effect.succeed(new Map())
+  if (process.platform === 'win32') return windowsCommandLines(pids, millis)
+  if (process.platform === 'linux') {
+    return Effect.sync(
+      () =>
+        new Map(
+          pids.flatMap((pid) => {
+            const line = procCommandLine(pid)
+            return line === null ? [] : [[pid, line] as const]
+          }),
+        ),
+    )
+  }
+  return psCommandLines(pids, millis)
+}
 
 /** The machine this engine runs on. */
 export const hostProcessesLayer = Layer.succeed(HostProcesses, {
@@ -266,8 +349,8 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
       onStdout: (read, done) => {
         if (child.stdout !== null) linesOf(child.stdout, read, done)
       },
-      onStderr: (read) => {
-        if (child.stderr !== null) linesOf(child.stderr, read)
+      onStderr: (read, done) => {
+        if (child.stderr !== null) linesOf(child.stderr, read, done)
       },
     }
   },
@@ -291,20 +374,7 @@ export const hostProcessesLayer = Layer.succeed(HostProcesses, {
       return (cause as NodeJS.ErrnoException).code === 'EPERM'
     }
   },
-  commandLineOf: (pid) => {
-    if (process.platform === 'win32') return windowsCommandLine(pid)
-    if (process.platform === 'linux') {
-      return Effect.sync(() => {
-        try {
-          const read = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8')
-          return read === '' ? null : read.replace(/\0$/, '').split('\0').join(' ')
-        } catch {
-          return null
-        }
-      })
-    }
-    return psCommandLine(pid)
-  },
+  commandLinesOf: (pids) => machineCommandLines(pids, WINDOWS_COMMAND_LINE_MS),
 })
 
 const readArgs = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
@@ -406,6 +476,9 @@ export interface Orphan {
  */
 export const ORPHAN_EXIT_MS = 10_000
 
+/** How often a kept orphan is looked at, to drop it from the list once it is gone. */
+export const KEPT_WATCH_MS = 1_000
+
 /** How long a child is given to end itself before its tree is taken down, unless told. */
 export const DEFAULT_GRACE_MS = 5_000
 
@@ -452,6 +525,10 @@ export class ProcessSupervisor extends Context.Service<
      * say, or that its kill did not end, which is kept for the next start.
      */
     readonly endOrphans: (kind: ProcessOwner['kind']) => Effect.Effect<ReadonlyArray<Orphan>>
+    /** The orphans a sweep of this engine kept, for as long as each is alive. */
+    readonly kept: Effect.Effect<ReadonlyArray<RegisteredRoot>>
+    /** The kept orphans now, then again at each change. */
+    readonly keptChanges: Stream.Stream<ReadonlyArray<RegisteredRoot>>
   }
 >()('ProcessSupervisor') {}
 
@@ -479,6 +556,8 @@ export const processSupervisorLayer = Layer.effect(
     const sink = yield* StderrSink
     const registry = yield* ProcessRegistry
     const engine = crypto.randomUUID()
+    const scope = yield* Effect.scope
+    const kept = yield* SubscriptionRef.make<ReadonlyArray<RegisteredRoot>>([])
 
     const signalQuietly = (child: Child, signal: Signal) =>
       Effect.sync(() => {
@@ -546,49 +625,58 @@ export const processSupervisorLayer = Layer.effect(
           const id = crypto.randomUUID()
           const label = basename(program)
           // Started and listened to in one synchronous step: the events these listeners answer
-          // are the child's first moments, and Node tells them on the next tick.
-          const { child, process: started } = yield* Effect.sync(() => {
-            const made = host.start(program, args, {
-              detached: grouped,
-              cwd: options.cwd,
-              env: options.env,
-              verbatim: options.verbatim ?? false,
-            })
-            const tracked: Child = {
-              pid: () => made.pid,
-              label,
-              grouped,
-              grace: Duration.millis(options.graceMillis ?? DEFAULT_GRACE_MS),
-              lifecycle,
-              observation,
-              spawned,
-              closeInput: Effect.sync(() => made.end()),
-              signal: (signal) => made.signal(signal),
-            }
-            made.onSpawn(() => {
-              Effect.runSync(Ref.set(spawned, true))
-              Effect.runSync(Deferred.succeed(answer, undefined))
-            })
-            made.onExit((code, signal) => {
-              Effect.runFork(ended(tracked, id)({ code, signal, when: new Date().toISOString() }))
-            })
-            made.onFailure((reason) => {
-              Effect.runSync(Deferred.fail(answer, new SpawnFailed({ program, reason })))
-              Effect.runFork(
-                ended(
-                  tracked,
-                  null,
-                )({
-                  code: null,
-                  signal: `error: ${reason}`,
-                  when: new Date().toISOString(),
-                }),
-              )
-            })
-            made.onStderr((line) => {
-              Effect.runSync(sink.write(`${label} (${String(made.pid)}): ${line}`))
-            })
-            return { child: tracked, process: made }
+          // are the child's first moments, and Node tells them on the next tick. A program the
+          // system refuses outright (on Windows, a file that is no program) throws from the start
+          // itself, before any event: it failed to spawn too (#362).
+          const { child, process: started } = yield* Effect.try({
+            try: () => {
+              const made = host.start(program, args, {
+                detached: grouped,
+                cwd: options.cwd,
+                env: options.env,
+                verbatim: options.verbatim ?? false,
+              })
+              const tracked: Child = {
+                pid: () => made.pid,
+                label,
+                grouped,
+                grace: Duration.millis(options.graceMillis ?? DEFAULT_GRACE_MS),
+                lifecycle,
+                observation,
+                spawned,
+                closeInput: Effect.sync(() => made.end()),
+                signal: (signal) => made.signal(signal),
+              }
+              made.onSpawn(() => {
+                Effect.runSync(Ref.set(spawned, true))
+                Effect.runSync(Deferred.succeed(answer, undefined))
+              })
+              made.onExit((code, signal) => {
+                Effect.runFork(ended(tracked, id)({ code, signal, when: new Date().toISOString() }))
+              })
+              made.onFailure((reason) => {
+                Effect.runSync(Deferred.fail(answer, new SpawnFailed({ program, reason })))
+                Effect.runFork(
+                  ended(
+                    tracked,
+                    null,
+                  )({
+                    code: null,
+                    signal: `error: ${reason}`,
+                    when: new Date().toISOString(),
+                  }),
+                )
+              })
+              made.onStderr((line) => {
+                Effect.runSync(sink.write(`${label} (${String(made.pid)}): ${line}`))
+              })
+              return { child: tracked, process: made }
+            },
+            catch: (cause) =>
+              new SpawnFailed({
+                program,
+                reason: cause instanceof Error ? cause.message : String(cause),
+              }),
           })
           yield* Deferred.await(answer)
           const pid = started.pid
@@ -615,7 +703,7 @@ export const processSupervisorLayer = Layer.effect(
           stop: stopOf(child),
           kill: killOf(child),
           onStdout: (read, done) => started.onStdout(read, done),
-          onStderr: (read) => started.onStderr(read),
+          onStderr: (read, done) => started.onStderr(read, done),
         })),
       )
 
@@ -674,49 +762,94 @@ export const processSupervisorLayer = Layer.effect(
       )
     }
 
+    /** Watches a kept orphan until it is gone, then drops it: the next start would only forget it. */
+    const keep = (root: RegisteredRoot) =>
+      Effect.gen(function* () {
+        yield* SubscriptionRef.update(kept, (roots) => [
+          ...roots.filter((one) => one.id !== root.id),
+          root,
+        ])
+        const gone: Effect.Effect<void> = Effect.suspend(() =>
+          host.alive(root.pid)
+            ? Effect.andThen(Effect.sleep(Duration.millis(KEPT_WATCH_MS)), gone)
+            : Effect.void,
+        )
+        yield* gone.pipe(
+          Effect.andThen(registry.remove(root.id)),
+          Effect.andThen(
+            SubscriptionRef.update(kept, (roots) => roots.filter((one) => one.id !== root.id)),
+          ),
+          Effect.forkIn(scope),
+        )
+        return { root, ended: false }
+      })
+
+    /** One root left by a previous engine: ended, forgotten, or kept for the next start. */
+    const endOrphan = (root: RegisteredRoot, said: ReadonlyMap<number, string> | null) =>
+      Effect.gen(function* () {
+        let ours = false
+        let gone = false
+        const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
+        if (said !== null) {
+          const line = said.get(root.pid) ?? null
+          // Alive, and the system could not say what it runs in time (on Windows, PowerShell too
+          // slow or failing): neither ended nor forgotten, so that the next start asks again.
+          if (line === null) {
+            yield* sink.write(
+              `kept ${which}: what it runs could not be read, asked again at the next start`,
+            )
+            return yield* keep(root)
+          }
+          ours = stillRuns(root, line, host.platform)
+        }
+        if (ours) {
+          yield* host.killTree(root.pid, host.platform !== 'win32')
+          // Said ended only once the system says the pid is gone, not when the kill was asked.
+          gone = yield* goneWithin(root.pid)
+          // Still alive after its kill (on Windows, `taskkill` past its bound or refused): not
+          // forgotten either, so that the next start kills it again.
+          if (!gone) {
+            yield* sink.write(
+              `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
+            )
+            return yield* keep(root)
+          }
+          yield* sink.write(`ended ${which}`)
+        }
+        yield* registry.remove(root.id)
+        return { root, ended: gone }
+      })
+
+    // The machine is asked once what every living root runs (one PowerShell on Windows, however
+    // many), then the roots are ended side by side: N roots cost about one root's worst case.
     const endOrphans = (kind: ProcessOwner['kind']) =>
       Effect.gen(function* () {
         const left = yield* registry.leftBy(kind, engine)
-        const orphans: Orphan[] = []
-        for (const root of left) {
-          let ours = false
-          let gone = false
-          const which = `${basename(root.program)} (${String(root.pid)}), left running by a previous engine for ${root.owner.kind} ${root.owner.id}`
-          if (host.alive(root.pid)) {
-            const line = yield* host.commandLineOf(root.pid)
-            // Alive, and the system could not say what it runs (on Windows, PowerShell too slow or
-            // failing): neither ended nor forgotten, so that the next start asks again.
-            if (line === null) {
-              yield* sink.write(
-                `kept ${which}: what it runs could not be read, asked again at the next start`,
-              )
-              orphans.push({ root, ended: false })
-              continue
-            }
-            ours = stillRuns(root, line, host.platform)
-          }
-          if (ours) {
-            yield* host.killTree(root.pid, host.platform !== 'win32')
-            // Said ended only once the system says the pid is gone, not when the kill was asked.
-            gone = yield* goneWithin(root.pid)
-            // Still alive after its kill (on Windows, `taskkill` past its bound or refused): not
-            // forgotten either, so that the next start kills it again.
-            if (!gone) {
-              yield* sink.write(
-                `kept ${which}: still alive ${String(ORPHAN_EXIT_MS)} ms after its tree was killed, killed again at the next start`,
-              )
-              orphans.push({ root, ended: false })
-              continue
-            }
-            yield* sink.write(`ended ${which}`)
-          }
-          yield* registry.remove(root.id)
-          orphans.push({ root, ended: gone })
-        }
-        return orphans
+        const living = new Set(left.filter((root) => host.alive(root.pid)).map((root) => root.pid))
+        const said =
+          living.size === 0
+            ? new Map<number, string>()
+            : yield* host
+                .commandLinesOf([...living])
+                .pipe(
+                  Effect.timeoutOption(Duration.millis(WINDOWS_COMMAND_LINE_MS)),
+                  Effect.map(Option.getOrElse(() => new Map<number, string>())),
+                )
+        return yield* Effect.forEach(
+          left,
+          (root) => endOrphan(root, living.has(root.pid) ? said : null),
+          { concurrency: 'unbounded' },
+        )
       })
 
-    return { engine, start, adopt, endOrphans }
+    return {
+      engine,
+      start,
+      adopt,
+      endOrphans,
+      kept: SubscriptionRef.get(kept),
+      keptChanges: SubscriptionRef.changes(kept),
+    }
   }),
 )
 

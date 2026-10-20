@@ -46,8 +46,14 @@ export function concernSaid(concern: PlaceConcern, placeName = 'the Workspace'):
 // ---------------------------------------------------------------------------------------------
 // The sensitive places.
 
-/** One segment of a sensitive place: a name, or every name that starts with a prefix. */
-type Segment = { readonly name: string } | { readonly prefix: string }
+/**
+ * One segment of a sensitive place: a name, every name that starts with a prefix (`dotless`: and
+ * holds no dot after it), or every name that ends with a suffix.
+ */
+type Segment =
+  | { readonly name: string }
+  | { readonly prefix: string; readonly dotless?: boolean }
+  | { readonly suffix: string }
 
 interface SensitiveEntry {
   /** As the list says it. */
@@ -57,6 +63,15 @@ interface SensitiveEntry {
   readonly anchored?: boolean
   /** A name of the place a read tool reads freely, though the place is sensitive. */
   readonly readFreely?: (name: string) => boolean
+  /** Matched whatever the case of its names, on every system: `.ENV` is a `.env` too. */
+  readonly anyCase?: boolean
+  /** Matched on a path's last name only: a file's name, never a folder's (`src/id_utils/`). */
+  readonly lastName?: boolean
+  /**
+   * Named by a glob without its leading dot when the glob writes the rest of the name: a pattern
+   * a program matches itself (`find -path`) is no shell's, and takes a dot as any character.
+   */
+  readonly dotlessGlobs?: boolean
 }
 
 /**
@@ -68,6 +83,17 @@ export const ENV_TEMPLATE_ENDINGS = ['.example', '.sample', '.template', '.dist'
 
 const envTemplate = (name: string): boolean =>
   ENV_TEMPLATE_ENDINGS.some((ending) => name.toLowerCase().endsWith(ending))
+
+/**
+ * The names before `.env` that make a `*.env` a template (`example.env`, `app.sample.env`); not
+ * `dist`, which a build's real environment may be called.
+ */
+const ENV_FILE_TEMPLATES = ['example', 'sample', 'template'] as const
+
+const envFileTemplate = (name: string): boolean => {
+  const stem = name.toLowerCase().slice(0, -'.env'.length)
+  return ENV_FILE_TEMPLATES.some((one) => stem === one || stem.endsWith(`.${one}`))
+}
 
 const named = (...names: readonly string[]): Segment[] => names.map((name) => ({ name }))
 
@@ -93,15 +119,58 @@ export const SENSITIVE_PLACES: readonly SensitiveEntry[] = [
   { listed: '~/Library/Keychains', segments: named('Library', 'Keychains') },
   { listed: '~/.hemera', segments: named('.hemera') },
   { listed: '~/.hemera-dev', segments: named('.hemera-dev') },
+  // A repository's Git folder, a worktree's `.git` file and what they lead to: Git reads its
+  // configuration, hooks and attributes there, and runs the programs they name (`core.fsmonitor`,
+  // a filter, a hook) at the engine's next Git call, with its rights (#448). Read freely; a glob
+  // that writes its name without the dot names it too (`find -path '*git/config'`).
+  {
+    listed: '.git',
+    segments: named('.git'),
+    readFreely: () => true,
+    anyCase: true,
+    dotlessGlobs: true,
+  },
+  // The user's own Git configuration, which every Git command reads as well.
+  { listed: '~/.gitconfig', segments: named('.gitconfig') },
+  { listed: '~/.config/git/config', segments: named('.config', 'git', 'config') },
+  { listed: '~/.config/git/attributes', segments: named('.config', 'git', 'attributes') },
   { listed: '/etc/shadow', segments: named('etc', 'shadow'), anchored: true },
   { listed: '/etc/sudoers', segments: named('etc', 'sudoers'), anchored: true },
   { listed: '/etc/sudoers.d', segments: named('etc', 'sudoers.d'), anchored: true },
-  { listed: '.env', segments: named('.env') },
-  { listed: '.env.*', segments: [{ prefix: '.env.' }], readFreely: envTemplate },
+  { listed: '.env', segments: named('.env'), anyCase: true },
+  { listed: '.env.*', segments: [{ prefix: '.env.' }], readFreely: envTemplate, anyCase: true },
+  { listed: '.envrc', segments: named('.envrc'), anyCase: true },
+  // The `env_file` of a Compose file and its kind (`app.env`), wherever it sits.
+  {
+    listed: '*.env',
+    segments: [{ suffix: '.env' }],
+    readFreely: envFileTemplate,
+    anyCase: true,
+    lastName: true,
+  },
+  // Private keys wherever they sit, by a file's name; `id_*` without a dot, so `id_ed25519.pub`
+  // and `id_utils.ts` are not.
+  { listed: '*.pem', segments: [{ suffix: '.pem' }], anyCase: true, lastName: true },
+  { listed: '*.key', segments: [{ suffix: '.key' }], anyCase: true, lastName: true },
+  {
+    listed: 'id_*',
+    segments: [{ prefix: 'id_', dotless: true }],
+    anyCase: true,
+    lastName: true,
+  },
 ]
 
 /** Whether names differ only by case on this system. */
 const foldsCase = (platform: string) => platform === 'win32' || platform === 'darwin'
+
+/**
+ * A name as Windows opens it: without a stream (`.git::$INDEX_ALLOCATION` is the folder `.git`)
+ * and without the dots and spaces it drops at the end (`.git.` is `.git`).
+ */
+const windowsName = (name: string): string => {
+  const kept = name.replace(/:.*$/, '').replace(/[. ]+$/, '')
+  return kept === '' ? name : kept
+}
 
 /** A segment that holds a glob, as the expression of the names it matches. */
 function globOf(segment: string): RegExp | null {
@@ -120,19 +189,37 @@ function globOf(segment: string): RegExp | null {
   }
 }
 
-/** Whether a segment of a path — a name, or a glob that may name it — is this entry's segment. */
-function segmentIs(written: string, segment: Segment, platform: string): boolean {
-  const fold = foldsCase(platform)
-  const name = fold ? written.toLowerCase() : written
+/**
+ * Whether a segment of a path — a name, or a glob that may name it — is this entry's segment. A
+ * glob counts for a suffix or a prefix without a dot only when it writes them (`*.pem`, `id_*`):
+ * `*` alone names every file of a folder, and would make every command that uses one ask.
+ */
+function segmentIs(
+  written: string,
+  segment: Segment,
+  platform: string,
+  anyCase: boolean,
+  dotlessGlobs = false,
+): boolean {
+  const fold = anyCase || foldsCase(platform)
+  const said = platform === 'win32' ? windowsName(written) : written
+  const name = fold ? said.toLowerCase() : said
   const glob = globOf(written)
+  if ('suffix' in segment) return name.endsWith(segment.suffix)
   if ('name' in segment) {
     const wanted = fold ? segment.name.toLowerCase() : segment.name
     if (glob === null) return name === wanted
     // A shell's glob does not match a leading dot unless it writes one; Windows' does.
-    if (platform !== 'win32' && wanted.startsWith('.') && !written.startsWith('.')) return false
+    const dotless = dotlessGlobs && name.includes(wanted.slice(1))
+    if (platform !== 'win32' && wanted.startsWith('.') && !written.startsWith('.') && !dotless) {
+      return false
+    }
     return glob.test(wanted)
   }
   const prefix = segment.prefix
+  if (segment.dotless === true) {
+    return name.startsWith(prefix) && name.length > prefix.length && !name.includes('.')
+  }
   if (glob === null) return name.startsWith(prefix) && name.length > prefix.length
   if (platform !== 'win32' && !written.startsWith('.')) return false
   return glob.test(`${prefix}local`)
@@ -156,11 +243,22 @@ export function sensitivePlace(
   const parts = segmentsOf(path)
   for (const entry of SENSITIVE_PLACES) {
     const length = entry.segments.length
-    const starts = entry.anchored === true ? [1] : parts.map((_, at) => at)
+    const starts =
+      entry.anchored === true
+        ? [1]
+        : entry.lastName === true
+          ? [parts.length - length]
+          : parts.map((_, at) => at)
     for (const start of starts) {
       if (start + length > parts.length) continue
       const matches = entry.segments.every((segment, at) =>
-        segmentIs(parts[start + at] ?? '', segment, context.platform),
+        segmentIs(
+          parts[start + at] ?? '',
+          segment,
+          context.platform,
+          entry.anyCase === true,
+          entry.dotlessGlobs === true,
+        ),
       )
       if (!matches) continue
       if (entry.anchored === true && parts[0] !== '') continue
@@ -591,6 +689,13 @@ function carriedBy(
         to: words.length,
       }
     }
+    if (name === 'git') {
+      const carried = foreachCode(rest)
+      if (carried === undefined) return { unreadable: 'a git submodule foreach with no command' }
+      if (carried !== null) {
+        return { text: carried.text, dialect: 'posix', from: from + carried.at, to: words.length }
+      }
+    }
     if (leads && name === 'eval' && dialect === 'posix') {
       return { text: rest.join(' '), dialect: 'posix', from, to: words.length }
     }
@@ -648,6 +753,40 @@ function readCommand(
 interface Code {
   readonly text: string
   readonly at: number
+}
+
+/** Git's options before its subcommand that take the next word as their value. */
+const GIT_OPTION_VALUES = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--config-env',
+  '--exec-path',
+  '--super-prefix',
+])
+
+/**
+ * The command `git submodule foreach` hands to a POSIX shell (Git's own `sh`): its words after
+ * `foreach` and its options, joined. Null when the command is no `submodule foreach`, undefined
+ * when it has no command.
+ */
+function foreachCode(rest: readonly string[]): Code | null | undefined {
+  let at = 0
+  const skip = (values: ReadonlySet<string>) => {
+    while (at < rest.length && (rest[at] ?? '').startsWith('-')) {
+      at += values.has(rest[at] ?? '') ? 2 : 1
+    }
+  }
+  skip(GIT_OPTION_VALUES)
+  if ((rest[at] ?? '').toLowerCase() !== 'submodule') return null
+  at += 1
+  skip(new Set())
+  if ((rest[at] ?? '').toLowerCase() !== 'foreach') return null
+  at += 1
+  skip(new Set())
+  return at < rest.length ? { text: rest.slice(at).join(' '), at } : undefined
 }
 
 /** The string `cmd.exe` is handed after `/c`, `/k` or `/r`: the rest of its line. */

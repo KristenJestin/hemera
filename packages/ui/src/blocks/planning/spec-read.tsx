@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -16,6 +17,7 @@ import type {
   Task,
 } from './planning-types.ts'
 import { Prose } from './prose.tsx'
+import { railOf, changedSet, sectionAnchor } from './spec-rail.ts'
 
 const ID = 'shrink-0 font-mono text-xs leading-5 text-muted-foreground'
 
@@ -26,34 +28,6 @@ const CHANGED = 'border-l-2 border-info pl-3'
 
 const PRE =
   'max-w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap'
-
-/** The Spec's sections as its rail lists them: the seven prose ones, Requirements fourth. */
-export interface RailEntry {
-  name: string
-  title: string
-  state: SectionState
-}
-
-/** The eight sections of the rail, Requirements fourth, in the Spec's order. */
-export function railOf(
-  sections: readonly SpecSection[],
-  requirementsState: SectionState,
-): RailEntry[] {
-  const prose = sections.map(({ name, title, state }) => ({ name, title, state }))
-  return [
-    ...prose.slice(0, 3),
-    { name: 'requirements', title: 'Requirements', state: requirementsState },
-    ...prose.slice(3),
-  ]
-}
-
-/** The items changed since the last read: a section's name, `R2`, `T3` — a scenario counts for its requirement. */
-export function changedSet(changes: readonly SpecChange[]): ReadonlySet<string> {
-  return new Set(changes.map((change) => change.item.split('.')[0] ?? change.item))
-}
-
-/** The id an element of a section of the Spec carries, for the rail to scroll to it. */
-export const sectionAnchor = (name: string): string => `spec-${name}`
 
 function ProofBlock({ proof }: { proof: Proof }): ReactNode {
   return (

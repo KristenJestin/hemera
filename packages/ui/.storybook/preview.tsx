@@ -65,6 +65,29 @@ const RESULT_TYPES =
     ? ['violations']
     : ['violations', 'incomplete', 'passes', 'inapplicable']
 
+/**
+ * The accessibility check fetches axe-core when the first story of a page ends, inside that
+ * story's thirty seconds. On the Windows runner that request has waited 28 s in the browser's
+ * queue, behind the other pages' of the same server, and the story timed out on it (#428). Asked
+ * for here, while the page is being set up, the same wait costs time and fails nothing.
+ */
+if ('__vitest_browser__' in globalThis) await import('axe-core')
+
+/**
+ * The faces of the theme are fetched when the first text that wears them is laid out, and a story
+ * does not wait for them: its play starts on the fallback font. A play that measures text
+ * (`List › Loading To Filled`) and has the face arrive in the middle of it reads two different
+ * widths for one text, and fails on the Windows runner, where a request can wait tens of seconds
+ * in the browser's queue and then land anywhere. Loaded here, in the page's setup, every story
+ * starts with the face it will end with.
+ */
+if ('__vitest_browser__' in globalThis) {
+  await Promise.all([
+    document.fonts.load('1em "Inter Variable"'),
+    document.fonts.load('1em "Fira Code Variable"'),
+  ])
+}
+
 const preview: Preview = {
   decorators: [withTooltips, withMotion, withTheme],
   /**

@@ -46,9 +46,12 @@ import { HelpersRpcs } from './helpers.ts'
 import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
+import { ForgeRpcs } from './forge.ts'
+import { DeliveryRulesRpcs } from './delivery.ts'
 import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 import { AutoReviewRpcs } from './review.ts'
+import { ReviewRpcs } from './feedback.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -64,6 +67,11 @@ export const EngineStart = Schema.Struct({
   version: Schema.String,
   /** The folder of the migrations this build carries. */
   migrations: Schema.String,
+  /**
+   * The data folder is a fixture's (#420), opened by a development build only: every agent is the
+   * scripted fake, never one of this machine's.
+   */
+  fixture: Schema.optional(Schema.Boolean),
 })
 export type EngineStart = typeof EngineStart.Type
 
@@ -194,18 +202,26 @@ export const EngineMainCoreRpcs = EngineCoreRpcs.merge(
  */
 export const EngineSettingsRpcs = ChecksRpcs.merge(DocRecipesRpcs)
 
+/** The forge of each repository (#253), a layer of its own in the engine and in main (TS2589). */
+export const EngineForgeRpcs = ForgeRpcs
+
+/** A Project's delivery rules (#340), a layer of its own in the engine and in main (TS2589). */
+export const EngineDeliveryRulesRpcs = DeliveryRulesRpcs
+
 /** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
 export const EngineReviewRpcs = DiffRpcs
 
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
   EngineSettingsRpcs,
+  EngineForgeRpcs,
+  EngineDeliveryRulesRpcs,
   EngineReviewRpcs,
 )
 
 /**
- * Everything the engine serves: what main asks, and the proofs (#144) and the automatic review
- * (#147), served apart until their screens (R1, R10) forward them; their handlers are layers of
- * their own (TS2589).
+ * Everything the engine serves: what main asks, and the proofs (#144), the automatic review
+ * (#147) and Review's feedback (#341), served apart until their screens (R10) forward them; their
+ * handlers are layers of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, AutoReviewRpcs)
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, AutoReviewRpcs, ReviewRpcs)

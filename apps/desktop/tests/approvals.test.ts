@@ -26,13 +26,13 @@ import { NeverProgram, PermissionAnswer, type PermissionChoice } from '@hemera/c
 import type { CommandDraft } from '@hemera/ipc'
 import { asc, eq } from 'drizzle-orm'
 import { Effect, Layer, Predicate, Schema } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { ADAPTERS } from '../src/engine/agents/adapters/index.ts'
 import { TextBlock, defaultPermissionAnswerLayer } from '../src/engine/agents/client.ts'
 import { Discovery } from '../src/engine/agents/discovery.ts'
-import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
-import { type FakeStep, fakeAgent } from '../src/engine/agents/fake.ts'
+import { type FakeScript, type FakeStep, fakeAgent } from '../src/engine/agents/fake.ts'
 import { IdleAgents } from '../src/engine/agents/idle.ts'
 import {
   AgentRuntime,
@@ -51,14 +51,16 @@ import { setNeverList } from '../src/engine/permissions/never-list.ts'
 import { RESTORED_REQUESTS, TaskStates } from '../src/engine/permissions/requests.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
 import { startRun } from '../src/engine/runs.ts'
+import { Sessions } from '../src/engine/sessions/service.ts'
+import { getSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   domainEvents,
   permissionRequests,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
-import { ToolAccess } from '../src/engine/tools/index.ts'
 import { type Started, commandsEngine, nodeLine, script, until } from './commands-engine.ts'
+import { acmeIn, sessionsEngine, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { acmeWithMission, callTool, sessionOf } from './tools-world.ts'
 
@@ -90,15 +92,6 @@ const acme = Effect.gen(function* () {
   const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
   return { projectId: project.id, missionId: mission.id, main, builder } satisfies Acme
 })
-
-/** A session opened by an earlier engine, its token minted again by this one. */
-const grantAgain = (sessionId: string) =>
-  Effect.gen(function* () {
-    const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(sessionId))
-    const grant = yield* ToolAccess.use((access) => access.byToken(token))
-    if (grant === null) return yield* Effect.die(new Error('the token named no grant'))
-    return grant.id
-  })
 
 const inEngine =
   <A, E>(body: Effect.Effect<A, E, EngineServices>) =>
@@ -172,31 +165,29 @@ describe('A call that asks is answered at once, and waits for nobody', () => {
   test('the agent reads the waiting text with its number; nothing runs; the request and its need are stored', async () => {
     const out = join(work, 'out.txt')
     const appender = script(APPENDS)
+    // The clock of the calls is never advanced: a call that waited on a grace or a timer, for any
+    // length, would never return. No elapsed time is read.
     const seen = await engine()(
       inEngine(
         Effect.gen(function* () {
           const world = yield* acme
-          const began = performance.now()
           const first = yield* callTool(world.builder.grantId, 'commands_run', {
             line: nodeLine(appender, out),
             why: 'seed the notes',
           })
-          const took = performance.now() - began
           const second = yield* callTool(world.builder.grantId, 'fs_write', {
             path: '../elsewhere.txt',
             content: 'x',
           })
           const rows = yield* requests
           const need = yield* getNeed(rows[0]?.needId ?? '')
-          return { first, second, took, rows, need }
-        }),
+          return { first, second, rows, need }
+        }).pipe(Effect.provide(TestClock.layer())),
       ),
     )
     expect(seen.first.text).toMatch(WAITING)
     expect(seen.first.text).toContain('request #1.')
     expect(seen.second.text).toContain('request #2.')
-    // No grace, no timer: the answer does not wait for the user.
-    expect(seen.took).toBeLessThan(5000)
     expect(linesIn(out)).toBe(0)
     expect(existsSync(join(work, 'elsewhere.txt'))).toBe(false)
     expect(seen.rows.map((row) => [row.number, row.state, row.tool])).toEqual([
@@ -773,30 +764,63 @@ describe('Grants are listed with who gave them, when, and how often they were us
     expect(grants).toEqual([])
   })
 
-  test('a new session of an earlier engine is minted again and its grant still applies', async () => {
+  test('the session rebuilt at restart keeps the grant given for the mission', async () => {
     const out = join(work, 'out.txt')
     const appender = script(APPENDS)
-    const world = await engine()(
-      inEngine(
+    // The Builder's agent runs the line on its first turn, through Hemera's MCP server.
+    const runs = (id: string): FakeScript => ({
+      turns: [
+        [
+          {
+            does: 'uses',
+            id,
+            tool: 'commands_run',
+            arguments: { line: nodeLine(appender, out), why: 'append a line' },
+          },
+        ],
+      ],
+      steps: [{ does: 'says', text: 'Done.' }],
+    })
+    const before = sessionsEngine(data, () => runs('toolu_append'), { tools: { home: work } })
+    const builder = await before.run(({ profile }) =>
+      within(
+        profile,
         Effect.gen(function* () {
-          const made = yield* acme
-          yield* callTool(made.builder.grantId, 'commands_run', { line: nodeLine(appender, out) })
+          const { owner, main } = yield* acmeIn(work)
+          const session = yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', provider: 'claude', folder: main }),
+          )
+          yield* Sessions.use((sessions) => sessions.settled(session.id))
           const row = yield* theOnlyRequest
           yield* answer(row.needId, 'allow-for-mission')
           yield* handedOver(row.id)
-          return made
+          return session
         }),
       ),
     )
-    const again = await engine()(
-      inEngine(
+    expect(before.world.agents[0]?.answers.toolAnswers[0]?.text).toMatch(WAITING)
+    expect(linesIn(out)).toBe(1)
+    // The start's rebuild replaces the session; its successor's agent runs the line again.
+    const after = sessionsEngine(data, () => runs('toolu_again'), { tools: { home: work } })
+    const [replaced, successors] = await after.run(({ profile }) =>
+      within(
+        profile,
         Effect.gen(function* () {
-          const grantId = yield* grantAgain(world.builder.sessionId)
-          return yield* callTool(grantId, 'commands_run', { line: nodeLine(appender, out) })
+          yield* until(
+            Effect.sync(() => after.world.agents[0]?.answers.toolAnswers.length ?? 0),
+            (answered) => answered > 0,
+          )
+          return [
+            yield* getSession(builder.id),
+            yield* sessionsIn(['starting', 'working', 'idle'], builder.owner),
+          ] as const
         }),
       ),
     )
-    expect(again.ok).toBe(true)
+    expect(replaced.state).toBe('replaced')
+    expect(successors).toEqual([expect.objectContaining({ lineage: builder.lineage, epoch: 1 })])
+    expect(after.world.agents[0]?.answers.toolAnswers[0]).toMatchObject({ isError: false })
+    expect(after.world.agents[0]?.answers.toolAnswers[0]?.text).not.toMatch(WAITING)
     expect(linesIn(out)).toBe(2)
   })
 })
@@ -833,14 +857,13 @@ describe('An agent over real MCP is never held by a question', () => {
           renewed: () => Effect.succeed('# Instructions'),
         }),
       )
-      const began = performance.now()
       yield* AgentRuntime.use((runtime) =>
         runtime.prompt(sessionId, [TextBlock.make({ text: 'seed the notes' })]),
       ).pipe(
         Effect.provide(agentRuntimeLayer({ dataFolder: data, log: () => {} })),
         Effect.provide(world),
       )
-      return { answers: agent.answers.toolAnswers, took: performance.now() - began }
+      return { answers: agent.answers.toolAnswers }
     })
 
   test('the agent reads the waiting answer and goes on; quit with the need pending; started again, nothing ran; Allow runs it once', async () => {
@@ -874,7 +897,6 @@ describe('An agent over real MCP is never held by a question', () => {
     expect(first.answers[0]?.text).toMatch(WAITING)
     // It went on with what does not depend on it: the next call was answered in the same turn.
     expect(first.answers[1]?.text).toContain('Acme')
-    expect(first.took).toBeLessThan(10_000)
     expect(linesIn(out)).toBe(0)
 
     const after = await engine()(

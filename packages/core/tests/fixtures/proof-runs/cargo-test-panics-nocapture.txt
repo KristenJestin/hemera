@@ -1,0 +1,68 @@
+
+running 11 tests
+
+thread 'tests::assert_msg' (3390700) panicked at src/lib.rs:10:31:
+the total is missing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tests::eq' (3390701) panicked at src/lib.rs:8:23:
+assertion `left == right` failed
+  left: 1
+ right: 2
+
+thread 'tests::eq_msg' (3390703) panicked at src/lib.rs:11:27:
+assertion `left == right` failed: the total is missing
+  left: 1
+ right: 2
+
+thread 'tests::expects' (3390704) panicked at src/lib.rs:15:36:
+row 1 exists
+
+thread 'tests::index' (3390705) panicked at src/lib.rs:18:64:
+index out of bounds: the len is 0 but the index is 0
+
+thread 'tests::panics' (3390706) panicked at src/lib.rs:16:27:
+boom
+Error: "not found"
+
+thread 'tests::unwraps' (3390709) panicked at src/lib.rs:14:47:
+called `Option::unwrap()` on a `None` value
+tests::assert_msg --- 
+thread 'tests::uses_todo' (3390710) panicked at src/lib.rs:1:48:
+not yet implemented
+FAILED
+
+thread 'tests::uses_unimplemented' (3390711) panicked at src/lib.rs:3:23:
+not implemented
+tests::eq --- FAILED
+tests::eq_msg --- FAILED
+tests::expects --- FAILED
+tests::index --- FAILED
+tests::panics --- FAILED
+tests::returns_err --- FAILED
+tests::unwraps --- FAILED
+tests::uses_todo --- FAILED
+tests::uses_unimplemented --- FAILED
+
+thread 'tests::plain_assert' (3390707) panicked at src/lib.rs:9:33:
+assertion failed: 1 > 2
+tests::plain_assert --- FAILED
+
+failures:
+
+failures:
+    tests::assert_msg
+    tests::eq
+    tests::eq_msg
+    tests::expects
+    tests::index
+    tests::panics
+    tests::plain_assert
+    tests::returns_err
+    tests::unwraps
+    tests::uses_todo
+    tests::uses_unimplemented
+
+test result: FAILED. 0 passed; 11 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

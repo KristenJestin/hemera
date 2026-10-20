@@ -59,14 +59,14 @@ describe('The living spec agent reads no Memory, and no tool validates its propo
     ).toEqual([])
   })
 
-  test('only the living spec agent proposes, and the Planner, the Chat and it read', () => {
+  test('only the living spec agent proposes, and the Planner (in round mode too), the Chat and it read', () => {
     expect(
       TOOL_NAMES.filter((name) => name.startsWith('living_')).map((name) => [
         name,
         TOOLS[name].roles,
       ]),
     ).toEqual([
-      ['living_spec_read', ['planner', 'chat', 'living-spec']],
+      ['living_spec_read', ['planner', 'chat', 'living-spec', 'round-planner']],
       ['living_domain_propose', ['living-spec']],
       ['living_requirement_propose', ['living-spec']],
       ['living_requirement_obsolete', ['living-spec']],
@@ -149,6 +149,7 @@ describe('Each role has exactly its tools', () => {
         'commands_run',
         'commands_stop',
         'evidence_add',
+        'feedback_answer',
         'fs_edit',
         'fs_list',
         'fs_read',
@@ -273,11 +274,33 @@ describe('Each role has exactly its tools', () => {
         'search',
       ],
     ],
+    [
+      'round-planner',
+      [
+        'ask_wave',
+        'feedback_answer',
+        'fs_list',
+        'fs_read',
+        'input_integrated',
+        'journal_add',
+        'living_spec_read',
+        'memory_read',
+        'note_add',
+        'now_set',
+        'round_point_remove',
+        'round_point_write',
+        'round_propose_mission',
+        'round_ready',
+        'round_tasks_write',
+        'search',
+        'spec_read',
+      ],
+    ],
   ])('%s', (role, tools) => {
     expect(toolsFor(role)).toEqual(tools)
   })
 
-  test('every role has a place, and the read-only ones are the Planner, the cold read, the ticket-event and pre-launch Planners, the reviewers, the setup agent and the living spec agent', () => {
+  test('every role has a place, and the read-only ones are the Planner, the cold read, the ticket-event and pre-launch Planners, the reviewers, the setup agent, the living spec agent and the Planner in round mode', () => {
     expect(ROLES.filter((role) => ROLE_PLACES[role].readOnly)).toEqual([
       'planner',
       'cold-read',
@@ -287,7 +310,9 @@ describe('Each role has exactly its tools', () => {
       'code-reviewer',
       'setup',
       'living-spec',
+      'round-planner',
     ])
+    expect(ROLE_PLACES['round-planner'].kind).toBe('workspace')
     expect(ROLE_PLACES['living-spec'].kind).toBe('main-checkout')
     expect(ROLE_PLACES.planner.kind).toBe('main-checkout')
     expect(ROLE_PLACES.probe.kind).toBe('own-worktree')

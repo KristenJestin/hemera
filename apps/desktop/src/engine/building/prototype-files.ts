@@ -29,9 +29,19 @@ import { listEvidence } from '../memory/evidence.ts'
 import { freezesOf } from '../planning/freeze-store.ts'
 import type { Database } from '../storage/database.ts'
 import type { Grant } from '../tools/access.ts'
-import { type ToolAnswer, answered, attempt, failure, pageSaid, refusal } from '../tools/files.ts'
+import {
+  type ToolAnswer,
+  answered,
+  attempt,
+  failedOn,
+  failure,
+  pageSaid,
+  refusal,
+} from '../tools/files.ts'
 import { containedIn, resolvePath } from '../tools/paths.ts'
+import type { SensitivePlaces } from '../tools/ports.ts'
 import { readPage } from '../tools/read.ts'
+import { Withholding } from '../tools/withholding.ts'
 import { helperRowsOf } from './helper-store.ts'
 
 /** A prototype frozen with the Spec, with where its files are and which ones it kept. */
@@ -116,7 +126,7 @@ export const prototypeReadTool = (
   grant: Grant,
   args: ToolArguments<'prototype_read'>,
   home: string,
-): Effect.Effect<ToolAnswer, never, Database> =>
+): Effect.Effect<ToolAnswer, never, Database | SensitivePlaces> =>
   Effect.gen(function* () {
     if (grant.missionId === null) return refusal('refused: this session has no mission')
     const frozen = yield* frozenPrototypesOf(grant.missionId)
@@ -145,11 +155,17 @@ export const prototypeReadTool = (
         `refused: ${args.path} is not a file ${found.helper} kept: ${found.files.length === 0 ? 'it kept none' : `it kept ${found.files.join(', ')}`}`,
       )
     }
+    const withholding = yield* Withholding.of(grant)
     const page = yield* attempt(() =>
-      readPage(resolved.path, args.range?.offset ?? 0, args.range?.length ?? READ_PAGE_BYTES),
+      readPage(
+        resolved.path,
+        args.range?.offset ?? 0,
+        args.range?.length ?? READ_PAGE_BYTES,
+        withholding,
+      ),
     ).pipe(Effect.result)
     return Result.isFailure(page)
-      ? failure(`could not read ${args.path}: ${page.failure}`)
+      ? failedOn(page.failure, `could not read ${args.path}: ${page.failure}`)
       : answered(pageSaid(page.success))
   }).pipe(
     Effect.catchCause((cause) =>

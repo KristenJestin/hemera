@@ -22,6 +22,7 @@ import {
   type NeedOwner,
   NEED_STATES,
   MissionOwner,
+  NEED_FIXED,
   NeedAnswer,
   NeedAnswerRefused,
   NeedFields,
@@ -89,6 +90,14 @@ export interface NeedHandler {
    * the user's Retry, which tries again whatever changed; otherwise Hemera looks again by itself.
    */
   readonly recheck?: (need: Need, retried: boolean) => Effect.Effect<boolean>
+  /**
+   * What the user's Retry moves in the owner's own state, inside the transaction that withdraws
+   * the need: a failure there leaves the need open, for the user to Retry again.
+   */
+  readonly retriedIn?: (
+    need: Need,
+    transaction: EngineTransaction,
+  ) => Effect.Effect<ReadonlyArray<NewEvent>, DeliveryFailed | DatabaseError>
 }
 
 export class NeedOwners extends Context.Service<
@@ -410,7 +419,10 @@ const insertNeed = (
 ) =>
   Effect.gen(function* () {
     // What a need says may quote what an agent, a command or Git wrote: it is masked before it is kept.
-    const masked = maskedJson((yield* Secrets).maskRecord(fields))
+    // Only a need Hemera writes keeps the settings section it fixes; an agent's is masked (#416).
+    const masked = maskedJson(
+      (yield* Secrets).maskRecord(fields, by === BY_HEMERA ? NEED_FIXED : undefined),
+    )
     const written = yield* mutate('writing a need', (transaction) =>
       needWritten(transaction, { service, owner, fields, masked, requestedBy, by }).pipe(
         Effect.map(({ id, events }) => ({ result: id, events })),
@@ -432,7 +444,7 @@ export const createNeedIn = (
   requestedBy: string | null = null,
 ) =>
   Secrets.useSync((secrets) => {
-    const masked = maskedJson(secrets.maskRecord(fields))
+    const masked = maskedJson(secrets.maskRecord(fields, NEED_FIXED))
     return (transaction: EngineTransaction) =>
       needWritten(transaction, {
         service,
@@ -556,20 +568,42 @@ export const deliverAnswers = Effect.gen(function* () {
   yield* deliveryRound(owners).pipe(Semaphore.withPermits(owners.delivering, 1))
 })
 
+/**
+ * The answers a hand-over round hands over: not handed yet, of a need this version reads and a
+ * service there to take it, oldest first; only a mission's when one is named. What waits on a
+ * hand-over waits on exactly these: one the round skips would wait for good (#348).
+ */
+export const answersToHand = (
+  reader: Database['Service'] | EngineTransaction,
+  owners: NeedOwners['Service'],
+  missionId: string | null,
+) =>
+  reader
+    .select({ need: needs })
+    .from(needDeliveries)
+    .innerJoin(needs, eq(needs.id, needDeliveries.needId))
+    .where(
+      and(
+        isNull(needDeliveries.deliveredAt),
+        missionId === null ? undefined : eq(needs.missionId, missionId),
+      ),
+    )
+    .orderBy(asc(needs.endedAt))
+    .pipe(
+      Effect.mapError(refusedWhile('reading the answers to deliver')),
+      Effect.map((rows) =>
+        rows.flatMap(({ need: row }) => {
+          const handler = owners.handlers.get(row.service)
+          const need = needOf(row)
+          return handler === undefined || need === null ? [] : [{ row, need, handler }]
+        }),
+      ),
+    )
+
 const deliveryRound = (owners: NeedOwners['Service']) =>
   Effect.gen(function* () {
     const database = yield* Database
-    const waiting = yield* database
-      .select({ need: needs })
-      .from(needDeliveries)
-      .innerJoin(needs, eq(needs.id, needDeliveries.needId))
-      .where(isNull(needDeliveries.deliveredAt))
-      .orderBy(asc(needs.endedAt))
-      .pipe(Effect.mapError(refusedWhile('reading the answers to deliver')))
-    for (const { need: row } of waiting) {
-      const handler = owners.handlers.get(row.service)
-      const need = needOf(row)
-      if (handler === undefined || need === null) continue
+    for (const { row, need, handler } of yield* answersToHand(database, owners, null)) {
       yield* mutate('handing an answer to its owner', (transaction) =>
         Effect.gen(function* () {
           const events = yield* handler.deliver(need, transaction)
@@ -627,23 +661,32 @@ export const answerNeed = (asked: NeedAnswerAsked) =>
   })
 
 /** Ends a pending need without an answer: it expired, or its owner withdrew it. */
-const endNeed = (id: string, state: 'expired' | 'withdrawn', reason: string) =>
+const endNeed = <E = never>(
+  id: string,
+  state: 'expired' | 'withdrawn',
+  reason: string,
+  within: (transaction: EngineTransaction) => Effect.Effect<ReadonlyArray<NewEvent>, E> = () =>
+    Effect.succeed([]),
+) =>
   Effect.gen(function* () {
     const row = yield* needRow(id)
     yield* mutate(`ending a need`, (transaction) =>
-      transaction
-        .update(needs)
-        .set({ state, endedReason: reason, endedAt: now() })
-        .where(and(eq(needs.id, id), eq(needs.state, 'pending')))
-        .returning({ id: needs.id })
-        .pipe(
-          Effect.mapError(refusedWhile('ending a need')),
-          Effect.map((written) => ({
-            result: undefined,
-            events:
-              written.length === 0 ? [] : [needEvent(`need.${state}`, row, BY_HEMERA, { reason })],
-          })),
-        ),
+      Effect.gen(function* () {
+        const written = yield* transaction
+          .update(needs)
+          .set({ state, endedReason: reason, endedAt: now() })
+          .where(and(eq(needs.id, id), eq(needs.state, 'pending')))
+          .returning({ id: needs.id })
+          .pipe(Effect.mapError(refusedWhile('ending a need')))
+        if (written.length === 0) return { result: undefined, events: [] }
+        return {
+          result: undefined,
+          events: [
+            ...(yield* within(transaction)),
+            needEvent(`need.${state}`, row, BY_HEMERA, { reason }),
+          ],
+        }
+      }),
     )
     return yield* getNeed(id)
   })
@@ -687,9 +730,22 @@ export const retryNeed = (id: string) =>
     if (need.state !== 'pending') return need
     const row = yield* needRow(id)
     const owners = yield* NeedOwners
-    const recheck = owners.handlers.get(row.service)?.recheck
-    if (recheck === undefined) return need
-    return (yield* recheck(need, true)) ? need : yield* withdrawNeed(id, RESOLVED)
+    const handler = owners.handlers.get(row.service)
+    if (handler?.recheck === undefined) return need
+    // Still missing: the need as the recheck left it, which may have revised what it says (#362).
+    if (yield* handler.recheck(need, true)) return yield* getNeed(id)
+    const { retriedIn } = handler
+    return yield* endNeed(
+      id,
+      'withdrawn',
+      RESOLVED,
+      retriedIn === undefined ? undefined : (transaction) => retriedIn(need, transaction),
+    ).pipe(
+      // Its owner could not take the Retry now: the need stays open, to be retried again.
+      Effect.catchTag('DeliveryFailed', (failed) =>
+        Effect.fail(new NeedAnswerRefused({ reason: failed.reason })),
+      ),
+    )
   })
 
 /**

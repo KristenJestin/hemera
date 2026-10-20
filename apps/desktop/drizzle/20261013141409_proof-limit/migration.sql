@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `proof_limit_minutes` integer;

@@ -20,7 +20,17 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -28,6 +38,7 @@ import { type DirtyStatus, type Masked, maskText } from '@hemera/core/domain'
 import { GitCut, GitFailed, GitMissing } from '@hemera/ipc'
 import { Context, Effect, Layer, Option } from 'effect'
 
+import { readRegular } from './tools/judged.ts'
 import { outsideTransaction } from './transaction.ts'
 
 /** A read (status, rev-parse, remote, the fetch of one branch, log), or work on the tree. */
@@ -41,6 +52,13 @@ export const LIMITS: Readonly<Record<CallClass, number>> = {
 
 /** How much of what a command prints is read before it is cut: a long status, not an endless one. */
 export const OUTPUT_LIMIT = 32 * 1024 * 1024
+
+/**
+ * Given to every call before its arguments: the engine's Git never runs the program a
+ * `core.fsmonitor` names, wherever it was configured (#448). A narrow guard beside the sensitive
+ * Git folder: filters and hooks are configured by name and cannot be turned off this way.
+ */
+export const NO_FSMONITOR = ['-c', 'core.fsmonitor=false'] as const
 
 export type GitRefusal = GitFailed | GitMissing | GitCut
 
@@ -93,6 +111,19 @@ export interface GitCallOptions {
   readonly input?: Uint8Array
 }
 
+/**
+ * What the engine's every Git call asks first (#457): why it may not run in `folder` (what shapes
+ * Git there changed since the user last allowed it), or null; and what is done once it has run.
+ */
+export interface GitSpawnGuard {
+  /** Before a call in `folder`, with its arguments and the variables Git is handed beyond ours. */
+  readonly before: (
+    folder: string,
+    args: ReadonlyArray<string>,
+    env: Readonly<Record<string, string>>,
+  ) => { readonly refused: string | null; readonly after: () => void }
+}
+
 /** Runs one command in `folder` and answers the bytes it printed, as they are. */
 export type GitBytesSpawn = (
   folder: string,
@@ -104,23 +135,32 @@ export type GitBytesSpawn = (
 /**
  * The machine's spawn: a child with its arguments and no shell. Abandoned (interrupted, or cut at
  * its limit), it is ended, and the interruption returns once it has exited, not once it was told
- * to go. What it printed is answered as bytes: a blob is not text.
+ * to go. What it printed is answered as bytes: a blob is not text. With a guard, a call it refuses
+ * is answered as a failure in its words and nothing is spawned.
  */
 export const spawnGitBytes =
-  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitBytesSpawn =>
+  (
+    program: GitProgram,
+    mask: (text: string) => Masked<string> = SHAPES_ONLY,
+    guard?: GitSpawnGuard,
+  ): GitBytesSpawn =>
   (folder, args, kind, options = {}) => {
     const run = Effect.callback<Buffer, GitRefusal>((resume) => {
-      const child = spawn(program.command, [...program.leading, '-C', folder, ...args], {
-        env: {
-          ...process.env,
-          ...options.env,
-          GIT_TERMINAL_PROMPT: '0',
-          GCM_INTERACTIVE: 'never',
+      const child = spawn(
+        program.command,
+        [...program.leading, '-C', folder, ...NO_FSMONITOR, ...args],
+        {
+          env: {
+            ...process.env,
+            ...options.env,
+            GIT_TERMINAL_PROMPT: '0',
+            GCM_INTERACTIVE: 'never',
+          },
+          stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          detached: process.platform !== 'win32',
         },
-        stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        detached: process.platform !== 'win32',
-      })
+      )
       const out: Buffer[] = []
       const err: Buffer[] = []
       let printed = 0
@@ -182,7 +222,7 @@ export const spawnGitBytes =
         end(child)
       })
     })
-    return outsideTransaction(`run git ${args.join(' ')}`, run).pipe(
+    const spawned = outsideTransaction(`run git ${args.join(' ')}`, run).pipe(
       Effect.catchTag('SideEffectInTransaction', (refused) => Effect.die(refused)),
       Effect.timeoutOrElse({
         duration: LIMITS[kind],
@@ -192,13 +232,27 @@ export const spawnGitBytes =
           ),
       }),
     )
+    if (guard === undefined) return spawned
+    return Effect.suspend(() => {
+      const checked = guard.before(folder, args, options.env ?? {})
+      if (checked.refused !== null) {
+        return Effect.fail(
+          new GitFailed({ args: [...args], folder, stderr: mask(checked.refused) }),
+        )
+      }
+      return Effect.ensuring(spawned, Effect.sync(checked.after))
+    })
   }
 
 /** The same spawn, answering what Git printed as text. */
 export const spawnGit =
-  (program: GitProgram, mask: (text: string) => Masked<string> = SHAPES_ONLY): GitSpawn =>
+  (
+    program: GitProgram,
+    mask: (text: string) => Masked<string> = SHAPES_ONLY,
+    guard?: GitSpawnGuard,
+  ): GitSpawn =>
   (folder, args, kind) =>
-    spawnGitBytes(program, mask)(folder, args, kind).pipe(
+    spawnGitBytes(program, mask, guard)(folder, args, kind).pipe(
       Effect.map((printed) => printed.toString('utf8')),
     )
 
@@ -230,6 +284,16 @@ export interface AheadBehind {
 export interface WorktreeChange {
   readonly path: string
   readonly status: 'new' | 'modified' | 'deleted'
+}
+
+/**
+ * A worktree a repository made, by the folders Git keeps it in: its administrative folder in the
+ * repository (`<common>/worktrees/<id>`) and its work tree, both real paths. A command given both
+ * explicitly never reads the worktree's `.git`, which whoever works in it can rewrite.
+ */
+export interface OwnWorktree {
+  readonly gitDir: string
+  readonly workTree: string
 }
 
 /** A file of a checkout that differs from its HEAD, with how (#92, CT-23). */
@@ -306,7 +370,27 @@ export interface GitService {
   readonly worktreeChanges: (
     folder: string,
     commit: string,
+    own?: OwnWorktree,
   ) => Effect.Effect<ReadonlyArray<WorktreeChange>, GitRefusal>
+  /**
+   * The worktree at `worktree` as `source` made it, or null when it is no longer one: its `.git`
+   * must be a file leading to an administrative folder of `source`'s, which leads back to it.
+   */
+  readonly worktreeOwn: (
+    source: string,
+    worktree: string,
+  ) => Effect.Effect<OwnWorktree | null, GitRefusal>
+  /**
+   * The patch of one file of a worktree against a commit, its new side the bytes given (what was
+   * read of it through a proven handle) rather than whatever the worktree holds by then: Git runs
+   * on the worktree's own folders, over a scratch work tree holding only those bytes.
+   */
+  readonly patchOf: (
+    own: OwnWorktree,
+    commit: string,
+    path: string,
+    after: { readonly bytes: Uint8Array; readonly executable: boolean },
+  ) => Effect.Effect<string, GitRefusal>
   /**
    * Each file that differs between two commits of a repository, renames as a removal and an
    * addition: its path, Git's status letter, and the lines added and removed (null for a binary
@@ -654,11 +738,12 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
       run(folder, ['worktree', 'remove', '--force', '--force', path], 'work').pipe(Effect.asVoid),
     branchDeleteAt: (folder, branch, commit) =>
       run(folder, ['update-ref', '-d', `refs/heads/${branch}`, commit], 'work').pipe(Effect.asVoid),
-    worktreeChanges: (folder, commit) =>
+    worktreeChanges: (folder, commit, own) =>
       Effect.all([
         run(
-          folder,
+          own?.workTree ?? folder,
           [
+            ...explicitly(own),
             '--no-optional-locks',
             'diff',
             '--name-status',
@@ -671,11 +756,54 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
           'read',
         ),
         run(
-          folder,
-          ['--no-optional-locks', 'ls-files', '--others', '--exclude-standard', '-z'],
+          own?.workTree ?? folder,
+          [
+            ...explicitly(own),
+            '--no-optional-locks',
+            'ls-files',
+            '--others',
+            '--exclude-standard',
+            '-z',
+          ],
           'read',
         ),
       ]).pipe(Effect.map(([diffed, untracked]) => worktreeChangesOf(diffed, untracked))),
+    worktreeOwn: (source, worktree) =>
+      run(source, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read').pipe(
+        Effect.flatMap((printed) =>
+          Effect.promise(() => ownWorktree(printed.trim(), worktree).catch(() => null)),
+        ),
+      ),
+    patchOf: (own, commit, path, after) =>
+      withScratch((scratch) =>
+        Effect.suspend(() => {
+          const file = join(scratch, path)
+          mkdirSync(dirname(file), { recursive: true })
+          writeFileSync(file, after.bytes)
+          if (after.executable) chmodSync(file, 0o755)
+          return run(
+            scratch,
+            [
+              '--git-dir',
+              own.gitDir,
+              '--work-tree',
+              scratch,
+              '--no-optional-locks',
+              'diff',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--src-prefix=a/',
+              '--dst-prefix=b/',
+              '--end-of-options',
+              commit,
+              '--',
+              path,
+            ],
+            'read',
+          )
+        }),
+      ),
     changesBetween: (folder, from, to) =>
       Effect.all([
         run(
@@ -893,11 +1021,47 @@ const mergeIn = (
 
 const lf = (text: string) => text.replaceAll('\r\n', '\n')
 
+/** Above this many cells, the lines between the shared start and end are not aligned in a table. */
+const ALIGNMENT_CELLS = 16_000_000
+
+/**
+ * For each of the merged lines, the index of the held line it is aligned with, or -1 for a new
+ * line: a longest common subsequence of the two. Past `ALIGNMENT_CELLS`, a line is aligned with
+ * the last occurrence of its text among the held ones.
+ */
+function alignedWith(held: ReadonlyArray<string>, merged: ReadonlyArray<string>): Array<number> {
+  const width = merged.length + 1
+  if ((held.length + 1) * width > ALIGNMENT_CELLS) {
+    const last = new Map(held.map((line, at) => [line, at]))
+    return merged.map((line) => last.get(line) ?? -1)
+  }
+  // `table[i * width + j]`: the length of the longest common subsequence of `held[i..]` and `merged[j..]`.
+  const table = new Uint32Array((held.length + 1) * width)
+  for (let i = held.length - 1; i >= 0; i -= 1)
+    for (let j = merged.length - 1; j >= 0; j -= 1)
+      table[i * width + j] =
+        held[i] === merged[j]
+          ? (table[(i + 1) * width + j + 1] ?? 0) + 1
+          : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0)
+  const aligned = merged.map(() => -1)
+  let i = 0
+  let j = 0
+  while (i < held.length && j < merged.length) {
+    if (held[i] === merged[j]) {
+      aligned[j] = i
+      i += 1
+      j += 1
+    } else if ((table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0)) i += 1
+    else j += 1
+  }
+  return aligned
+}
+
 /**
  * Merged lines given back the endings of the Workspace's file: the lines both share at its start
- * and at its end keep their own endings, in place; between them, a line it holds keeps its ending
- * (a repeated line, that of its last occurrence there), any other line takes the ending of the line
- * above.
+ * and at its end keep their own endings, in place; those between them are aligned with the file's
+ * line by line (a longest common subsequence), and a line aligned with a held line takes its
+ * ending, any other line the ending of the line above.
  */
 function withEndingsOf(ours: string, merged: string): string {
   if (!ours.includes('\r\n')) return merged
@@ -906,31 +1070,86 @@ function withEndingsOf(ours: string, merged: string): string {
   const endingOf = (line = '') => (line.endsWith('\r') ? '\r\n' : '\n')
   const lines = merged.split('\n')
   const last = lines.pop() ?? ''
+  const texts = held.map(textOf)
   let leading = 0
-  while (
-    leading < Math.min(held.length, lines.length) &&
-    textOf(held[leading] ?? '') === lines[leading]
-  )
+  while (leading < Math.min(held.length, lines.length) && texts[leading] === lines[leading])
     leading += 1
   let trailing = 0
   while (
     trailing < Math.min(held.length, lines.length) - leading &&
-    textOf(held[held.length - 1 - trailing] ?? '') === lines[lines.length - 1 - trailing]
+    texts[held.length - 1 - trailing] === lines[lines.length - 1 - trailing]
   )
     trailing += 1
-  const endings = new Map(
-    held.slice(leading, held.length - trailing).map((line) => [textOf(line), endingOf(line)]),
-  )
+  const between = alignedWith(
+    texts.slice(leading, held.length - trailing),
+    lines.slice(leading, lines.length - trailing),
+  ).map((aligned) => (aligned < 0 ? -1 : leading + aligned))
+  const heldAt = (at: number) =>
+    at < leading
+      ? at
+      : at >= lines.length - trailing
+        ? held.length - (lines.length - at)
+        : (between[at - leading] ?? -1)
   let above = endingOf(held[0])
   const ended = lines.map((line, at) => {
-    if (at < leading) above = endingOf(held[at])
-    else if (at >= lines.length - trailing)
-      above = endingOf(held[held.length - (lines.length - at)])
-    else above = endings.get(line) ?? above
+    const aligned = heldAt(at)
+    if (aligned >= 0) above = endingOf(held[aligned])
     return `${line}${above}`
   })
   return `${ended.join('')}${last}`
 }
+
+/** The folders of a worktree given to Git explicitly, when they are known. */
+const explicitly = (own: OwnWorktree | undefined): ReadonlyArray<string> =>
+  own === undefined ? [] : ['--git-dir', own.gitDir, '--work-tree', own.workTree]
+
+/** A real path, or null when there is nothing there. */
+const realOrNull = (path: string): string | null => {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The path a file of Git's names, resolved from the folder holding it: a worktree's `.git` says
+ * `gitdir: <path>`, its administrative folder's `gitdir` the path alone. Only a regular file is
+ * read, opened without waiting.
+ */
+const pathIn = async (file: string, prefix: string): Promise<string | null> => {
+  const stat = lstatSync(file, { throwIfNoEntry: false })
+  if (stat?.isFile() !== true) return null
+  const said = (await readRegular(file)).toString('utf8').replace(/\r?\n$/, '')
+  if (!said.startsWith(prefix) || said.length === prefix.length) return null
+  return resolve(dirname(file), said.slice(prefix.length))
+}
+
+/**
+ * The worktree at `worktree` as the repository whose common folder is `common` made it: its
+ * `.git` leads to an administrative folder under `<common>/worktrees/`, whose own `gitdir` leads
+ * back to that `.git`. Anything else (a `.git` leading to another repository, a `.git` folder, a
+ * link) is no longer that worktree.
+ */
+async function ownWorktree(common: string, worktree: string): Promise<OwnWorktree | null> {
+  const workTree = realOrNull(worktree)
+  const admins = realOrNull(join(common, 'worktrees'))
+  if (workTree === null || admins === null) return null
+  const named = await pathIn(join(worktree, '.git'), 'gitdir: ')
+  const gitDir = named === null ? null : realOrNull(named)
+  if (gitDir === null || dirname(gitDir) !== admins) return null
+  const back = await pathIn(join(gitDir, 'gitdir'), '')
+  const backTree = back === null ? null : realOrNull(dirname(back))
+  return backTree === workTree ? { gitDir, workTree } : null
+}
+
+/** A scratch folder for the time of a use, then removed. */
+const withScratch = <A, E>(use: (scratch: string) => Effect.Effect<A, E>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => mkdtempSync(join(tmpdir(), 'hemera-scratch-'))),
+    use,
+    (scratch) => Effect.sync(() => rmSync(scratch, { recursive: true, force: true })),
+  )
 
 /** A patch written to a scratch file for the time of a use, then removed. */
 const withPatchFile = <A, E>(patch: string, use: (file: string) => Effect.Effect<A, E>) =>

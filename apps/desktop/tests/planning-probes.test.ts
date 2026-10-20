@@ -14,19 +14,31 @@
  * preparation resumed after a restart.
  */
 
+import { execFileSync } from 'node:child_process'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 
-import { DEFAULT_BASE_BRANCH, LIVE_RUN_STATES, type ProbeReport } from '@hemera/core/domain'
+import {
+  DEFAULT_BASE_BRANCH,
+  LIVE_RUN_STATES,
+  PermissionAnswer,
+  type ProbeReport,
+} from '@hemera/core/domain'
 import type { CommandDraft, ResourceDraft } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
 import {
@@ -65,6 +77,10 @@ import { Runs } from '../src/engine/runs.ts'
 import { Cap } from '../src/engine/sessions/cap.ts'
 import { listWorkspaces } from '../src/engine/workspaces.ts'
 import { REPORTED_TURN_BOUND, RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
+import { THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
+import { Git } from '../src/engine/git.ts'
+import { answerNeed, listNeeds } from '../src/engine/needs.ts'
+import { Withholding } from '../src/engine/tools/withholding.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
 import { Database } from '../src/engine/storage/database.ts'
@@ -74,15 +90,27 @@ import {
   memoryJournal,
   missionSpent,
   missions,
+  probeContents,
   probes,
   sessionDeliveries,
   workspaces,
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/access.ts'
-import { PermissionRequests } from '../src/engine/tools/ports.ts'
+import { PermissionRequests, SensitivePlaces } from '../src/engine/tools/ports.ts'
 import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
 import { commitOnRemote, git, remote, repository } from './repositories.ts'
-import { SILENCE, type World, held, sessionsEngine, text, until, within } from './sessions-world.ts'
+import {
+  SILENCE,
+  type World,
+  held,
+  heldSweeps,
+  sessionsEngine,
+  text,
+  until,
+  within,
+} from './sessions-world.ts'
+import { observedProcesses } from './observed-processes.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 
@@ -187,7 +215,7 @@ const IMPORTER = 'export const importName = (name: string) => name.normalize("NF
  */
 const acme = (
   steps: ReadonlyArray<{ readonly line: string }> = [],
-  options: { readonly remoteGone?: boolean } = {},
+  options: { readonly remoteGone?: boolean; readonly relativePaths?: boolean } = {},
 ) =>
   Effect.gen(function* () {
     const main = join(work, 'acme')
@@ -200,6 +228,7 @@ const acme = (
     const ahead = commitOnRemote(bare, DEFAULT_BASE_BRANCH, work)
     writeFileSync(join(api, '.env'), 'DATABASE_PASSWORD=hunter2-acme\n')
     if (options.remoteGone === true) git(api, 'remote', 'set-url', 'origin', join(work, 'nowhere'))
+    if (options.relativePaths === true) git(api, 'config', 'worktree.useRelativePaths', 'true')
     const created = yield* createProject({
       name: 'Acme',
       mainCheckout: main,
@@ -319,6 +348,41 @@ const { observed: _observed, ...WITHOUT_OUTPUT } = REPORT
 
 const answersOf = (agent: FakeAgent | undefined) =>
   agent?.answers.toolAnswers.map((one) => one.text) ?? []
+
+/** Every content the Probes' captures kept, as stored. */
+const keptContents = Effect.gen(function* () {
+  const database = yield* Database
+  const rows = yield* database.select({ content: probeContents.content }).from(probeContents)
+  return rows.map((row) => row.content)
+})
+
+/**
+ * Rewrites a worktree's `.git` file to say `said`. It is removed first: Git for Windows makes it a
+ * hidden file (`core.hideDotFiles`), and Windows refuses to write over a hidden file in place
+ * (EPERM), where a new one is written on every system.
+ */
+const pointGitAt = (tree: string, said: string) => {
+  rmSync(join(tree, '.git'))
+  writeFileSync(join(tree, '.git'), said)
+}
+
+/** The key of a capture's keyed hashes, in the suite's reads of one file. */
+const SUITE_KEY = randomBytes(32)
+
+/** A capture's read of one file, for a Probe whose place holds no sensitive file. */
+const found = (path: string) =>
+  Effect.runPromise(
+    Withholding.of({
+      sessionId: 'probe-session',
+      role: 'probe',
+      projectId: 'acme',
+      missionId: null,
+      place: { kind: 'workspace', readOnly: false, root: work },
+    }).pipe(
+      Effect.provideService(SensitivePlaces, { sensitive: () => Effect.succeed(null) }),
+      Effect.flatMap((withholding) => readFound(path, 1024, { withholding, key: SUITE_KEY })),
+    ),
+  )
 
 /** The agents that were Probes, in the order they started: their brief names their question. */
 const probeAgentsOf = (world: World) =>
@@ -651,6 +715,223 @@ describe('The Probe’s place (#36)', () => {
   })
 })
 
+describe('A Probe never shapes the engine’s Git through a Git folder (#448)', () => {
+  /**
+   * The command a Git configuration names, as Git runs it through its shell: a Node script that
+   * writes `marker` when it runs. Forward slashes, so Git for Windows' shell reads it too.
+   */
+  const marking = (marker: string) => {
+    const path = script(
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'ran')\n`,
+    )
+    return [process.execPath, path].map((word) => `"${word.replaceAll('\\', '/')}"`).join(' ')
+  }
+
+  /** Where the first Probe of Acme's first mission has its worktree of `api`, and `api` itself. */
+  const places = () => ({
+    tree: join(data, 'probes', 'ACME-1', '1', 'api'),
+    api: join(work, 'acme', 'api'),
+  })
+
+  /**
+   * A Probe of Acme, its recipe running `steps`, whose agent makes the writes `calls` names through
+   * the gate, then `prepare` and the engine's next Git calls on its worktree and on `api`. Then
+   * `control` writes as anything but the Probe's tools could, and the engine's Git runs on the
+   * worktree again, then the machine's git alone. Answers what the gate said to each write and
+   * run, the worktree's `.git`, and whether `marker` was written before the control, after the
+   * engine's Git, and after the machine's git alone.
+   */
+  const probeWrites = (
+    marker: string,
+    calls: ReadonlyArray<Schema.JsonObject>,
+    options: {
+      /** The files the Probe reads first, as a write over an existing file requires. */
+      readonly reads?: ReadonlyArray<Schema.JsonObject>
+      readonly prepare?: (tree: string) => void
+      readonly control?: (tree: string) => void
+      readonly steps?: ReadonlyArray<{ readonly line: string }>
+      /** The command lines the Probe runs after its writes. */
+      readonly runs?: ReadonlyArray<Schema.JsonObject>
+    } = {},
+  ) => {
+    const { reads = [], prepare = () => {}, control = () => {}, steps = [], runs = [] } = options
+    const made = reads.length + calls.length + runs.length
+    const hold = held()
+    // The Planner's grant is the suite's own: the first agent started is the Probe.
+    let taken = 0
+    const { world, run } = probing(() => ({
+      turns: [
+        [
+          ...reads.map((args, at) => uses(`toolu_read_${String(at)}`, 'fs_read', args)),
+          ...calls.map((args, at) => uses(`toolu_git_${String(at)}`, 'fs_write', args)),
+          ...runs.map((args, at) => uses(`toolu_run_${String(at)}`, 'commands_run', args)),
+        ],
+      ],
+      steps: [says('Waiting.')],
+      // Its writes go at once; what follows them waits for the test.
+      between: () => {
+        taken += 1
+        return taken > made ? hold.promise : Promise.resolve()
+      },
+    }))
+    return run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, main } = yield* acme(steps)
+          const { tree, api } = places()
+          const { mission, grantId } = yield* planningMission(project.id, main)
+          yield* launch(grantId, 'does the importer keep accents?')
+          yield* probeIn(mission.id, 1, ['running'])
+          yield* until(
+            Effect.sync(() => (world.agents[0]?.answers.toolAnswers.length ?? 0) === made),
+          )
+          prepare(tree)
+          const engineStatus = (folder: string) =>
+            Git.use((engineGit) => engineGit.status(folder)).pipe(Effect.ignore)
+          yield* engineStatus(tree)
+          yield* engineStatus(api)
+          const before = existsSync(marker)
+          const gitFile = readFileSync(join(tree, '.git'), 'utf8')
+          control(tree)
+          yield* engineStatus(tree)
+          const afterEngine = existsSync(marker)
+          // The same status run by the machine's git alone, as an agent's own command would.
+          execFileSync('git', ['-C', tree, 'status', '--porcelain'], { stdio: 'ignore' })
+          hold.release()
+          const answers = answersOf(world.agents[0]).slice(reads.length)
+          return { answers, gitFile, before, afterEngine, afterPlain: existsSync(marker) }
+        }),
+      ),
+    )
+  }
+
+  test('a Probe that points its worktree’s .git at a Git folder of its own, with a core.fsmonitor, gets no command run by the engine’s next Git call', async () => {
+    const marker = join(work, 'fsmonitor-ran')
+    const seen = await probeWrites(
+      marker,
+      [{ repository: 'api', path: '.git', content: 'gitdir: shadow\n' }],
+      {
+        reads: [{ repository: 'api', path: '.git' }],
+        prepare: (tree) => {
+          // What the Probe may write in its own folder: a Git folder that is not named `.git`.
+          const shadow = join(tree, 'shadow')
+          git(tree, 'init', '-q', '--bare', shadow)
+          git(tree, '--git-dir', shadow, 'config', 'core.bare', 'false')
+          git(tree, '--git-dir', shadow, 'config', 'core.fsmonitor', marking(marker))
+        },
+        // The same .git written by anything but the Probe's tools: the engine's Git still runs
+        // no core.fsmonitor; the machine's git alone does.
+        control: (tree) => pointGitAt(tree, 'gitdir: shadow\n'),
+      },
+    )
+    expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
+    // The path as written is read from the Probe's repository, where it leads (#480).
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/sensitive place: .*[\\/]ACME-1[\\/]1[\\/]api[\\/]\.git$/),
+    ])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
+    expect(seen.before).toBe(false)
+    expect(seen.afterEngine).toBe(false)
+    expect(seen.afterPlain).toBe(true)
+  })
+
+  test('a Probe’s write of .git/config naming its repository is asked as that repository’s Git folder, not the probe folder’s (#480)', async () => {
+    const { tree } = places()
+    const seen = await probeWrites(
+      join(work, 'never-written'),
+      [{ repository: 'api', path: '.git/config', content: '[core]\n\tfsmonitor = true\n' }],
+      {},
+    )
+    expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
+    expect(asked.map((one) => one.reason)).toEqual([`sensitive place: ${join(tree, '.git')}`])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
+  })
+
+  test('a Probe that writes a core.fsmonitor or a filter into the repository’s Git folder, or its worktree’s, is asked as a sensitive place, never written', async () => {
+    const marker = join(work, 'git-folder-ran')
+    const { api } = places()
+    const config = `[core]\n\tfsmonitor = ${marking(marker)}\n[filter "x"]\n\tclean = ${marking(marker)}\n`
+    const seen = await probeWrites(
+      marker,
+      [
+        { path: join(api, '.git', 'config'), content: config },
+        { path: join(api, '.git', 'info', 'attributes'), content: '* filter=x\n' },
+        { path: join(api, '.git', 'hooks', 'post-checkout'), content: '#!/bin/sh\n' },
+        { path: join(api, '.git', 'worktrees', 'api', 'config.worktree'), content: config },
+      ],
+      {
+        // The last one is the worktree's own administrative folder.
+        prepare: (tree) =>
+          expect(
+            realpathSync.native(git(tree, 'rev-parse', '--path-format=absolute', '--git-dir')),
+          ).toBe(realpathSync.native(join(api, '.git', 'worktrees', 'api'))),
+      },
+    )
+    expect(seen.answers).toEqual(Array.from({ length: 4 }, () => expect.stringMatching(/^refused/)))
+    for (const reason of asked.map((one) => one.reason)) {
+      expect(reason).toMatch(/sensitive place: .*[\\/]api[\\/]\.git/)
+    }
+    expect(readFileSync(join(api, '.git', 'config'), 'utf8')).not.toContain('fsmonitor')
+    expect(existsSync(join(api, '.git', 'info', 'attributes'))).toBe(false)
+    expect(existsSync(join(api, '.git', 'worktrees', 'api', 'config.worktree'))).toBe(false)
+    expect(seen.before).toBe(false)
+  })
+
+  test('a Probe whose command runs git config to set a core.fsmonitor is asked as the repository’s configuration, never written, whatever the judge says', async () => {
+    const { api } = places()
+    const marker = join(work, 'never-written')
+    const seen = await probeWrites(marker, [], {
+      runs: [
+        { line: 'git config core.fsmonitor ./tools/watch.sh', repository: 'api' },
+        { line: 'git config --worktree core.fsmonitor ./tools/watch.sh', repository: 'api' },
+      ],
+    })
+    expect(seen.answers).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/^sensitive place: .*[\\/]api[\\/]\.git[\\/]config$/),
+      expect.stringMatching(/^sensitive place: .*[\\/]api[\\/]\.git[\\/]config$/),
+    ])
+    expect(readFileSync(join(api, '.git', 'config'), 'utf8')).not.toContain('fsmonitor')
+    expect(existsSync(join(api, '.git', 'worktrees', 'api', 'config.worktree'))).toBe(false)
+  })
+
+  test('a .git spelled in another case, or reached through a link, is the same sensitive place', async () => {
+    const seen = await probeWrites(
+      join(work, 'never-written'),
+      [
+        { repository: 'api', path: '.GIT', content: 'gitdir: shadow\n' },
+        { repository: 'api', path: 'gitlink', content: 'gitdir: shadow\n' },
+      ],
+      {
+        reads: [{ repository: 'api', path: 'gitlink' }],
+        // The recipe leaves a link to the worktree's .git, as a command of the Probe's could.
+        steps: [
+          {
+            line: nodeLine(
+              script(
+                `import { symlinkSync } from 'node:fs'\nsymlinkSync('.git', 'gitlink', 'file')\n`,
+              ),
+            ),
+          },
+        ],
+      },
+    )
+    expect(seen.answers).toEqual([
+      expect.stringMatching(/^refused/),
+      expect.stringMatching(/^refused/),
+    ])
+    expect(asked.map((one) => one.reason)).toEqual([
+      expect.stringMatching(/sensitive place: .*[\\/]1[\\/]api[\\/]\.GIT$/),
+      expect.stringMatching(/sensitive place: .*[\\/]api[\\/]\.git$/),
+    ])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
+  })
+})
+
 /**
  * A Planner that launches one Probe, and a Probe that reports, then keeps its turn going until
  * `hold` is released.
@@ -978,9 +1259,14 @@ describe('probe_report ends the Probe', () => {
   const reportedAfter = (
     steps: ReadonlyArray<{ readonly line: string }>,
     leave: (tree: string) => void,
+    options: Parameters<typeof sessionsEngine>[2] = {},
+    guard: 'allowed' | 'none' = 'none',
   ) => {
     const hold = held()
-    const { run } = probing(() => ({ steps: [says('Waiting.')], between: () => hold.promise }))
+    const { run } = probing(
+      () => ({ steps: [says('Waiting.')], between: () => hold.promise }),
+      options,
+    )
     return run(({ profile }) =>
       within(
         profile,
@@ -990,16 +1276,109 @@ describe('probe_report ends the Probe', () => {
           yield* launch(grantId, 'does the importer keep accents?')
           const row = yield* probeIn(mission.id, 1, ['running'])
           leave(join(row.folder, 'api'))
+          // What the guard on the engine's Git asks first (#457), allowed: what follows is the
+          // Probe's own refusal.
+          const guardAsked = guard === 'allowed' ? yield* allowedGuard(join(main, 'api')) : ''
           const [session] = yield* sessionsOfLineage(row.lineage)
           const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(session?.id ?? ''))
           const probeGrant = yield* ToolAccess.use((access) => access.byToken(token))
           const answer = yield* callTool(probeGrant?.id ?? '', 'probe_report', reported())
           hold.release()
-          return { answer, detail: yield* readProbe(row.id) }
+          return {
+            answer,
+            guardAsked,
+            detail: yield* readProbe(row.id),
+            kept: yield* keptContents,
+          }
         }),
       ),
     )
   }
+
+  /** The guard's question on a repository, raised by an engine call there, then allowed. */
+  const allowedGuard = (checkout: string) =>
+    Effect.gen(function* () {
+      yield* Git.use((service) => service.status(checkout)).pipe(Effect.ignore)
+      const pending = Effect.map(listNeeds, (groups) =>
+        groups
+          .flatMap((group) => group.needs)
+          .filter((need) => Predicate.isTagged(need.fields, 'Permission')),
+      )
+      yield* until(Effect.map(pending, (needs) => needs.length > 0))
+      const [need] = yield* pending
+      if (need === undefined) return yield* Effect.die(new Error('the guard asked nothing'))
+      yield* answerNeed({
+        id: need.id,
+        answer: PermissionAnswer.make({ choice: 'allow-once' }),
+        key: crypto.randomUUID(),
+      })
+      return Predicate.isTagged(need.fields, 'Permission') ? need.fields.call : ''
+    })
+
+  test('a probe file hard-linked to a file outside the worktree is not saved, and the probe names it', async () => {
+    const secret = join(work, 'outside.txt')
+    writeFileSync(secret, 'not the Probe’s to keep\n')
+    const seen = await reportedAfter([], (tree) => linkSync(secret, join(tree, 'notes.txt')))
+    expect(seen.answer.text).toMatch(/^Kept: Probe #1 ended/)
+    expect(seen.detail.files.find((file) => file.path === 'notes.txt')).toMatchObject({
+      status: 'new',
+      content: null,
+      withheld:
+        'content withheld: it has more than one name on the disk (a hard link), and its other name may be a file outside the Workspace: it is never kept in a Probe’s capture',
+    })
+    expect(JSON.stringify(seen.detail)).not.toContain('not the Probe’s to keep')
+    expect(seen.kept.join('\n')).not.toContain('not the Probe’s to keep')
+  })
+
+  test('a second name of a sensitive file of the worktree is withheld as that sensitive place', async () => {
+    const seen = await reportedAfter([], (tree) =>
+      linkSync(join(tree, '.env'), join(tree, 'notes.txt')),
+    )
+    expect(seen.detail.files.find((file) => file.path === 'notes.txt')).toMatchObject({
+      status: 'new',
+      content: null,
+      withheld: expect.stringMatching(
+        /^content withheld: sensitive place: .+, through a hard link$/,
+      ),
+    })
+    expect(JSON.stringify(seen.detail)).not.toContain('hunter2-acme')
+    expect(seen.kept.join('\n')).not.toContain('hunter2-acme')
+  })
+
+  test('ordinary files are still captured when the data folder is reached through a link', async () => {
+    const linked = join(work, 'data-link')
+    symlinkSync(data, linked, process.platform === 'win32' ? 'junction' : 'dir')
+    data = linked
+    const seen = await reportedAfter([], (tree) => {
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+    })
+    expect(seen.detail.files.find((file) => file.path === 'fixture.csv')).toMatchObject({
+      status: 'new',
+      content: 'name\nÉloïse\n',
+      withheld: null,
+    })
+  })
+
+  test('ordinary files are still captured', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      mkdirSync(join(tree, 'tests', 'fixtures'), { recursive: true })
+      writeFileSync(join(tree, 'tests', 'fixtures', 'names.csv'), 'name\nÉloïse\n')
+      writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+    })
+    const files = new Map(seen.detail.files.map((file) => [file.path, file]))
+    expect([...files.keys()].toSorted()).toEqual(['importer.ts', 'tests/fixtures/names.csv'])
+    expect(files.get('tests/fixtures/names.csv')).toMatchObject({
+      status: 'new',
+      content: 'name\nÉloïse\n',
+      withheld: null,
+    })
+    expect(files.get('importer.ts')).toMatchObject({
+      status: 'modified',
+      content: `${IMPORTER}// probed\n`,
+      withheld: null,
+    })
+    expect(files.get('importer.ts')?.patch).toContain('+// probed')
+  })
 
   test('what the preparation wrote is not captured; what the Probe changed of it is', async () => {
     const seen = await reportedAfter([{ line: nodeLine(marks) }], (tree) => {
@@ -1014,7 +1393,216 @@ describe('probe_report ends the Probe', () => {
       content: null,
       withheld: 'content withheld: a sensitive place',
     })
-    expect(files.get('.env')?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(files.get('.env')?.sha256).toMatch(/^keyed:[0-9a-f]{64}$/)
+  })
+
+  test('a sensitive file the Probe rewrote to the same size and times is still told changed', async () => {
+    // The preparation leaves the `.env` at a whole second, a time Node sets back exactly.
+    const settles = script(`
+import { utimesSync } from 'node:fs'
+utimesSync('.env', 1000000000, 1000000000)
+`)
+    const seen = await reportedAfter([{ line: nodeLine(settles) }], (tree) => {
+      const env = join(tree, '.env')
+      const before = statSync(env, { bigint: true })
+      writeFileSync(env, 'DATABASE_PASSWORD=hunter3-acme\n')
+      utimesSync(env, 1000000000, 1000000000)
+      const after = statSync(env, { bigint: true })
+      expect([after.size, after.mtimeNs]).toEqual([before.size, before.mtimeNs])
+    })
+    expect(seen.detail.files.find((file) => file.path === '.env')).toMatchObject({
+      content: null,
+      withheld: 'content withheld: a sensitive place',
+    })
+  })
+
+  test('a withheld file is told by a keyed hash of its content, its key kept outside the database', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      writeFileSync(join(tree, '.env'), 'DATABASE_PASSWORD=changed-by-the-probe\n')
+    })
+    const key = readFileSync(join(data, 'capture.key'))
+    expect(key).toHaveLength(32)
+    const keyed = createHmac('sha256', key)
+      .update('DATABASE_PASSWORD=changed-by-the-probe\n')
+      .digest('hex')
+    expect(seen.detail.files.find((file) => file.path === '.env')?.sha256).toBe(`keyed:${keyed}`)
+    // Nothing of the profile but the key's own file holds the key, the database least of all.
+    const holding = readdirSync(data, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name !== 'capture.key')
+      .map((entry) => join(entry.parentPath, entry.name))
+      .filter((path) => {
+        const bytes = readFileSync(path)
+        return bytes.includes(key) || bytes.includes(Buffer.from(key.toString('hex')))
+      })
+    expect(holding).toEqual([])
+  })
+
+  test('a withheld file only touched or given another mode is not told changed', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      const env = join(tree, '.env')
+      utimesSync(env, 2000000000, 2000000000)
+      if (process.platform !== 'win32') chmodSync(env, 0o600)
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+    })
+    expect(seen.detail.files.map((file) => file.path)).toEqual(['fixture.csv'])
+  })
+
+  test('what the preparation wrote is not captured when the data folder is reached through a link', async () => {
+    const linked = join(work, 'data-link')
+    symlinkSync(data, linked, process.platform === 'win32' ? 'junction' : 'dir')
+    data = linked
+    const seen = await reportedAfter([{ line: nodeLine(marks) }], (tree) => {
+      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+    })
+    expect(seen.detail.files.map((file) => file.path)).toEqual(['fixture.csv'])
+  })
+
+  test('a file of exactly the room left is kept whole', async () => {
+    const whole = 'x'.repeat(5 * 1024 * 1024)
+    const seen = await reportedAfter([], (tree) => writeFileSync(join(tree, 'whole.txt'), whole))
+    const file = seen.detail.files.find((one) => one.path === 'whole.txt')
+    expect(file?.withheld).toBeNull()
+    expect(file?.content?.length).toBe(whole.length)
+  })
+
+  test('a .git that leads to another repository refuses the report, and nothing of the other work tree is kept', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      const out = (...args: string[]) => git(tree, ...args)
+      const commit = out('rev-parse', 'HEAD')
+      const common = out('rev-parse', '--path-format=absolute', '--git-common-dir')
+      const other = join(work, 'other.git')
+      const elsewhere = join(work, 'elsewhere')
+      mkdirSync(elsewhere)
+      git(work, 'init', '-q', '--bare', other)
+      writeFileSync(join(other, 'objects', 'info', 'alternates'), `${join(common, 'objects')}\n`)
+      git(work, '--git-dir', other, 'config', 'core.bare', 'false')
+      git(work, '--git-dir', other, 'config', 'core.worktree', elsewhere)
+      git(work, '--git-dir', other, '--work-tree', elsewhere, 'read-tree', commit)
+      writeFileSync(join(elsewhere, 'importer.ts'), `${IMPORTER}not the Probe’s to keep\n`)
+      writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+      // Even leading back to the worktree, as an administrative folder of Git's does.
+      writeFileSync(join(other, 'gitdir'), `${join(tree, '.git')}\n`)
+      pointGitAt(tree, `gitdir: ${other}\n`)
+    })
+    expect(seen.answer.text).toBe(
+      'refused: your worktree of api no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again',
+    )
+    expect(seen.detail.state).toBe('running')
+    expect(JSON.stringify(seen.detail)).not.toContain('not the Probe’s to keep')
+    expect(seen.kept.join('\n')).not.toContain('not the Probe’s to keep')
+  })
+
+  /** The refusal of a report whose worktree of `api` is no longer the one Hemera made. */
+  const NOT_ITS_OWN =
+    'refused: your worktree of api no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again'
+
+  test('a .git that leads to another worktree of the same repository refuses the report', async () => {
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        const other = join(work, 'other-tree')
+        git(tree, 'worktree', 'add', '-q', '--detach', other, 'HEAD')
+        const admin = git(other, 'rev-parse', '--path-format=absolute', '--git-dir')
+        writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+        pointGitAt(tree, `gitdir: ${admin}\n`)
+      },
+      {},
+      'allowed',
+    )
+    // A worktree added to the repository by another than the engine is a change the guard asks.
+    expect(seen.guardAsked).toContain('other-tree')
+    expect(seen.answer.text).toBe(NOT_ITS_OWN)
+    expect(seen.detail.state).toBe('running')
+  })
+
+  test('a worktree moved aside and put back as a link refuses the report', async () => {
+    const seen = await reportedAfter([], (tree) => {
+      renameSync(tree, `${tree}-moved`)
+      symlinkSync(`${tree}-moved`, tree, process.platform === 'win32' ? 'junction' : 'dir')
+    })
+    expect(seen.answer.text).toBe(NOT_ITS_OWN)
+  })
+
+  test('a .git changed once the worktree was found its own does not choose what is listed', async () => {
+    let worktree = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        worktree = tree
+        writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+      },
+      {
+        probes: {
+          hold: (at) =>
+            at === 'listing'
+              ? Effect.sync(() => {
+                  const other = join(work, 'other.git')
+                  const elsewhere = join(work, 'elsewhere')
+                  mkdirSync(elsewhere)
+                  git(work, 'init', '-q', '--bare', other)
+                  git(work, '--git-dir', other, 'config', 'core.bare', 'false')
+                  git(work, '--git-dir', other, 'config', 'core.worktree', elsewhere)
+                  pointGitAt(worktree, `gitdir: ${other}\n`)
+                })
+              : Effect.void,
+        },
+      },
+    )
+    expect(seen.detail.files.map((file) => file.path)).toEqual(['fixture.csv'])
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'the patch of a file the Probe made executable says so, as Git says it',
+    async () => {
+      let expected = ''
+      const seen = await reportedAfter([], (tree) => {
+        writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+        chmodSync(join(tree, 'importer.ts'), 0o755)
+        expected = git(
+          tree,
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          'HEAD',
+          '--',
+          'importer.ts',
+        )
+      })
+      expect(expected).toContain('new mode 100755')
+      expect(seen.detail.files.find((file) => file.path === 'importer.ts')?.patch?.trim()).toBe(
+        expected,
+      )
+    },
+  )
+
+  test('a hard link swapped in between the read and the patch never reaches the patch', async () => {
+    const secret = join(work, 'outside.txt')
+    writeFileSync(secret, `${IMPORTER}not the Probe’s to keep\n`)
+    let worktree = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        worktree = tree
+        writeFileSync(join(tree, 'importer.ts'), `${IMPORTER}// probed\n`)
+      },
+      {
+        probes: {
+          hold: (at) =>
+            at === 'patching'
+              ? Effect.sync(() => {
+                  rmSync(join(worktree, 'importer.ts'))
+                  linkSync(secret, join(worktree, 'importer.ts'))
+                })
+              : Effect.void,
+        },
+      },
+    )
+    const importer = seen.detail.files.find((file) => file.path === 'importer.ts')
+    expect(importer).toMatchObject({ content: `${IMPORTER}// probed\n`, withheld: null })
+    expect(importer?.patch).toContain('+// probed')
+    expect(JSON.stringify(seen.detail)).not.toContain('not the Probe’s to keep')
   })
 
   test('the capture keeps at most 200 files and 5 MiB of content; the rest is listed, withheld', async () => {
@@ -1038,6 +1626,52 @@ describe('probe_report ends the Probe', () => {
     const bytes = kept.reduce((sum, file) => sum + Buffer.byteLength(file.content ?? ''), 0)
     expect(bytes).toBeLessThanOrEqual(5 * 1024 * 1024)
     expect(withheld.every((file) => /^[0-9a-f]{64}$/.test(file.sha256))).toBe(true)
+    // Hashed whole, a chunk at a time, through the handle that was proven.
+    expect(seen.detail.files.find((file) => file.path === 'big-2.txt')?.sha256).toBe(
+      createHash('sha256').update(big).digest('hex'),
+    )
+  })
+
+  test('a large JSON file and the large patch the Probe left are kept masked as the whole mask gives them, while another fiber keeps its turns (#402)', async () => {
+    const value = 'variable-value-8812'
+    const json = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    let patch = ''
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        writeFileSync(join(tree, 'lock.json'), json)
+        writeFileSync(join(tree, 'importer.ts'), json)
+        patch = execFileSync(
+          'git',
+          [
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--src-prefix=a/',
+            '--dst-prefix=b/',
+            '--end-of-options',
+            'HEAD',
+            '--',
+            'importer.ts',
+          ],
+          { cwd: tree, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+        )
+      },
+      { secrets },
+    )
+    const files = new Map(seen.detail.files.map((file) => [file.path, file]))
+    expect(patch.length).toBeGreaterThan(LARGE_TEXT)
+    expect(files.get('lock.json')?.content).toBe(unwatched.mask(json))
+    expect(files.get('importer.ts')?.content).toBe(unwatched.mask(json))
+    expect(files.get('importer.ts')?.patch).toBe(unwatched.mask(patch))
+    expect(unwatched.mask(patch)).not.toContain(value)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(3)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
   })
 
   test('what the Probe committed in its worktree is captured against its base commit', async () => {
@@ -1116,11 +1750,40 @@ describe('probe_report ends the Probe', () => {
 
   test('a file gone between Git’s list and its reading is skipped, never a failure', async () => {
     const gone = join(work, 'gone.txt')
-    expect(await Effect.runPromise(readFound(gone, 1024))).toBeNull()
+    expect(await found(gone)).toBeNull()
     writeFileSync(gone, 'here\n')
-    expect(await Effect.runPromise(readFound(gone, 1024))).toMatchObject({ withheld: null })
-    expect(await Effect.runPromise(readFound(join(gone, 'under.txt'), 1024))).toBeNull()
+    expect(await found(gone)).toMatchObject({ withheld: null })
+    expect(await found(join(gone, 'under.txt'))).toBeNull()
   })
+
+  test('a symbolic link out of the worktree is not followed', async () => {
+    const tree = join(work, 'tree')
+    const outside = join(work, 'outside')
+    mkdirSync(tree)
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'notes.txt'), 'not the Probe’s to keep\n')
+    // Git listed `notes/notes.txt` while `notes` was a folder; it is a link out when it is read.
+    symlinkSync(outside, join(tree, 'notes'), process.platform === 'win32' ? 'junction' : 'dir')
+    const read = await found(join(tree, 'notes', 'notes.txt'))
+    expect(read).toMatchObject({
+      sha256: 'unopened',
+      bytes: null,
+      withheld: `content withheld: ${THROUGH_A_LINK}`,
+    })
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe in the worktree is refused, never waited on',
+    async () => {
+      const pipe = join(work, 'pipe')
+      execFileSync('mkfifo', [pipe])
+      expect(await found(pipe)).toMatchObject({
+        bytes: null,
+        sha256: 'unopened',
+        withheld: 'content withheld: it is not a regular file (a pipe, a device or a folder)',
+      })
+    },
+  )
 })
 
 describe('The complete wipe', () => {
@@ -1148,6 +1811,7 @@ ${STAYS_UP}`)
           (state) => Effect.sync(() => void cleaned.push({ probe, ...state })),
         ),
     })
+    const observed = observedProcesses()
     const { world, run } = probing(
       () => ({
         turns: [
@@ -1163,7 +1827,7 @@ ${STAYS_UP}`)
         steps: [says('Waiting.')],
         between: () => hold.promise,
       }),
-      { children: true, probes: { cleanup } },
+      { children: true, probes: { cleanup }, hostProcesses: observed.layer },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1223,8 +1887,9 @@ ${STAYS_UP}`)
         runsLive: 0,
       },
     ])
-    expect(() => process.kill(seen.servePid, 0)).toThrow()
-    for (const pid of world.pids) expect(() => process.kill(pid, 0)).toThrow()
+    // Each process's end as the supervisor saw it: a freed pid may already be another's.
+    expect(world.pids.length).toBeGreaterThan(0)
+    for (const pid of [seen.servePid, ...world.pids]) expect(observed.ended(pid)).toBe(true)
   })
 
   // Git for Windows writes `gitdir: C:/…/.git/worktrees/<name>`, and `worktree.useRelativePaths`
@@ -1236,8 +1901,8 @@ ${STAYS_UP}`)
       within(
         profile,
         Effect.gen(function* () {
-          const { project, main, api } = yield* acme()
-          git(api, 'config', 'worktree.useRelativePaths', 'true')
+          // Set before Hemera first sees the repository: the user's own configuration.
+          const { project, main, api } = yield* acme([], { relativePaths: true })
           const { mission, grantId } = yield* planningMission(project.id, main)
           yield* launch(grantId, 'does the importer keep accents?')
           const row = yield* probeIn(mission.id, 1, ['running'])
@@ -1748,6 +2413,7 @@ describe('A restored Profile’s Probes (#4’s registry)', () => {
 describe('Stuck (#40’s rule)', () => {
   test('a Probe silent in a turn past the bound is stuck, its Planner told; not while its command runs', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     let longId = ''
     const { world, run } = probing(
       (index) => {
@@ -1760,7 +2426,8 @@ describe('Stuck (#40’s rule)', () => {
         if (index === 1) return { steps: [says('Silent.')], between: () => hold.promise }
         return { steps: [says('Back.')] }
       },
-      { timings: SILENCE },
+      // Its agents start slower than the bound, as under load: the start is part of the turn.
+      { ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) },
     )
     const seen = await run(({ profile }) =>
       within(
@@ -1780,6 +2447,10 @@ describe('Stuck (#40’s rule)', () => {
           yield* until(Effect.sync(() => runs.live.size === 1))
           yield* launch(grantId, 'does the importer keep accents?')
           yield* probeIn(mission.id, 2, ['running'])
+          // Its turn begun, silent past the bound, its sibling's command running all along: looked at.
+          yield* until(Effect.sync(() => (world.agents[1]?.answers.prompts.length ?? 0) > 0))
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           // Stuck is told by its event: the fresh session may speak before a row is read.
           yield* until(Effect.map(eventsOf(mission.id, 'probe.stuck'), (rows) => rows.length > 0))
           const database = yield* Database

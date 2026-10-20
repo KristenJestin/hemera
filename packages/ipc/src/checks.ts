@@ -27,6 +27,16 @@ export class CheckRefused extends Schema.TaggedError<CheckRefused>()('CheckRefus
   }
 }
 
+/** A proof's time limit refused: under a minute, over the bound, or not whole minutes (#321). */
+export class InvalidProofLimit extends Schema.TaggedError<InvalidProofLimit>()(
+  'InvalidProofLimit',
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason
+  }
+}
+
 export class UnknownProjectCheck extends Schema.TaggedError<UnknownProjectCheck>()(
   'UnknownProjectCheck',
   { id: Schema.String },
@@ -80,5 +90,17 @@ export const ChecksRpcs = RpcGroup.make(
     payload: { projectId: Schema.String, id: Schema.String, rank: Schema.Number },
     success: Schema.Array(ProjectCheck),
     error: failing(...always, UnknownProjectCheck),
+  }),
+  /** How long a proof may run, in minutes (#321); null while the Project keeps the default. */
+  Rpc.make('checks.proofLimit', {
+    payload: { projectId: Schema.String },
+    success: Schema.NullOr(Schema.Number),
+    error: failing(...always),
+  }),
+  /** Sets it, or empties it back to the default with null; answers what is kept. */
+  Rpc.make('checks.setProofLimit', {
+    payload: { projectId: Schema.String, minutes: Schema.NullOr(Schema.Number) },
+    success: Schema.NullOr(Schema.Number),
+    error: failing(...always, InvalidProofLimit),
   }),
 )

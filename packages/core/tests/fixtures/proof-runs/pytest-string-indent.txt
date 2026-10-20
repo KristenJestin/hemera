@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 4 items
+
+tests/test_doc.py ...F                                                   [100%]
+
+=================================== FAILURES ===================================
+_______________________________ TestA.test_saves _______________________________
+
+self = <test_doc.TestA object at 0x7fe65b7f1950>
+
+    def test_saves(self):
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_doc.py:18: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_doc.py::TestA::test_saves - assert 1 == 2
+========================= 1 failed, 3 passed in 0.03s ==========================

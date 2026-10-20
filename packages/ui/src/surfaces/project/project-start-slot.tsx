@@ -3,7 +3,7 @@ import { type ReactNode, use } from 'react'
 import { Input } from '../../components/field/field.tsx'
 import { Kbd } from '../../components/kbd/kbd.tsx'
 import { IconSearch } from '../../icons.ts'
-import { MissionField } from './project-page.tsx'
+import { MissionField } from './mission-field.ts'
 
 /**
  * The place of the start field in the stories and in the window's fixtures: a field of the

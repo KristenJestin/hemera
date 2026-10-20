@@ -33,7 +33,17 @@ import { Database } from '../src/engine/storage/database.ts'
 import { memoryJournal, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
-import { BUILDER, HELPER, acmeIn, held, sessionsEngine, until, within } from './sessions-world.ts'
+import {
+  BUILDER,
+  HELPER,
+  SILENCE,
+  acmeIn,
+  held,
+  heldSweeps,
+  sessionsEngine,
+  until,
+  within,
+} from './sessions-world.ts'
 
 let data: string
 let work: string
@@ -181,9 +191,12 @@ describe('The cap of sub-agents (CT-13)', () => {
 
 describe('A slot goes back once nothing uses it', () => {
   test('an idle helper gives its slot to a phase waiting for one, and its parent is told', async () => {
+    const sweeps = heldSweeps()
+    // Its agents start slower than the bound, as under load: a turn begins with its start.
     const { run } = sessionsEngine(data, () => SAYS_DONE, {
       roles: ROLES,
-      timings: { stuckAfter: Duration.millis(400) },
+      ...sweeps,
+      starting: () => Effect.sleep(SILENCE.stuckAfter),
     })
     const seen = await run(({ profile }) =>
       within(
@@ -204,8 +217,18 @@ describe('A slot goes back once nothing uses it', () => {
               requestedBy: 'agent',
             }),
           )
+          yield* Sessions.use((sessions) => sessions.settled(builder.id))
           yield* Sessions.use((sessions) => sessions.settled(helper.id))
           yield* launched(owner, main, 'documenter', 'hemera')
+          yield* until(
+            Effect.map(
+              Memory.use((memory) => memory.now(owner.missionId)),
+              (state) => state.slotWait !== null,
+            ),
+          )
+          // The helper idle past the bound while the phase waits, and looked at.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           yield* until(
             Effect.map(live, (sessions) =>
               sessions.some((one) => one.role === 'documenter' && one.state !== 'starting'),

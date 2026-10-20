@@ -1,0 +1,26 @@
+{
+  "testResults": [
+    {
+      "name": "/work/acme/api/saves.test.ts",
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "title": "saves",
+          "status": "failed",
+          "failureMessages": ["AssertionError: expected 1 to be 2"]
+        }
+      ]
+    },
+    {
+      "name": "/work/acme/api/other.test.ts",
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "title": "loads",
+          "status": "failed",
+          "failureMessages": ["AssertionError: expected 1 to be 2"]
+        }
+      ]
+    }
+  ]
+}

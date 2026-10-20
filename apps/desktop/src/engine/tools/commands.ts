@@ -6,7 +6,8 @@
  * writes the intent of the run before it starts and its outcome when it ends; it answers when the
  * command ends or at its timeout, with the end of its output, and a run that outlasts it keeps
  * going, read with `commands_output`. A session reads and stops only the runs of its own mission
- * (or, for a session of a Project, its own runs).
+ * (or, for a session of a Project, its own runs). From its launch to its end, a run is watched by
+ * the guard on the engine's Git (#457).
  */
 
 import {
@@ -20,7 +21,10 @@ import type { Command, Run } from '@hemera/ipc'
 import { Duration, Effect, Exit, Option, Predicate, Result, type Scope } from 'effect'
 
 import { listCommands } from '../catalogue.ts'
+import type { DomainEvents } from '../domain-events.ts'
+import { GitGuard, actionIn } from '../git-guard.ts'
 import { type RunServices, awaitRun, getRun, runOutput, startRun, stopRun } from '../runs.ts'
+import type { Database } from '../storage/database.ts'
 import type { Grant } from './access.ts'
 import { type ActionOwner, EffectfulActions } from './actions.ts'
 import { type ToolAnswer, answered, failure, refusal } from './files.ts'
@@ -124,6 +128,21 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       const note = watch?.note() ?? null
       return note === null ? answer : { ...answer, text: `${answer.text}\n\n${note}` }
     }
+    // What shapes the engine's Git in the place is compared from the launch to the end (#457).
+    const guard = yield* GitGuard
+    const action = yield* actionIn({ projectId: grant.projectId, root: grant.place.root })
+    const stores = yield* Effect.context<Database | DomainEvents>()
+    let closeGuard: Effect.Effect<void> = Effect.void
+    const openGuard = Effect.flatMap(Effect.provide(guard.open(action), stores), (close) =>
+      Effect.sync(() => {
+        closeGuard = close
+      }),
+    )
+    const guardClosed = Effect.suspend(() => {
+      const close = closeGuard
+      closeGuard = Effect.void
+      return close
+    })
     const details = { command: command?.id ?? null, line, folder, sessionId: grant.sessionId }
     // Written as the process launches: a run that waits for a reservation and is stopped first
     // never ran, and leaves no intent to be "maybe done" at a restart, only its record. It keeps
@@ -154,7 +173,7 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
         sessionId: grant.sessionId,
         missionId: grant.missionId,
         intent: begin,
-        beforeLaunch: watch === null ? Effect.void : watch.launch,
+        beforeLaunch: watch === null ? openGuard : Effect.andThen(watch.launch, openGuard),
       }).pipe(Effect.result)
       if (Result.isFailure(launched)) return launched
       const run = launched.success
@@ -162,6 +181,7 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
       // Its changes are attributed and its lock released first, so an outcome written says its
       // changes are already its task's.
       yield* awaitRun(run.id).pipe(
+        Effect.tap(() => guardClosed),
         Effect.tap(() => (watch === null ? Effect.void : watch.finish(run.id))),
         Effect.flatMap((ended) =>
           intent === null
@@ -178,15 +198,19 @@ export const commandsRun = (call: RunCall, args: ToolArguments<'commands_run'>) 
         Effect.ignore,
         Effect.andThen(watch === null ? Effect.void : watch.ended),
         Effect.ensuring(watch === null ? Effect.void : watch.finish(run.id)),
+        Effect.ensuring(guardClosed),
         Effect.forkIn(call.scope),
       )
       return launched
     }).pipe(
       Effect.onExit((exit) =>
-        watch === null || Exit.isSuccess(exit) ? Effect.void : watch.finish(null),
+        Exit.isSuccess(exit)
+          ? Effect.void
+          : Effect.andThen(guardClosed, watch === null ? Effect.void : watch.finish(null)),
       ),
     )
     if (Result.isFailure(started)) {
+      yield* guardClosed
       const reason = started.failure.message
       yield* intent === null ? neverLaunched(reason) : actions.failed(intent, reason)
       if (watch !== null) yield* watch.finish(null)
@@ -237,4 +261,4 @@ export const commandsStop = (grant: Grant, args: ToolArguments<'commands_stop'>)
     return answered(`run ${stopped.id}: ${stopped.name} is ${stopped.state}`)
   })
 
-export type CommandServices = RunServices | EffectfulActions | WriteAttribution
+export type CommandServices = RunServices | EffectfulActions | WriteAttribution | GitGuard

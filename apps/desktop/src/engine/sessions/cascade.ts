@@ -114,12 +114,19 @@ export const resolvedSetting = (owner: SessionOwner, role: string) =>
     return resolveSetting(app, project, mission)
   })
 
+/** The setting a role's next session gets: a role that takes another's model reads that one's. */
+export const sessionSetting = (owner: SessionOwner, role: string) =>
+  Effect.gen(function* () {
+    const roles = yield* RoleRegistry
+    return yield* resolvedSetting(owner, roleNamed(roles, role)?.modelOf ?? role)
+  })
+
 /** The runtime's `ModelChoice`, from the cascade. */
 export const modelChoiceLayer = Layer.effect(
   ModelChoice,
-  Effect.map(Effect.context<Database>(), (context) => ({
+  Effect.map(Effect.context<Database | RoleRegistry>(), (context) => ({
     of: (owner: SessionOwner, role: string) =>
-      resolvedSetting(owner, role).pipe(Effect.provide(context)),
+      sessionSetting(owner, role).pipe(Effect.provide(context)),
   })),
 )
 
@@ -134,6 +141,7 @@ export const seedAppSettings = Effect.gen(function* () {
   const given = { ...CLAUDE_DEFAULTS, agent: first ?? 'claude' }
   let seeded = 0
   for (const role of roles) {
+    if (role.modelOf !== undefined) continue
     if ((yield* roleSettingAt('app', null, role.id)) !== null) continue
     yield* setRoleSetting('app', null, role.id, given)
     seeded += 1
@@ -147,7 +155,8 @@ export const roleModelsOf = (projectId: string | null, missionId: string | null)
     if (projectId !== null) yield* getProject(projectId)
     if (missionId !== null) yield* getMission(missionId)
     const roles = yield* RoleRegistry
-    return yield* Effect.forEach(roles, (role) =>
+    const own = roles.filter((role) => role.modelOf === undefined)
+    return yield* Effect.forEach(own, (role) =>
       Effect.gen(function* () {
         const app = yield* roleSettingAt('app', null, role.id)
         const project =
@@ -177,8 +186,15 @@ export const setRoleModel = (
   setting: ModelSettingValue | null,
 ) =>
   Effect.gen(function* () {
-    if (roleNamed(yield* RoleRegistry, role) === undefined) {
+    const roles = yield* RoleRegistry
+    const entry = roleNamed(roles, role)
+    if (entry === undefined) {
       return yield* new ModelSettingRefused({ reason: `no role ${role} is registered` })
+    }
+    if (entry.modelOf !== undefined) {
+      return yield* new ModelSettingRefused({
+        reason: `${entry.displayName} takes the model of ${roleNamed(roles, entry.modelOf)?.displayName ?? entry.modelOf}`,
+      })
     }
     if (level === 'app' && setting === null) {
       return yield* new ModelSettingRefused({

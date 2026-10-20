@@ -23,7 +23,7 @@
  * settled and how long it took) and one line of the diagnostic log.
  */
 
-import { readFileSync, realpathSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -37,6 +37,8 @@ import {
   deletesGit,
   effectiveAction,
   chatMustAskThroughScripts,
+  type GitSettingsWrite,
+  gitSettingsWrites,
   missionRefusal,
   namesGit,
   neverMatch,
@@ -59,8 +61,15 @@ import { Secrets } from '../secrets.ts'
 import { getProject } from '../projects.ts'
 import { mutate } from '../transaction.ts'
 import { changedBy } from '../resources/declarations.ts'
+import { readOwnSync } from '../tools/judged.ts'
 import { containedIn, resolvePath, shownPath } from '../tools/paths.ts'
-import { type JudgedCall, SensitivePlaces, type Verdict, Verdicts } from '../tools/ports.ts'
+import {
+  type JudgedCall,
+  SensitiveLinks,
+  SensitivePlaces,
+  type Verdict,
+  Verdicts,
+} from '../tools/ports.ts'
 import { neverList } from './never-list.ts'
 import { CommitRights, Judge, type Judged, MissionGrants } from './ports.ts'
 
@@ -70,12 +79,18 @@ const PackageScripts = Schema.fromJsonString(
 )
 const readPackageScripts = Schema.decodeUnknownOption(PackageScripts)
 
+/** The most of a `package.json` Hemera reads. */
+const MANIFEST_CAP = 4 * 1024 * 1024
+
 /**
  * The scripts of the `package.json` of a folder, by name; none when it has none, or when it does
- * not read (a folder of that name, a file it may not open, text that is not JSON).
+ * not read (a folder of that name, a file it may not open, text that is not JSON; a pipe, a link
+ * or a file over the cap, refused without waiting, #434).
  */
 const scriptsIn = (folder: string) =>
-  Effect.try(() => readFileSync(join(folder, 'package.json'), 'utf8')).pipe(
+  Effect.try(() =>
+    readOwnSync(join(folder, 'package.json'), MANIFEST_CAP).bytes.toString('utf8'),
+  ).pipe(
     Effect.map((text) =>
       Option.match(readPackageScripts(text), {
         onNone: () => new Map<string, string>(),
@@ -144,6 +159,37 @@ const ownFolder = (call: JudgedCall): boolean => {
     !namesGit(relative(place.root, call.path.resolved)) &&
     !namesGit(relative(realRoot(place.root), call.path.resolved))
   )
+}
+
+/** What a Git command writes of Git's own, as the human is shown it, from its run folder. */
+const configWritten = (write: GitSettingsWrite, folder: string, home: string): string => {
+  switch (write.kind) {
+    case 'global':
+      return shownPath(join(home, '.gitconfig'), home)
+    case 'system':
+      return 'the system’s Git configuration'
+    case 'unread':
+      return 'a git config whose file does not read'
+    case 'alias':
+      return `a git alias set on its line (${write.setting})`
+    case 'command':
+      return `a git command that does not read (git ${write.name})`
+    case 'environment':
+      return `a git configuration set through its environment (${write.name})`
+    case 'include':
+      return `a git configuration included on its line (${write.setting})`
+    case 'clone':
+      return `a setting saved into the clone (${write.setting})`
+    case 'named':
+      return shownPath(resolve(folder, ...write.folders, write.path), home)
+    case 'repository':
+    case 'hooks': {
+      const repository = resolve(folder, ...write.folders)
+      const gitDir =
+        write.gitDir === null ? join(repository, '.git') : resolve(repository, write.gitDir)
+      return shownPath(join(gitDir, write.kind === 'hooks' ? 'hooks' : 'config'), home)
+    }
+  }
 }
 
 /** A place's root as the disk has it, links followed; as written when it cannot say. */
@@ -229,10 +275,16 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
         Effect.promise(() => resolvePath(call.session.place.root, folder, named, home))
 
       /** The sensitive place a path is, as written and as it leads, or null. */
-      const sensitiveOf = (call: JudgedCall, written: string, resolved: string, writes: boolean) =>
+      const sensitiveOf = (
+        call: JudgedCall,
+        written: string,
+        resolved: string,
+        writes: boolean,
+        links: SensitiveLinks,
+      ) =>
         Effect.gen(function* () {
           const places = yield* SensitivePlaces
-          const asked = { session: call.session, writes }
+          const asked = { session: call.session, writes, links }
           return (
             (yield* places.sensitive(written, asked)) ?? (yield* places.sensitive(resolved, asked))
           )
@@ -295,12 +347,13 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
           const writes =
             call.tool !== 'fs_read' && call.tool !== 'fs_list' && call.tool !== 'search'
           const root = call.session.place.root
+          const links = call.links ?? new SensitiveLinks()
           const pointAt = (
             written: string,
             resolved: { path: string; inside: boolean; certain: boolean },
           ) =>
             Effect.gen(function* () {
-              const found = yield* sensitiveOf(call, written, resolved.path, writes)
+              const found = yield* sensitiveOf(call, written, resolved.path, writes, links)
               if (found !== null) sensitive.push(found)
               // The Workspace a place reads beside its own folder is inside for a read (#145).
               const readable = call.session.place.readable
@@ -317,7 +370,9 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
             const named = /^~(?:$|[\\/])/.test(call.path.named)
               ? join(home, call.path.named.slice(1))
               : call.path.named
-            const written = isAbsolute(named) ? resolve(named) : resolve(root, named)
+            const written = isAbsolute(named)
+              ? resolve(named)
+              : resolve(call.path.from ?? root, named)
             yield* pointAt(written, {
               path: call.path.resolved,
               inside: call.path.inside,
@@ -338,6 +393,12 @@ export const decisionOrderLayer = (settings: OrderSettings) =>
               const resolved = yield* place(call, folder.path, path)
               const written = isAbsolute(path) ? resolve(path) : resolve(folder.path, path)
               yield* pointAt(written, resolved)
+            }
+            // A `git config` that writes, a template's hooks, or a Git command that does not read (an
+            // alias), always asks, as what it writes (#448).
+            const action = effectiveAction(wordsOf(call.line ?? ''), context)
+            for (const write of gitSettingsWrites(action)) {
+              sensitive.push(`sensitive place: ${configWritten(write, folder.path, home)}`)
             }
           }
           if (call.command?.askBeforeRunning === true) {

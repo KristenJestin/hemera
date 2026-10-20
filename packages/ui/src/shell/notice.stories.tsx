@@ -4,7 +4,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../components/button/button.tsx'
 import { type NoticeItem, NoticeStack } from './notice.tsx'
-import { LONG_TITLE, NOTICES } from './shell-fixtures.tsx'
+import { LONG_TITLE } from './shell-fixtures.tsx'
+import { NOTICES } from './shell-data.ts'
 
 /**
  * A notification while the window has the focus, in the sheet's corner: the mark of what
