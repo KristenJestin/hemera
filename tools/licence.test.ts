@@ -6,8 +6,8 @@ import { describe, expect, test } from 'vite-plus/test'
 const repository = resolve(import.meta.dirname, '..')
 const read = (path: string): string => readFileSync(join(repository, path), 'utf8')
 
-/** The sha256 of the LICENSE as `dev` holds it: gnu.org's `agpl-3.0.txt`, its indentation stripped. */
-const AGPL_SHA256 = 'd8a6cc31abc16b6748c7a21f21611f5a1ec33f67d22ca23d7da1c19b95496bee'
+/** The sha256 of `agpl-3.0.txt` as gnu.org publishes it: the licence is kept byte for byte. */
+const AGPL_SHA256 = '0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0'
 
 /** The workspace's own manifests: `apps/*` and `packages/*` of pnpm-workspace.yaml. */
 const workspaceManifests = ['apps', 'packages'].flatMap((folder) =>
@@ -23,11 +23,11 @@ function licenceOf(manifest: string): string | undefined {
 }
 
 describe('Hemera is published under the AGPL-3.0-only', () => {
-  test('the LICENSE at the root is the text of the GNU AGPL v3 that dev holds', () => {
+  test('the LICENSE at the root is the unmodified text of the GNU AGPL v3', () => {
     const text = readFileSync(join(repository, 'LICENSE'))
     expect(text.toString('utf8').split('\n').slice(0, 2)).toEqual([
-      'GNU AFFERO GENERAL PUBLIC LICENSE',
-      'Version 3, 19 November 2007',
+      '                    GNU AFFERO GENERAL PUBLIC LICENSE',
+      '                       Version 3, 19 November 2007',
     ])
     expect(createHash('sha256').update(text).digest('hex')).toBe(AGPL_SHA256)
   })
