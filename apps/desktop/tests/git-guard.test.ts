@@ -410,6 +410,27 @@ wait()
   })
 })
 
+describe('A hold says in the engine’s lines what changed, and how (#483)', () => {
+  test('a change to ~/.gitconfig is said with its path and its kinds before and after', async () => {
+    writeFileSync(join(work, '.gitconfig'), '[user]\n\tname = t\n')
+    const said = await commandsEngine(data, { tools: { home: work } })((started) =>
+      started.profile.use(
+        Effect.gen(function* () {
+          const { main } = yield* acmeWithMission(work)
+          repository(main)
+          yield* engineStatus(main)
+          rmSync(join(work, '.gitconfig'))
+          mkdirSync(join(work, '.gitconfig'))
+          const status = yield* engineStatus(main)
+          return { status, lines: started.lines.filter((line) => line.includes('Git guard')) }
+        }),
+      ),
+    )
+    expect(said.status).toContain('Hemera stopped its Git')
+    expect(said.lines).toContain(`the Git guard holds ~: ${join(work, '.gitconfig')} file → folder`)
+  })
+})
+
 describe('A command still running is watched until it ends (#457)', () => {
   test('a hook a running command wrote stops the engine’s next Git call before the command ends', async () => {
     const result = await withBuilder(({ builder, main }) =>
@@ -1138,6 +1159,40 @@ describe('What a user’s everyday Git writes into a configuration asks nothing 
     expect(reopened.needs).toEqual([])
   })
 
+  test('a baseline kept before its steady digests (before #458’s round 5) takes them at the start: the everyday Git that follows asks nothing', async () => {
+    await withBuilder(({ main }) => {
+      remote(main, join(work, 'acme.git'))
+      return engineStatus(main)
+    })
+    // As a record from before round 5: no steady digest on any file.
+    const database = new DatabaseSync(join(data, DATABASE_FILE))
+    database.exec(
+      "UPDATE git_baselines SET shapes = (SELECT json_group_array(json_remove(value, '$.steady')) FROM json_each(git_baselines.shapes))",
+    )
+    database.close()
+    const main = join(work, 'acme')
+    const config = realpathSync.native(join(main, '.git', 'config'))
+    const reopened = await reopen(
+      Effect.gen(function* () {
+        everyday(main)
+        return {
+          status: yield* engineStatus(main),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(reopened.status).toBe('ran')
+    expect(reopened.needs).toEqual([])
+    const kept = new DatabaseSync(join(data, DATABASE_FILE))
+    const [row] = kept
+      .prepare(
+        "SELECT json_extract(value, '$.steady') AS steady FROM git_baselines, json_each(git_baselines.shapes) WHERE git_baselines.id = ? AND json_extract(value, '$.path') = ?",
+      )
+      .all(realpathSync.native(join(main, '.git')), config)
+    kept.close()
+    expect(row?.['steady']).toEqual(expect.any(String))
+  })
+
   test('a worktree the engine adds on a branch made from a remote one, its upstream written into the config, asks nothing', async () => {
     const result = await withBuilder(({ main }) =>
       Effect.gen(function* () {
@@ -1201,5 +1256,212 @@ describe('What a user’s everyday Git writes into a configuration asks nothing 
     )
     expect(result.status).toContain('Hemera stopped its Git')
     expect(shown(result.needs[0])).toContain('~/acme/.git/config')
+  })
+})
+
+describe('A submodule’s own Git folder shapes the engine’s Git like the repository’s own (#470)', () => {
+  /** Adds a submodule cloned from a repository on the same disk, its own submodules too, and commits. */
+  const submodule = (main: string, from: string, path: string) => {
+    git(main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', from, path)
+    git(
+      main,
+      '-c',
+      'protocol.file.allow=always',
+      'submodule',
+      'update',
+      '-q',
+      '--init',
+      '--recursive',
+    )
+    git(main, 'commit', '-q', '-m', path)
+  }
+
+  /** A clean filter: a program Git runs on the files of a checkout, `git status` included. */
+  const FILTER = '[filter "x"]\n\tclean = sh ./gotcha.sh\n'
+
+  test('.git/modules/<n>: a clean filter written into a submodule’s config stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        yield* engineStatus(main)
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        const added = yield* engineStatus(main)
+        appendFileSync(join(main, '.git', 'modules', 'shared', 'config'), FILTER)
+        return { added, status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.added).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/modules/shared/config')
+  })
+
+  test('a gitdir: file: a submodule’s checkout pointed at a Git folder outside stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        yield* engineStatus(main)
+        const outside = join(work, 'outside.git')
+        git(work, 'clone', '-q', `--separate-git-dir=${outside}`, join(work, 'shared'), 'copy')
+        appendFileSync(join(outside, 'config'), FILTER)
+        // Git for Windows marks the `.git` file hidden, and a hidden file cannot be opened to be
+        // replaced there: it is removed, then written again.
+        rmSync(join(main, 'shared', '.git'))
+        writeFileSync(join(main, 'shared', '.git'), `gitdir: ${outside.replaceAll('\\', '/')}\n`)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/shared/.git')
+    expect(shown(result.needs[0])).toContain('~/outside.git/config')
+  })
+
+  test('a link (a junction on Windows) to a folder outside: a submodule’s Git folder there, its config changed, stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        const outside = join(work, 'kept')
+        renameSync(join(main, '.git', 'modules', 'shared'), outside)
+        symlinkSync(
+          outside,
+          join(main, '.git', 'modules', 'shared'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        // Read from where the link leads, a relative work tree would no longer lead back.
+        git(
+          main,
+          'config',
+          '--file',
+          join(outside, 'config'),
+          'core.worktree',
+          join(main, 'shared'),
+        )
+        const first = yield* engineStatus(main)
+        appendFileSync(join(outside, 'config'), FILTER)
+        return { first, status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.first).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/kept/config')
+  })
+
+  test('a submodule nested in a submodule: a clean filter written into its own Git folder’s config stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        const shared = repository(join(work, 'shared'))
+        submodule(shared, repository(join(work, 'deep')), 'deep')
+        submodule(main, shared, 'shared')
+        yield* engineStatus(main)
+        appendFileSync(join(main, '.git', 'modules', 'shared', 'modules', 'deep', 'config'), FILTER)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/modules/shared/modules/deep/config')
+  })
+
+  test('a submodule’s config that sets core.hooksPath: a hook written there, relative to the submodule’s checkout, stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        git(join(main, 'shared'), 'config', 'core.hooksPath', '.husky')
+        mkdirSync(join(main, 'shared', '.husky'))
+        yield* engineStatus(main)
+        writeFileSync(join(main, 'shared', '.husky', 'pre-commit'), '#!/bin/sh\necho gotcha\n')
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/shared/.husky/pre-commit')
+  })
+
+  test('a submodule’s config that sets include.path: a change in the file it includes stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        const included = join(work, 'sub.gitconfig')
+        writeFileSync(included, '[core]\n')
+        git(join(main, 'shared'), 'config', 'include.path', included.replaceAll('\\', '/'))
+        yield* engineStatus(main)
+        appendFileSync(included, FILTER)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/sub.gitconfig')
+  })
+
+  test('a repository the index holds as a submodule, its .git folder inside the checkout: a clean filter written into its config stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        repository(join(main, 'vendor'))
+        git(main, 'add', 'vendor')
+        git(main, 'commit', '-q', '-m', 'vendor')
+        yield* engineStatus(main)
+        appendFileSync(join(main, 'vendor', '.git', 'config'), FILTER)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/vendor/.git/config')
+  })
+
+  test('a submodule added with a hook of its own asks: only what a clone writes passes', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        yield* engineStatus(main)
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        writeFileSync(
+          join(main, '.git', 'modules', 'shared', 'hooks', 'post-checkout'),
+          '#!/bin/sh\necho gotcha\n',
+        )
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    const asks = shown(result.needs[0])
+    expect(asks).toContain('~/acme/.git/modules/shared/hooks/post-checkout')
+    expect(asks).not.toContain('pre-commit.sample')
+  })
+
+  test('a submodule added with a clean filter in its config asks', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        yield* engineStatus(main)
+        submodule(main, repository(join(work, 'shared')), 'shared')
+        appendFileSync(join(main, '.git', 'modules', 'shared', 'config'), FILTER)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/modules/shared/config')
+  })
+})
+
+describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
+  test('an upstream pointed at another repository, taken without asking, never moves the engine’s fetch: it fetches the remote it names', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        const origin = remote(main, join(work, 'acme.git'))
+        yield* engineStatus(main)
+        // The remote moves on, from another clone.
+        const clone = join(work, 'clone')
+        git(work, 'clone', '-q', '-b', 'trunk', origin, clone)
+        git(clone, 'commit', '-q', '--allow-empty', '-m', 'later')
+        git(clone, 'push', '-q', 'origin', 'trunk')
+        // The branch's upstream now names another repository: an everyday entry, taken as it is.
+        const elsewhere = repository(join(work, 'elsewhere'))
+        git(elsewhere, 'commit', '-q', '--allow-empty', '-m', 'elsewhere')
+        git(main, 'config', 'branch.trunk.remote', elsewhere)
+        git(main, 'config', 'branch.trunk.merge', 'refs/heads/trunk')
+        yield* Git.use((service) => service.fetchBranch(main, 'origin', 'trunk'))
+        return {
+          fetched: git(main, 'rev-parse', 'refs/remotes/origin/trunk'),
+          later: git(origin, 'rev-parse', 'refs/heads/trunk'),
+          needs: yield* until(guardNeeds, () => false, 1_000),
+        }
+      }),
+    )
+    expect(result.fetched).toBe(result.later)
+    expect(result.needs).toEqual([])
   })
 })

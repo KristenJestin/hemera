@@ -55,6 +55,8 @@ import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from 
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
+import { roundDeskLayer } from './review/round-desk.ts'
+import { type Rounds, roundsLayer } from './review/rounds.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, cancelHelpersIn, helpersLayer } from './building/helpers.ts'
@@ -286,7 +288,13 @@ export interface ProfileParts {
   /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
   readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
   /** Where a suite holds Review's feedback (#341, see `ReviewHold`); never held otherwise. */
-  readonly review?: { readonly hold?: ReviewHold | undefined } | undefined
+  readonly review?:
+    | {
+        readonly hold?: ReviewHold | undefined
+        /** Where a suite holds a round's Fix once committed, before its Planner opens (#468). */
+        readonly fixed?: Effect.Effect<void> | undefined
+      }
+    | undefined
   /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
   readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
@@ -417,6 +425,7 @@ export type EngineServices =
   | Checkpoints
   | Diffs
   | Review
+  | Rounds
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -541,6 +550,8 @@ export const startProfile = (
     const docsContext = yield* Layer.build(docsDeskLayer)
     // Where the gate reaches the reviewers' tools, served by the automatic review (#147).
     const reviewContext = yield* Layer.build(reviewDeskLayer)
+    // Where the gate reaches a Review round's tools, served by the rounds (#468).
+    const roundContext = yield* Layer.build(roundDeskLayer)
     // The database as a suite sees it, wrapped around the real one (#341): one connection either way.
     const realDatabase = databaseLayer(file)
     const wrapDatabase = parts.database
@@ -570,6 +581,7 @@ export const startProfile = (
       Layer.succeedContext(helperContext),
       Layer.succeedContext(docsContext),
       Layer.succeedContext(reviewContext),
+      Layer.succeedContext(roundContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask, guard.spawn)),
@@ -780,8 +792,13 @@ export const startProfile = (
       outside,
       checkpoints,
       diffs,
-      reviewLayer({ log, hold: parts.review?.hold }).pipe(
-        Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
+      // The rounds over Review's feedback (#468), which the window reaches too.
+      roundsLayer({ log, fixed: parts.review?.fixed }).pipe(
+        Layer.provideMerge(
+          reviewLayer({ log, hold: parts.review?.hold }).pipe(
+            Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
+          ),
+        ),
       ),
     ).pipe(
       Layer.provideMerge(
@@ -809,7 +826,7 @@ export const startProfile = (
           roles,
           replacementGuardLayer.pipe(Layer.provide(roles)),
           capLayer.pipe(Layer.provide(postLayer)),
-          modelChoiceLayer,
+          modelChoiceLayer.pipe(Layer.provide(roles)),
           parts.sessions?.specLanguage ?? projectSpecLanguages,
           parts.sessions?.testerMode ?? testerModeLayer,
           postLayer,

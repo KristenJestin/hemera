@@ -43,7 +43,7 @@ const CHANGED = 'the evidence file changed on disk since Hemera recorded it: it 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const
 
 /** The roles that read the images of a round's feedback by their path. */
-const IMAGE_READERS: ReadonlyArray<Role> = ['builder', 'planner']
+const IMAGE_READERS: ReadonlyArray<Role> = ['builder', 'planner', 'round-planner']
 
 /** Why a session of a mission may not call a tool now, or null: the hold of Review. */
 export const reviewHeld = (missionId: string | null, tool: ToolName) =>

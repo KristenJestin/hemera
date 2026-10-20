@@ -28,18 +28,32 @@ import { BaseSequencer, type TestSpecification } from 'vite-plus/test/node'
 
 const TIMES_FILE = join(import.meta.dirname, 'test-times.json')
 
+/** The time of a file: its measured one, or the median of the others when it has none yet. */
+const timesOf = (times: ReadonlyMap<string, number>) => {
+  const known = [...times.values()].toSorted((a, b) => a - b)
+  const median = known[Math.floor(known.length / 2)] ?? 1
+  return (file: string) => times.get(file) ?? median
+}
+
+/** The files, each once, the slowest first; files of the same time in the order of their paths. */
+export function longestFirst(
+  files: ReadonlyArray<string>,
+  times: ReadonlyMap<string, number>,
+): ReadonlyArray<string> {
+  const timeOf = timesOf(times)
+  return [...new Set(files)].toSorted(
+    (a, b) => timeOf(b) - timeOf(a) || (a < b ? -1 : a > b ? 1 : 0),
+  )
+}
+
 /** The files of each shard, the slowest file first given to the shard with the least time. */
 export function shardsOf(
   files: ReadonlyArray<string>,
   times: ReadonlyMap<string, number>,
   count: number,
 ): ReadonlyArray<ReadonlyArray<string>> {
-  const known = [...times.values()].toSorted((a, b) => a - b)
-  const median = known[Math.floor(known.length / 2)] ?? 1
-  const timeOf = (file: string) => times.get(file) ?? median
-  const ordered = [...new Set(files)].toSorted(
-    (a, b) => timeOf(b) - timeOf(a) || (a < b ? -1 : a > b ? 1 : 0),
-  )
+  const timeOf = timesOf(times)
+  const ordered = longestFirst(files, times)
   const shards = Array.from({ length: count }, () => ({ time: 0, files: new Array<string>() }))
   for (const file of ordered) {
     const lightest = shards.reduce((best, shard) => (shard.time < best.time ? shard : best))
@@ -70,16 +84,45 @@ export function timesFromLog(log: string): ReadonlyMap<string, number> {
 const readTimes = (): ReadonlyMap<string, number> =>
   new Map(Object.entries(JSON.parse(readFileSync(TIMES_FILE, 'utf8'))))
 
+/** The path of a test file from the root, with forward slashes on Windows too. */
+const pathFrom = (root: string, spec: TestSpecification) =>
+  relative(root, spec.moduleId).replaceAll('\\', '/')
+
 /** Vitest's sequencer with the split above: `sequence.sequencer` in `vite.config.ts`. */
 export default class TimedSequencer extends BaseSequencer {
   override async shard(files: Array<TestSpecification>): Promise<Array<TestSpecification>> {
     const { root, shard } = this.ctx.config
     if (shard === undefined) return files
-    const pathOf = (spec: TestSpecification) => relative(root, spec.moduleId).replaceAll('\\', '/')
+    const pathOf = (spec: TestSpecification) => pathFrom(root, spec)
     const mine = new Set(
       shardsOf(files.map(pathOf), readTimes(), shard.count)[shard.index - 1] ?? [],
     )
     return files.filter((spec) => mine.has(pathOf(spec)))
+  }
+
+  /**
+   * In a shard, the repository files slowest first: Vitest hands each file to the next free worker
+   * in this order, and without times of its own (a runner keeps no cache) it starts the largest
+   * files first, so a slow but short file could start last and end the shard alone. A run that is
+   * not sharded keeps Vitest's order (failed files first, from the cache of earlier runs).
+   */
+  override async sort(files: Array<TestSpecification>): Promise<Array<TestSpecification>> {
+    const sorted = await super.sort(files)
+    const { root, shard } = this.ctx.config
+    if (shard === undefined) return sorted
+    const inRepository = sorted.filter((spec) => spec.project.name === 'repository')
+    const byPath = new Map(inRepository.map((spec) => [pathFrom(root, spec), spec]))
+    const ordered = longestFirst([...byPath.keys()], readTimes()).flatMap((path) => {
+      const spec = byPath.get(path)
+      return spec === undefined ? [] : [spec]
+    })
+    // Each repository file takes the place of the next in the order above; the others keep theirs.
+    let next = 0
+    return sorted.map((spec) => {
+      if (spec.project.name !== 'repository') return spec
+      next += 1
+      return ordered[next - 1] ?? spec
+    })
   }
 }
 

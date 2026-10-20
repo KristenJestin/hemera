@@ -399,6 +399,8 @@ export interface MissionCreation {
   readonly ticketTitle?: string | undefined
   /** The mission it was started from, checked by the caller. */
   readonly origin?: string | undefined
+  /** The feedback of `origin` it was started from (#468), which its round closes once it exists. */
+  readonly originFeedback?: string | undefined
   /** The key of the user's choice: the same key twice creates one mission. */
   readonly idempotencyKey?: string | undefined
   /** The provider that reads its ticket, the Spec mode and the version read (#95). */
@@ -578,6 +580,7 @@ export const createMission = (asked: NewMission, creation: MissionCreation = {})
               sentence,
               ticket: canonical ?? ticket,
               origin,
+              originFeedback: origin === null ? null : (creation.originFeedback ?? null),
               fromChat,
             }),
             missionEvent('memory.now_set', id, BY_HEMERA, {
