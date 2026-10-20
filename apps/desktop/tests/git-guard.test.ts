@@ -1522,6 +1522,48 @@ describe('The Git guard’s follow-ups after #499 (#500)', () => {
     expect(result.status).toContain('Hemera stopped its Git')
     expect(shown(result.needs[0])).toContain('~/acme/vendor/.git/config')
   })
+
+  test('3. a worktree the engine adds again at a checkout path the guard knows: an index it cannot read, written during the call, asks', async () => {
+    const main = repository(join(work, 'acme'))
+    const other = join(work, 'acme-other')
+    git(main, 'worktree', 'add', '-q', other, '-b', 'side')
+    const armed = join(work, 'armed')
+    const started = join(work, 'started')
+    const release = join(work, 'release')
+    // The engine's `worktree add` is held inside, once armed, by the repository's own hook.
+    git(main, 'config', 'core.hooksPath', join(main, '.git', 'hooks'))
+    writeFileSync(
+      join(main, '.git', 'hooks', 'post-checkout'),
+      `#!/bin/sh\nif [ -f "${armed}" ]; then\n  : > "${started}"\n  while [ ! -f "${release}" ]; do sleep 0.05; done\nfi\n`,
+      { mode: 0o755 },
+    )
+    const result = await reopen(
+      Effect.gen(function* () {
+        // The engine's first Git call there sees the repository with this checkout in it.
+        const first = yield* engineStatus(other)
+        yield* Git.use((service) => service.worktreeRemove(main, other))
+        writeFileSync(armed, '')
+        const adding = yield* Git.use((service) =>
+          service.worktreeAdd(main, 'mission/again', other, 'HEAD'),
+        ).pipe(Effect.forkChild)
+        if (
+          !(yield* until(
+            Effect.sync(() => existsSync(started)),
+            (there) => there,
+          ))
+        ) {
+          return yield* Effect.die(new Error('the worktree add was never held'))
+        }
+        writeFileSync(join(main, '.git', 'worktrees', 'acme-other', 'index'), 'not an index\n')
+        writeFileSync(release, '')
+        yield* Fiber.join(adding)
+        return { first, status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.first).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/worktrees/acme-other/index (added)')
+  })
 })
 
 describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
