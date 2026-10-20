@@ -186,9 +186,9 @@ const taskLine = (
     .join('; ')
 }
 
-/** The rule about commits as this version holds it: Hemera commits, never an agent. */
+/** The rule about commits: an agent commits only when a step of the delivery rules asks it to. */
 export const COMMITS_SAID =
-  'You do not commit, push, merge, rebase, tag or switch branches: the decision on every command you run refuses them for an agent of a mission.'
+  'You do not push, merge, rebase, tag or switch branches, and you commit only when Hemera asks you to commit a task (a step of the Project’s delivery rules): the decision on every command you run refuses the rest for an agent of a mission. Asked, you run `git commit` for that task, never with --amend or --no-verify.'
 
 /** The services running in the Workspace, one per line with its address; null for none. */
 const runningServicesSaid = (workspaceId: string | null) =>
