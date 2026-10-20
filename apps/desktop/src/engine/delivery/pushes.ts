@@ -84,6 +84,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import {
   Context,
+  Deferred,
   Effect,
   Fiber,
   Layer,
@@ -206,7 +207,10 @@ export interface ShipPush {
    * the freeze and the push leaves it for the next start to push. Ship is the click: none asks.
    */
   readonly handIn: (transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>
-  /** Once the freeze is committed: each repository's sequence, ended when every one has. */
+  /**
+   * Once the freeze is committed: each repository's sequence, ended when every one has ended,
+   * stopped, or waits for a forge CLI that is not ready; those go on in the pushes' scope.
+   */
   readonly push: Effect.Effect<void>
 }
 
@@ -1708,7 +1712,11 @@ export const pushesLayer = (settings: PushesSettings) => {
         )
 
       /** One repository's sequence, in its turn: the steps of its preparation stack, in order. */
-      const drive = (missionId: string, repositoryId: string) =>
+      /**
+       * `atForge`, when given, is told as the sequence reaches a step that may wait for the forge's
+       * CLI: Ship waits no longer than that while the CLI is not ready.
+       */
+      const drive = (missionId: string, repositoryId: string, atForge?: Deferred.Deferred<void>) =>
         Effect.gen(function* () {
           const row = yield* rowOf(missionId, repositoryId)
           if (row === null || row.state !== 'running') return
@@ -1770,6 +1778,9 @@ export const pushesLayer = (settings: PushesSettings) => {
               if (!pushing(still.stage)) return
               step = action.id
               yield* setRow(row, { step })
+              if (action.kind === 'pull-request' && atForge !== undefined) {
+                yield* Deferred.succeed(atForge, undefined)
+              }
               yield* stepOf(one, action)
             }
             yield* setRow(row, { state: 'done', step: null, message: null, needId: null })
@@ -1964,6 +1975,26 @@ export const pushesLayer = (settings: PushesSettings) => {
        * Ship's push (R9): what changed since its last push, whatever the round, handed in Ship's
        * freeze and pushed once it is committed. Ship is the user's click: nothing is asked again.
        */
+      /** Ends once the repository's forge CLI is not ready, or cannot be read. */
+      const cliWaits = (projectId: string, repositoryId: string) =>
+        provided(
+          Effect.gen(function* () {
+            const port = yield* ForgePort
+            yield* port.changes(projectId).pipe(
+              Stream.filter((states) =>
+                states.some(
+                  (one) =>
+                    one.repositoryId === repositoryId &&
+                    one.state !== 'ready' &&
+                    one.state !== 'not-needed',
+                ),
+              ),
+              Stream.take(1),
+              Stream.runDrain,
+            )
+          }),
+        ).pipe(Effect.ignore)
+
       const atShip = (missionId: string) =>
         Effect.gen(function* () {
           const mission = yield* getMission(missionId).pipe(Effect.provide(context))
@@ -1976,13 +2007,25 @@ export const pushesLayer = (settings: PushesSettings) => {
               Effect.forEach(acting, (one) => startIn(transaction, mission, one, null, false), {
                 discard: true,
               }),
-            push: Effect.gen(function* () {
-              const fibers = yield* Effect.forEach(acting, (one) =>
-                drive(missionId, one.repositoryId).pipe(Effect.forkIn(scope)),
-              )
-              // Forked in the pushes' own scope: a Ship cut meanwhile leaves them running.
-              yield* Effect.forEach(fibers, Fiber.join, { discard: true })
-            }),
+            push: Effect.forEach(
+              acting,
+              (one) =>
+                Effect.gen(function* () {
+                  const atForge = yield* Deferred.make<void>()
+                  // Forked in the pushes' own scope: a Ship that returns or is cut leaves it running.
+                  const fiber = yield* drive(missionId, one.repositoryId, atForge).pipe(
+                    Effect.forkIn(scope),
+                  )
+                  // Ended, stopped or waiting on a need; or at the forge, which waits for its CLI.
+                  yield* Effect.raceFirst(
+                    Fiber.join(fiber),
+                    Deferred.await(atForge).pipe(
+                      Effect.andThen(cliWaits(mission.projectId, one.repositoryId)),
+                    ),
+                  )
+                }),
+              { concurrency: 'unbounded', discard: true },
+            ),
           } satisfies ShipPush
         })
 

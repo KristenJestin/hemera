@@ -21,11 +21,14 @@ import { type PushesHold, Pushes } from '../src/engine/delivery/pushes.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, pendingNeedsOf } from '../src/engine/needs.ts'
+import { ForgePort } from '../src/engine/forges/port.ts'
 import { Ship, type ShipHold } from '../src/engine/review/ship.ts'
 import { builderAgents } from './builder-world.ts'
+import { ghSignedOut } from './fake-forge.ts'
 import { git } from './repositories.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import {
+  HOST,
   type InReview,
   LONG,
   SLOW,
@@ -568,6 +571,72 @@ describe('Only the frozen trees leave', () => {
       expect(seen.said).toHaveLength(1)
       expect(pushesTo(world, 'api', seen.mission.branch)).toBe(0)
       expect(pushesTo(world, 'web', seen.mission.branch)).toBe(1)
+    },
+    SLOW,
+  )
+})
+
+describe('Ship ends while the forge CLI is not ready', () => {
+  test(
+    'gh signed out at Ship: confirm returns Shipped, the CLI need is raised, a second press is refused, and signing in finishes the push once',
+    async () => {
+      const world = shipWorld()
+      const paused = pauseAt('pushing')
+      const { run } = engineOf(world, { ship: paused.hold })
+      const rulesFile = world.fake.env['FAKE_FORGE_RULES'] ?? ''
+      const signedIn = readFileSync(rulesFile, 'utf8')
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* shipReady(world)
+            recordPushes(world)
+            yield* changedInBoth(mission)
+            const shown = yield* Effect.gen(function* () {
+              yield* until(
+                Effect.map(
+                  Effect.all([preview(mission.missionId), preview(mission.missionId)]),
+                  ([one, two]) => one.previewId === two.previewId,
+                ),
+                LONG,
+              )
+              return yield* preview(mission.missionId)
+            })
+            const shipping = yield* Effect.forkChild(confirm(mission.missionId, shown.previewId))
+            yield* paused.reached
+            // Signed out once Ship read the forge: its pull requests wait for gh.
+            writeFileSync(
+              rulesFile,
+              JSON.stringify([...ghSignedOut(HOST), ...JSON.parse(signedIn)]),
+            )
+            yield* paused.release
+            const shipped = yield* Fiber.join(shipping)
+            const waiting = yield* pushesOf(mission.missionId)
+            const again = yield* Effect.result(confirm(mission.missionId, shown.previewId))
+            const pushedThen = ['api', 'web'].map((name) => pushesTo(world, name, mission.branch))
+            writeFileSync(rulesFile, signedIn)
+            yield* ForgePort.use((port) => port.checkAgain(mission.projectId, null))
+            yield* pushedIn(mission.missionId, 'api', 'done')
+            yield* pushedIn(mission.missionId, 'web', 'done')
+            return { mission, shipped, waiting, again, pushedThen }
+          }),
+        ),
+      )
+      expect(seen.shipped.missionId).toBe(seen.mission.missionId)
+      expect(seen.waiting.repositories.map((one) => [one.repository, one.state])).toEqual([
+        ['api', 'waiting-for-cli'],
+        ['web', 'waiting-for-cli'],
+      ])
+      // Refused as shipped already, at once: Ship's turn is free.
+      expect(Result.isFailure(seen.again)).toBe(true)
+      expect(String(Result.isFailure(seen.again) ? seen.again.failure.message : '')).toContain(
+        'Ship is offered in Review: the mission is in',
+      )
+      expect(seen.pushedThen).toEqual([1, 1])
+      for (const name of ['api', 'web']) {
+        expect(pushesTo(world, name, seen.mission.branch)).toBe(1)
+      }
+      expect(world.pullRequests()).toHaveLength(2)
     },
     SLOW,
   )
