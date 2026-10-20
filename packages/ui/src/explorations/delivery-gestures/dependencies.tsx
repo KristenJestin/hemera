@@ -212,7 +212,7 @@ export function TickedInItsDialog({
   const found = rules.repositories.find((one) => one.path === path)
   const [draft, setDraft] = useState<RepositoryDraft>({
     remote: found?.remote ?? 'origin',
-    base: found?.base ?? 'main',
+    base: found?.base ?? 'trunk',
     forced: null,
     host: '',
   })
