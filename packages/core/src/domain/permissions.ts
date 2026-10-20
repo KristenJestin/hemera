@@ -703,7 +703,7 @@ function gitSubcommand(args: ReadonlyArray<string>) {
     else if (word.startsWith('-')) at += 1
     else break
   }
-  return { sub: (args[at] ?? '').toLowerCase(), rest: args.slice(at + 1) }
+  return { sub: (args[at] ?? '').toLowerCase(), own: args.slice(0, at), rest: args.slice(at + 1) }
 }
 
 /** Whether a word is a long option, written whole or by a prefix of at least `least` characters. */
@@ -711,9 +711,17 @@ const longOption = (word: string, option: string, least: number) =>
   word.length >= least && option.startsWith(word.split('=')[0] ?? '')
 
 /** What a mission's agent may not do with Git, and why; null when it may. */
-function gitRefusal(args: ReadonlyArray<string>, mayCommit: boolean): string | null {
-  const { sub, rest } = gitSubcommand(args)
+function gitRefusal(
+  args: ReadonlyArray<string>,
+  mayCommit: boolean,
+  configured: boolean,
+): string | null {
+  const { sub, own, rest } = gitSubcommand(args)
   const refused = (what: string) => `no agent of a mission may run git ${what}`
+  // What an alias runs is not read: while agents may commit, it could be a commit refused below.
+  if (mayCommit && sub !== '' && !GIT_COMMANDS.has(sub)) {
+    return refused(`${sub}, none of Git's own commands, while it may commit`)
+  }
   switch (sub) {
     case 'push':
     case 'merge':
@@ -732,6 +740,10 @@ function gitRefusal(args: ReadonlyArray<string>, mayCommit: boolean): string | n
         : null
     case 'commit':
       if (!mayCommit) return 'no agent of a mission may run git commit in this Project'
+      // A setting given on the line skips the hooks as --no-verify does (`core.hooksPath`).
+      if (configured || own.some((word) => word === '-c' || word.startsWith('--config-env'))) {
+        return refused('commit with a setting of its own')
+      }
       // An agent's commit never rewrites the last one, nor skips the repository's hooks; Git takes
       // a long option by any prefix that is not ambiguous.
       if (rest.some((word) => longOption(word, '--amend', 4))) return refused('commit --amend')
@@ -847,12 +859,16 @@ export function missionRefusal(
   sequences: ReadonlyArray<ReadonlyArray<string>>,
   mayCommit: boolean,
 ): string | null {
+  // Git's configuration set through the environment, anywhere on the line.
+  const configured = sequences.some((words) =>
+    words.some((word) => new RegExp(CONFIG_ENVIRONMENT.source, 'i').test(word)),
+  )
   for (const words of sequences) {
     for (const [at, word] of words.entries()) {
       const name = programName(word)
       const args = words.slice(at + 1)
       if (name === 'git') {
-        const refused = gitRefusal(args, mayCommit)
+        const refused = gitRefusal(args, mayCommit, configured)
         if (refused !== null) return refused
       } else if (name === 'gh' || name === 'glab' || name === 'bkt') {
         if (!forgeReads(name, args)) return `no agent of a mission may run ${name} beyond its reads`
