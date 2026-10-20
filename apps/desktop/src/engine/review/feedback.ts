@@ -20,6 +20,10 @@
  *   cannot be followed is `outdated`, or `unread` when the Workspace cannot be read.
  * - **Images** go to the mission's evidence (A8), which owns their checks.
  * - **A refused manual proof** (B6) becomes a remark of the collecting round, once.
+ * - **A forge comment** (R8) is anchored on the tree of the commit Hemera pushed it was made on,
+ *   with no snapshot of its own, and becomes a feedback once, by its source: one made on a commit
+ *   Hemera did not push is `outdated`, "on a version Hemera did not push". The user resolves,
+ *   withdraws or edits a feedback drawn from a team member's comment as their own.
  */
 
 import { join } from 'node:path'
@@ -136,6 +140,37 @@ export interface FeedbackAsked {
   readonly images: ReadonlyArray<string>
 }
 
+/** A forge comment's anchor (R8), as the forge gives it. */
+export interface ForgeAnchorAsked {
+  readonly repository: string
+  readonly path: string
+  readonly side: 'new' | 'old'
+  readonly lines: LineRange | null
+  /** The tree of the commit it was made on; null on a commit Hemera did not push. */
+  readonly tree: string | null
+}
+
+/** What a forge comment's anchor keeps, as a feedback's anchor does: its side's content and fingerprint. */
+export interface StoredAnchor extends ForgeAnchorAsked {
+  readonly fingerprint: string | null
+  readonly sha256: string | null
+  readonly size: number | null
+  readonly withheld: string | null
+}
+
+/** A feedback drawn from a forge comment (R8): written once per source. */
+export interface ForgeFeedbackAsked {
+  readonly author: FeedbackAuthor
+  readonly kind: FeedbackKind
+  readonly body: string
+  /** `forge:<team comment id>`. */
+  readonly source: string
+  readonly anchor: StoredAnchor | null
+}
+
+/** Why the anchor of a comment on a commit Hemera did not push cannot be followed. */
+export const NOT_PUSHED = 'on a version Hemera did not push'
+
 type Refusals = FeedbackRefused | UnknownFeedback | DatabaseError
 
 export interface ReviewService {
@@ -192,11 +227,59 @@ export interface ReviewService {
   ) => Effect.Effect<ReadonlyArray<PromptBlock>, Refusals>
   /** What a stop left undone, then each committed event of the stream, for as long as it lasts. */
   readonly follow: (events: Stream.Stream<DomainEvent>) => Effect.Effect<void>
+  /** A forge comment's anchor recorded (R8): its side's content kept, its lines' fingerprint taken. */
+  readonly forgeAnchor: (missionId: string, asked: ForgeAnchorAsked) => Effect.Effect<StoredAnchor>
+  /** Where a forge comment's anchor stands on the live diff now, with its excerpt (#341). */
+  readonly forgeAnchorLive: (
+    missionId: string,
+    key: string,
+    anchor: StoredAnchor,
+  ) => Effect.Effect<{ readonly excerpt: ExcerptView | null; readonly live: AnchorLive }>
+  /** A forge comment's feedback in the collecting round; the one its source already made otherwise. */
+  readonly forgeFeedback: (
+    missionId: string,
+    asked: ForgeFeedbackAsked,
+  ) => Effect.Effect<FeedbackView, UnknownMission | FeedbackRefused | DatabaseError>
 }
 
 export class Review extends Context.Service<Review, ReviewService>()('Review') {}
 
 type FeedbackRow = typeof reviewFeedback.$inferSelect
+
+/** The columns of a feedback's anchor. */
+type AnchorColumns = Pick<
+  FeedbackRow,
+  | 'anchorKind'
+  | 'anchorRepository'
+  | 'anchorPath'
+  | 'anchorSide'
+  | 'anchorStart'
+  | 'anchorEnd'
+  | 'anchorTree'
+  | 'anchorFingerprint'
+  | 'anchorSha256'
+  | 'anchorSize'
+  | 'anchorWithheld'
+  | 'anchorItem'
+>
+
+/** What following an anchor reads of it, and the key it is remembered by. */
+type AnchorRow = Pick<FeedbackRow, 'id'> & AnchorColumns
+
+const columnsOf = (anchor: StoredAnchor): AnchorColumns => ({
+  anchorKind: 'code',
+  anchorRepository: anchor.repository,
+  anchorPath: anchor.path,
+  anchorSide: anchor.side,
+  anchorStart: anchor.lines?.start ?? null,
+  anchorEnd: anchor.lines?.end ?? null,
+  anchorTree: anchor.tree,
+  anchorFingerprint: anchor.fingerprint,
+  anchorSha256: anchor.sha256,
+  anchorSize: anchor.size,
+  anchorWithheld: anchor.withheld,
+  anchorItem: null,
+})
 
 const now = () => new Date().toISOString()
 
@@ -593,7 +676,7 @@ export const reviewLayer = (settings: ReviewSettings) =>
 
       const liveOf = (
         missionId: string,
-        row: FeedbackRow,
+        row: AnchorRow,
         live: RepositoryNow | null,
         content: Buffer | null,
       ) => {
@@ -617,12 +700,13 @@ export const reviewLayer = (settings: ReviewSettings) =>
 
       const computeLive = (
         missionId: string,
-        row: FeedbackRow,
+        row: AnchorRow,
         live: RepositoryNow,
         content: Buffer | null,
       ) =>
         Effect.gen(function* () {
           yield* hold('reanchor')
+          if (row.anchorTree === null) return AnchorOutdated.make({ why: NOT_PUSHED })
           const path = row.anchorPath ?? ''
           const lines: LineRange | null =
             row.anchorStart === null || row.anchorEnd === null
@@ -705,7 +789,7 @@ export const reviewLayer = (settings: ReviewSettings) =>
                 Effect.map(([row]) => row?.bytes ?? null),
               )
 
-      const excerptFor = (row: FeedbackRow, bytes: Buffer | null): ExcerptView | null => {
+      const excerptFor = (row: AnchorRow, bytes: Buffer | null): ExcerptView | null => {
         const lines = textLines(row.anchorWithheld === null ? bytes : null)
         if (lines === null || row.anchorStart === null || row.anchorEnd === null) return null
         return excerptOf(lines, { start: row.anchorStart, end: row.anchorEnd })
@@ -886,8 +970,8 @@ export const reviewLayer = (settings: ReviewSettings) =>
         readonly item: string | null
         readonly followsUp: string | null
         readonly source: string | null
-        /** An anchor copied from the feedback followed up. */
-        readonly copied: FeedbackRow | null
+        /** An anchor copied from the feedback followed up, or a forge comment's. */
+        readonly copied: AnchorColumns | null
       }
 
       /** Writes a feedback in the collecting round, with its first version and its images. */
@@ -1048,7 +1132,10 @@ export const reviewLayer = (settings: ReviewSettings) =>
                   .where(eq(reviewFeedback.id, feedbackId))
                   .pipe(Effect.mapError(refusedWhile(doing)))
                 if (row === undefined) return yield* new UnknownFeedback({ id: feedbackId })
-                if (!sameAuthor(authorOf(row), by)) {
+                // A team member's comment the user took in is theirs to settle.
+                const takenIn =
+                  Predicate.isTagged(by, 'User') && row.source?.startsWith('forge:') === true
+                if (!sameAuthor(authorOf(row), by) && !takenIn) {
                   return yield* new FeedbackRefused({
                     reason: `Only its author ${verb} a feedback.`,
                   })
@@ -1058,6 +1145,114 @@ export const reviewLayer = (settings: ReviewSettings) =>
             ),
           )
           return yield* oneView(feedbackId)
+        })
+
+      /**
+       * A forge comment's anchor (R8), on the tree of the commit it was made on: that side's content
+       * kept and its lines' fingerprint taken, with no snapshot of its own (the push holds the
+       * tree). Anything that cannot be read leaves the anchor as given, never followed.
+       */
+      const forgeAnchor = (missionId: string, asked: ForgeAnchorAsked) => {
+        const bare: StoredAnchor = {
+          ...asked,
+          fingerprint: null,
+          sha256: null,
+          size: null,
+          withheld: null,
+        }
+        return Effect.gen(function* () {
+          const { tree } = asked
+          if (tree === null) return bare
+          const place = (yield* diffs.places(missionId))?.find(
+            (one) => one.name === asked.repository,
+          )
+          if (place === undefined) return bare
+          const repository = { name: place.name, folder: place.folder }
+          let side: FileSide | null = null
+          if (asked.side === 'new') {
+            side = yield* snapshots.read(missionId, repository, tree, asked.path)
+          } else {
+            const live = yield* diffs.at(missionId, asked.repository)
+            if (live === null) return bare
+            const [file] = yield* snapshots.diff(missionId, repository, live.base, tree, asked.path)
+            side = file?.before ?? null
+          }
+          if (side === null) return bare
+          const content = side.content
+          if (content !== null) {
+            yield* database
+              .insert(fileContents)
+              .values({
+                sha256: side.sha256,
+                bytes: Buffer.from(content),
+                size: side.size,
+                masked: side.masked,
+              })
+              .onConflictDoNothing()
+              .pipe(Effect.mapError(refusedWhile('keeping a commented version')))
+          }
+          const lines = textLines(side.withheld === null ? content : null)
+          const fits =
+            asked.lines !== null &&
+            lines !== null &&
+            rangeRefusal(asked.lines, lines.length) === null
+          const stored: StoredAnchor = {
+            ...bare,
+            fingerprint:
+              fits && asked.lines !== null && lines !== null
+                ? fingerprintOf(lines, asked.lines)
+                : null,
+            sha256: side.sha256,
+            size: side.size,
+            withheld: side.withheld,
+          }
+          return stored
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(said(`a forge comment's anchor was not read: ${String(cause)}`), bare),
+          ),
+        )
+      }
+
+      /** A forge comment's feedback (R8), once per source, in the collecting round. */
+      const forgeFeedback = (missionId: string, asked: ForgeFeedbackAsked) =>
+        Effect.gen(function* () {
+          const [kept] = yield* database
+            .select({ id: reviewFeedback.id })
+            .from(reviewFeedback)
+            .where(eq(reviewFeedback.source, asked.source))
+            .pipe(Effect.mapError(refusedWhile('reading a feedback')))
+          const id = kept?.id ?? crypto.randomUUID()
+          if (kept === undefined) {
+            const mission = yield* missionRow(missionId)
+            // SAFETY: the column only ever holds a Stage, written by moveIn.
+            const stage = mission.stage as Stage
+            const wrong = feedbackRefusal({ stage, round: mission.round }, asked.body)
+            if (wrong !== null) return yield* refuse(wrong)
+            const written: Written = {
+              missionId,
+              author: asked.author,
+              kind: asked.kind,
+              body: asked.body,
+              images: [],
+              code: null,
+              item: null,
+              followsUp: null,
+              source: asked.source,
+              copied: asked.anchor === null ? null : columnsOf(asked.anchor),
+            }
+            yield* provided(
+              mutate('writing a forge comment’s feedback', (transaction) =>
+                Effect.map(writeIn(transaction, id, written, 'review.feedback_added'), (added) => ({
+                  result: undefined,
+                  events: added,
+                })),
+              ),
+            )
+          }
+          return yield* oneView(id).pipe(
+            Effect.catchTag('UnknownFeedback', () => Effect.die(`feedback ${id} vanished`)),
+          )
         })
 
       const setState = (
@@ -1429,6 +1624,20 @@ export const reviewLayer = (settings: ReviewSettings) =>
               ),
             )
           }),
+        forgeAnchor: (missionId, asked) => forgeAnchor(missionId, asked),
+        forgeAnchorLive: (missionId, key, anchor) =>
+          Effect.gen(function* () {
+            const row: AnchorRow = { id: key, ...columnsOf(anchor) }
+            const bytes = yield* contentOf(anchor.sha256).pipe(Effect.orElseSucceed(() => null))
+            const live = yield* diffs
+              .at(missionId, anchor.repository)
+              .pipe(Effect.orElseSucceed(() => null))
+            return {
+              excerpt: excerptFor(row, bytes),
+              live: yield* liveOf(missionId, row, live, bytes),
+            }
+          }),
+        forgeFeedback: (missionId, asked) => forgeFeedback(missionId, asked),
       }
 
       // --- what Review follows --------------------------------------------------------------
