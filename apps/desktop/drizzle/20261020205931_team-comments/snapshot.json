@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "bc6ca996-51eb-48b8-80fe-0ab1746f7f33",
+  "id": "1767541f-1cd3-4ea0-825a-5c012865146d",
   "prevIds": ["24958688-7c9d-4d6f-9de7-9a94550d164b"],
   "ddl": [
     {
@@ -13443,6 +13443,16 @@
       "default": null,
       "generated": null,
       "name": "author",
+      "entityType": "columns",
+      "table": "team_comments"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "author_id",
       "entityType": "columns",
       "table": "team_comments"
     },

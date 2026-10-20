@@ -3519,9 +3519,9 @@ export const missionShips = sqliteTable('mission_ships', {
  * A comment of a mission's pull request read from its forge (R8, CT-45), one row per comment: its
  * identity (forge, host, the pull request's repository `owner/repo`, its number, the comment's
  * id), the Workspace repository it is of, its kind (`inline`, `general`, `review` with the
- * review's verdict), its thread, its author and whether that was the signed-in account at the
- * fetch, its current body (masked) and version with what changes on an edit (`revision`), the
- * forge's dates and link, where it points (path, side, lines, the commit it was made on and that
+ * review's verdict), its thread, its author (as shown, and its account as the forge keys it) and
+ * whether that was the signed-in account at the fetch, its current body (masked) and version with
+ * what changes on an edit (`revision`), the forge's dates and link, where it points (path, side, lines, the commit it was made on and that
  * commit's tree when Hemera pushed it, with the anchored side's content and the lines'
  * fingerprint, as #341 keeps a comment's anchor), the forge's state (resolved, removed) apart from
  * the internal one (`received`, `feedback`, `dismissed`), the stage it arrived in, the agent's
@@ -3546,6 +3546,7 @@ export const teamComments = sqliteTable(
     review: text('review'),
     thread: text('thread'),
     author: text('author').notNull(),
+    authorId: text('author_id'),
     mine: integer('mine', { mode: 'boolean' }).notNull(),
     body: text('body').$type<Masked<string>>().notNull(),
     version: integer('version').notNull(),

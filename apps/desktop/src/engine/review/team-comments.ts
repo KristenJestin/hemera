@@ -14,8 +14,10 @@
  *   version; a comment taken into a round and edited after is "edited after integration". A comment
  *   gone from the forge is "removed on forge"; nothing is deleted. The forge's resolved state is a
  *   field of its own: it never resolves the feedback the comment became.
- * - **Mine or not.** The author is compared with the login the forge's CLI says is signed in, read
- *   again at each fetch, for every comment not yet taken in. Mine, in Review, becomes my feedback in
+ * - **Mine or not.** The author's account as the forge keys it (the login on GitHub, the account
+ *   id on Bitbucket Cloud, the user slug on Data Center), never a name the author chose, is compared
+ *   with the signed-in account, read again at each fetch, for every comment not yet taken in. When
+ *   Cloud's account cannot be read, no comment is mine. Mine, in Review, becomes my feedback in
  *   the collecting round at once and starts nothing.
  * - **Someone else's** is a team comment, not feedback: one short session of the Planner in
  *   team-comment mode per fetch that brings new ones drafts a reading and a reply for each, both
@@ -61,7 +63,7 @@ import {
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
-import { readComments, type ForgeComment } from '../forges/comments.ts'
+import { type ForgeComment, isMine, readComments, signedInAccount } from '../forges/comments.ts'
 import { ForgePort } from '../forges/port.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
@@ -390,7 +392,7 @@ export const teamCommentsLayer = (settings: TeamCommentsSettings) =>
         comment: ForgeComment,
         kept: CommentRow | undefined,
         trees: ReadonlyMap<string, string>,
-        login: string,
+        account: string | null,
       ) =>
         Effect.gen(function* () {
           const body = secrets.mask(comment.body)
@@ -423,7 +425,8 @@ export const teamCommentsLayer = (settings: TeamCommentsSettings) =>
               review: comment.review,
               thread: comment.thread,
               author: comment.author,
-              mine: comment.author === login,
+              authorId: comment.authorId,
+              mine: isMine(comment, account),
               body,
               version: 1,
               revision: comment.revision,
@@ -508,7 +511,7 @@ export const teamCommentsLayer = (settings: TeamCommentsSettings) =>
         status: PullRequestStatus,
       ) =>
         Effect.gen(function* () {
-          const login = yield* ForgePort.use((port) => port.currentUser(push.repositoryId))
+          const account = yield* signedInAccount(push.repositoryId)
           const read = yield* readComments(push.repositoryId, status.number)
           const trees = new Map(
             (yield* database
@@ -553,7 +556,7 @@ export const teamCommentsLayer = (settings: TeamCommentsSettings) =>
               comment,
               kept.find((one) => one.commentId === comment.id),
               trees,
-              login,
+              account,
             ),
           )
           // Gone from what the forge lists: removed there, kept here.
@@ -597,7 +600,7 @@ export const teamCommentsLayer = (settings: TeamCommentsSettings) =>
                   // Mine is read again for what the user did not take in yet.
                   yield* transaction
                     .update(teamComments)
-                    .set({ mine: row.author === login })
+                    .set({ mine: account !== null && row.authorId === account })
                     .where(and(eq(teamComments.id, row.id), eq(teamComments.state, 'received')))
                     .pipe(Effect.mapError(refusedWhile('recording a team comment')))
                 }

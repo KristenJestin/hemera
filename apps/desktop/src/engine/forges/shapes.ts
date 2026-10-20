@@ -148,6 +148,8 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
   read('gh', 'user', ['api', '--hostname', '<host>', 'user', '--jq', '.login']),
   read('bkt', 'version', ['--version']),
   read('bkt', 'auth.status', ['auth', 'status', '--json']),
+  // Bitbucket Cloud's signed-in account (R8): its id, what a comment of mine is known by.
+  shape('bkt', 'read', 'user', ['api', '/user'], [BKT_CONTEXT]),
   // The pull requests (R6): found before one is created, read for their state, head and
   // approvals. Only the open ones are listed, and only the fields named.
   shape(

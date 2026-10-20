@@ -15,7 +15,12 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { THREADS_QUERY, readComments } from '../src/engine/forges/comments.ts'
+import {
+  THREADS_QUERY,
+  isMine,
+  readComments,
+  signedInAccount,
+} from '../src/engine/forges/comments.ts'
 import { ForgePort } from '../src/engine/forges/port.ts'
 import { COMMAND_SHAPES, parseCommand, shapeOf } from '../src/engine/forges/shapes.ts'
 import type { EngineServices } from '../src/engine/profile.ts'
@@ -287,6 +292,7 @@ describe('The comments of a pull request come from the forge with their place, t
         kind: 'inline',
         thread: '101',
         author: 'grace',
+        authorId: 'grace',
         body: 'Rename this function.',
         createdAt: '2026-10-20T09:00:00Z',
         updatedAt: '2026-10-20T09:00:00Z',
@@ -307,6 +313,7 @@ describe('The comments of a pull request come from the forge with their place, t
         kind: 'inline',
         thread: '101',
         author: 'octo',
+        authorId: 'octo',
         body: 'Done in the next push.',
         createdAt: '2026-10-20T09:05:00Z',
         updatedAt: '2026-10-20T09:06:00Z',
@@ -327,6 +334,7 @@ describe('The comments of a pull request come from the forge with their place, t
         kind: 'general',
         thread: null,
         author: 'grace',
+        authorId: 'grace',
         body: 'The export needs a CSV header.',
         createdAt: '2026-10-20T10:00:00Z',
         updatedAt: '2026-10-20T10:00:00Z',
@@ -342,6 +350,7 @@ describe('The comments of a pull request come from the forge with their place, t
         kind: 'review',
         thread: null,
         author: 'grace',
+        authorId: 'grace',
         body: 'Two things to change.',
         createdAt: '2026-10-20T09:01:00Z',
         updatedAt: '2026-10-20T09:01:00Z',
@@ -397,6 +406,124 @@ describe('The comments of a pull request come from the forge with their place, t
         resolved: false,
       }),
       expect.objectContaining({ id: '22', kind: 'general', author: 'octo', resolved: true }),
+    ])
+  })
+})
+
+/** A Bitbucket Cloud comment by whoever these names and this account id say. */
+const cloudComment = (id: number, user: Readonly<Record<string, string>>) => ({
+  id,
+  content: { raw: `Comment ${String(id)}.` },
+  user,
+  created_on: '2026-10-20T11:00:00.000000+00:00',
+  updated_on: '2026-10-20T11:00:00.000000+00:00',
+  deleted: false,
+  resolution: null,
+})
+
+/** The signed-in account as Bitbucket Cloud's user API answers it through `bkt api /user`. */
+const CLOUD_ME: FakeRule = {
+  cli: 'bkt',
+  when: ['api', '/user'],
+  stdout: JSON.stringify({
+    account_id: '557058:octo',
+    uuid: '{0b3c-octo}',
+    nickname: 'octo',
+    display_name: 'Octo Cat',
+  }),
+}
+
+const NAMED_LIKE_ME: FakeRule = {
+  cli: 'bkt',
+  when: ['pr', 'comments', '--workspace'],
+  stdout: JSON.stringify({
+    workspace: 'acme-team',
+    repo: 'api',
+    comments: [
+      // A teammate who named themselves like the signed-in user.
+      cloudComment(31, { display_name: 'Octo Cat', nickname: 'octo', account_id: '557058:eve' }),
+      // The signed-in user.
+      cloudComment(32, { display_name: 'Octo Cat', nickname: 'octo', account_id: '557058:octo' }),
+      // Names alone, no account id: someone else.
+      cloudComment(33, { display_name: 'Octo Cat', nickname: 'octo' }),
+    ],
+  }),
+}
+
+const DC_NAMED_LIKE_ME: FakeRule = {
+  cli: 'bkt',
+  when: ['pr', 'comments', '--project'],
+  stdout: JSON.stringify({
+    project: 'SHOP',
+    repo: 'web',
+    comments: [
+      {
+        id: 41,
+        version: 0,
+        text: 'Mine, says my display name.',
+        createdDate: 1_760_958_000_000,
+        author: { name: 'eve', displayName: 'octo' },
+        threadResolved: false,
+      },
+      {
+        id: 42,
+        version: 0,
+        text: 'Mine.',
+        createdDate: 1_760_958_000_000,
+        author: { name: 'octo', displayName: 'Octo Cat' },
+        threadResolved: false,
+      },
+      // No user slug, a display name like the signed-in user's: someone else.
+      {
+        id: 43,
+        version: 0,
+        text: 'Mine, says my display name alone.',
+        createdDate: 1_760_958_000_000,
+        author: { displayName: 'octo' },
+        threadResolved: false,
+      },
+    ],
+  }),
+}
+
+const BKT_HOSTS = bktReady([BKT_CLOUD, { base: 'https://bitbucket.acme.test', kind: 'dc' }])
+
+/** Which comments of a pull request are the signed-in account's, by the forge's account. */
+const minesOf = (fake: FakeForge, path: string, number: number) =>
+  withForge(fake, (repository) =>
+    Effect.gen(function* () {
+      const account = yield* signedInAccount(repository(path))
+      const { comments } = yield* readComments(repository(path), number)
+      return comments.map((one) => [one.id, isMine(one, account)])
+    }),
+  )
+
+describe('My own comment is known by the forge account, never by a name anyone can choose', () => {
+  test('Bitbucket Cloud: a comment named like the signed-in user but by another account id stays someone else’s; mine is known by its account id', async () => {
+    const mines = await minesOf(fakeForge([CLOUD_ME, NAMED_LIKE_ME, ...BKT_HOSTS]), 'api', 4)
+    expect(mines).toEqual([
+      ['31', false],
+      ['32', true],
+      ['33', false],
+    ])
+  })
+
+  test('Bitbucket Cloud: without the signed-in account’s id, every comment is someone else’s', async () => {
+    const unread: FakeRule = { cli: 'bkt', when: ['api', '/user'], stderr: 'HTTP 403\n', code: 1 }
+    const mines = await minesOf(fakeForge([unread, NAMED_LIKE_ME, ...BKT_HOSTS]), 'api', 4)
+    expect(mines).toEqual([
+      ['31', false],
+      ['32', false],
+      ['33', false],
+    ])
+  })
+
+  test('Bitbucket Data Center: a comment whose display name is the signed-in user’s stays someone else’s; mine is known by the user slug', async () => {
+    const mines = await minesOf(fakeForge([DC_NAMED_LIKE_ME, ...BKT_HOSTS]), 'dc', 9)
+    expect(mines).toEqual([
+      ['41', false],
+      ['42', true],
+      ['43', false],
     ])
   })
 })

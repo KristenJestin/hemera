@@ -43,6 +43,7 @@ CREATE TABLE `team_comments` (
 	`review` text,
 	`thread` text,
 	`author` text NOT NULL,
+	`author_id` text,
 	`mine` integer NOT NULL,
 	`body` text NOT NULL,
 	`version` integer NOT NULL,
