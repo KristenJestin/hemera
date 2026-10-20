@@ -62,16 +62,18 @@ export const SLOW = 180_000
 export const LONG = 60_000
 
 /**
- * The fake forge's pull requests, kept in a file beside it: `pr list` and `pr view` read them,
- * `pr create` adds one. A pull request's head is the branch's commit on the bare repository; its
+ * The fake forge's pull requests, kept beside it in one file per repository: `pr list` and
+ * `pr view` read them, `pr create` adds one. A pull request's head is the branch's commit on the bare repository; its
  * approval and its CI (`checks`, GitHub's status check rollup) are what the test wrote on it.
  */
 const FORGE_PROGRAM = String.raw`
 const { existsSync, readFileSync, renameSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 const config = JSON.parse(readFileSync(join(__dirname, 'forge.json'), 'utf8'))
-const kept = join(__dirname, 'prs.json')
-const read = () => (existsSync(kept) ? JSON.parse(readFileSync(kept, 'utf8')) : [])
+// Each repository's pull requests in a file of its own, as a forge numbers them: two creates in
+// two repositories at once never write the same file (#522).
+const keptOf = (repo) => join(__dirname, 'prs-' + repo.replace('/', '-') + '.json')
+const read = (kept) => (existsSync(kept) ? JSON.parse(readFileSync(kept, 'utf8')) : [])
 // One create held between its read and its write, when a suite arms the hold (holdCreate).
 const held = () => {
   try {
@@ -97,7 +99,8 @@ const headOf = (bare, branch) => {
 module.exports = (cli, args) => {
   const repo = (valueOf(args, '--repo') ?? '').split('/').slice(1).join('/')
   const bare = config.bares[repo]
-  const prs = read()
+  const kept = keptOf(repo)
+  const prs = read(kept)
   if (args[1] === 'list') {
     const found = prs.filter(
       (one) =>
@@ -200,9 +203,10 @@ export const shipWorld = (): ShipWorld => {
     }),
   )
   const fake = fakeForge([...ghReady(HOST), { cli: 'gh', when: ['pr'], program }], ['gh'])
-  const kept = join(folder, 'prs.json')
-  const pullRequests = (): ReadonlyArray<FakePullRequest> =>
-    existsSync(kept) ? JSON.parse(readFileSync(kept, 'utf8')) : []
+  const keptOf = (name: string) => join(folder, `prs-acme-${name}.json`)
+  const keptIn = (name: string): ReadonlyArray<FakePullRequest> =>
+    existsSync(keptOf(name)) ? JSON.parse(readFileSync(keptOf(name), 'utf8')) : []
+  const pullRequests = () => ['api', 'web'].flatMap(keptIn)
   return {
     data,
     work,
@@ -218,12 +222,8 @@ export const shipWorld = (): ShipWorld => {
     pullRequests,
     setPullRequest: (name, change) =>
       writeFileSync(
-        kept,
-        JSON.stringify(
-          pullRequests().map((one) =>
-            one.repo === `acme/${name}` ? Object.assign({}, one, change) : one,
-          ),
-        ),
+        keptOf(name),
+        JSON.stringify(keptIn(name).map((one) => Object.assign({}, one, change))),
       ),
     checks: new Map([['test', 'green']]),
     asked: { count: 0 },
