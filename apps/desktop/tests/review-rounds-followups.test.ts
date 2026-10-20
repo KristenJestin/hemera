@@ -412,6 +412,56 @@ describe('A second mission from the same feedback', () => {
   )
 })
 
+describe('A feedback withdrawn after its mission started', () => {
+  test(
+    'a feedback withdrawn while its round runs, after a mission was started from it, reads as withdrawn and as moved to that mission once the round is answered',
+    SLOW,
+    async () => {
+      const { world, run } = rounding(data, work)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, projectId, lineage } = yield* reviewed(work)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            const two = yield* written(missionId, remark('The export button is grey.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerPoint(planner.grantId, [two.id])
+            const started = yield* startedFrom(projectId, one.id)
+            yield* withdrawnAndTold(missionId, one.id)
+            yield* headerTask(planner.grantId)
+            yield* used(planner.grantId, 'round_ready', { why: 'One point, one task.' })
+            yield* roundBuilding(missionId, 1)
+            const builder = yield* roundBuilderOf(missionId, lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: two.id,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(world, missionId)
+            yield* until(
+              Effect.map(
+                feedbackNow(missionId),
+                (all) => all.get(one.id)?.answer?.includes(started.key) === true,
+              ),
+              LONG,
+            )
+            return {
+              started,
+              moved: (yield* feedbackNow(missionId)).get(one.id),
+              rounds: yield* roundsOf(missionId),
+            }
+          }),
+        ),
+      )
+      expect(seen.rounds).toEqual([[1, 'answered']])
+      expect(seen.moved?.state).toBe('withdrawn')
+      expect(seen.moved?.answer).toBe(`Moved to a new mission: ${seen.started.key}.`)
+    },
+  )
+})
+
 /** The test of the Markdown export: it fails until `export.ts` holds `markdown`. */
 const MARKDOWN_TEST = [
   "import { test } from 'node:test'",
