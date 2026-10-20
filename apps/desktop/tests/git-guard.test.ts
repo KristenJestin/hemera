@@ -1437,6 +1437,61 @@ describe('A submodule’s own Git folder shapes the engine’s Git like the repo
   })
 })
 
+describe('An index the guard cannot read for its submodules asks, never taken as naming none (#474)', () => {
+  test('a linked index stops the engine’s Git, and the question names it', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        yield* engineStatus(main)
+        const index = join(main, '.git', 'index')
+        renameSync(index, join(work, 'index'))
+        symlinkSync(join(work, 'index'), index)
+        return { status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/.git/index (added)')
+    expect(shown(result.needs[0])).toContain('a link')
+  })
+
+  test('an index it cannot read when it first sees the repository asks before the engine’s first Git call there', async () => {
+    const result = await withBuilder(() =>
+      Effect.gen(function* () {
+        const loose = repository(join(work, 'loose'))
+        writeFileSync(join(loose, '.git', 'index'), 'not an index\n')
+        return { first: yield* engineStatus(loose), needs: yield* asked }
+      }),
+    )
+    expect(result.first).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/loose/.git/index (added)')
+  })
+
+  test('allowed once, the engine’s Git runs; the index read again afterwards asks nothing', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        writeFileSync(join(main, 'a.txt'), 'a\n')
+        git(main, 'add', 'a.txt')
+        yield* engineStatus(main)
+        const index = join(main, '.git', 'index')
+        const good = readFileSync(index)
+        writeFileSync(index, 'not an index\n')
+        const held = yield* engineStatus(main)
+        const [first] = yield* asked
+        if (first !== undefined) yield* allow(first)
+        // Git itself refuses that index: the call runs and fails there, not at the guard.
+        const allowed = yield* engineStatus(main)
+        writeFileSync(index, good)
+        const status = yield* engineStatus(main)
+        const quiet = yield* until(guardNeeds, (needs) => needs.length > 0, 1_000)
+        return { held, allowed, status, quiet }
+      }),
+    )
+    expect(result.held).toContain('Hemera stopped its Git')
+    expect(result.allowed).not.toContain('Hemera stopped its Git')
+    expect(result.status).toBe('ran')
+    expect(result.quiet).toEqual([])
+  })
+})
+
 describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
   test('an upstream pointed at another repository, taken without asking, never moves the engine’s fetch: it fetches the remote it names', async () => {
     const result = await withBuilder(({ main }) =>
