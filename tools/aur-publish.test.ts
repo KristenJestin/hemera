@@ -143,13 +143,13 @@ describe('The .SRCINFO follows the PKGBUILD', () => {
   })
 })
 
-describe('The AUR packages are published under the AGPL-3.0-or-later', () => {
+describe('The AUR packages are published under the AGPL-3.0-only', () => {
   test.each(AUR_PACKAGES)('%s declares the licence in its PKGBUILD', (name) => {
-    expect(arrayOf(pkgbuildOf(name), 'license')).toEqual(['AGPL-3.0-or-later'])
+    expect(arrayOf(pkgbuildOf(name), 'license')).toEqual(['AGPL-3.0-only'])
   })
 
   test.each(AUR_PACKAGES)('%s declares it in its .SRCINFO too', (name) => {
-    expect(srcinfoOf(name)).toContain('\tlicense = AGPL-3.0-or-later\n')
+    expect(srcinfoOf(name)).toContain('\tlicense = AGPL-3.0-only\n')
     expect(srcinfoOf(name)).not.toContain('UNLICENSED')
   })
 
@@ -179,7 +179,7 @@ describe('The AUR packages are published under the AGPL-3.0-or-later', () => {
       )
       const rendered = renderSrcinfo(stale, pkgbuild)
 
-      expect(rendered).toContain('\tlicense = AGPL-3.0-or-later\n')
+      expect(rendered).toContain('\tlicense = AGPL-3.0-only\n')
       expect(rendered).not.toContain('UNLICENSED')
     },
   )
