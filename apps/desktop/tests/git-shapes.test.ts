@@ -359,7 +359,7 @@ describe('An index that cannot be read for its submodules is said, never read as
     const { main, index } = indexed()
     rmSync(index)
     mkdirSync(index)
-    expect(saidOf(main)?.text).toContain('not a regular file')
+    expect(saidOf(main)?.text).toContain('not a regular file, never opened')
   })
 
   test.skipIf(process.platform === 'win32')(
@@ -368,7 +368,7 @@ describe('An index that cannot be read for its submodules is said, never read as
       const { main, index } = indexed()
       rmSync(index)
       execFileSync('mkfifo', [index])
-      expect(saidOf(main)?.text).toContain('not a regular file')
+      expect(saidOf(main)?.text).toContain('not a regular file, never opened')
     },
   )
 

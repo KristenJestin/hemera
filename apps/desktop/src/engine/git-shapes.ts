@@ -390,7 +390,7 @@ function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): Gitlinks {
 /** What an index of this stat names, its shared part's included, or why it could not be read. */
 function readGitlinks(gitDir: string, path: string, named: ShapeStat, hash: number): Gitlinks {
   if (named.isSymbolicLink()) return Result.fail('it is a link, never followed')
-  if (!named.isFile()) return Result.fail('it is not a regular file')
+  if (!named.isFile()) return Result.fail('it is not a regular file, never opened')
   if (named.size > BigInt(INDEX_CAP)) {
     return Result.fail(`it is larger than ${String(INDEX_CAP / 1024 / 1024)} MiB`)
   }
