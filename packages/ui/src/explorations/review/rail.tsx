@@ -504,6 +504,7 @@ const PULL_LEGEND: Record<PullRequest['state'], string> = {
 
 const CI_WORDS: Record<MarkState, string> = {
   done: 'green',
+  unverified: 'green, not verified',
   running: 'running',
   failed: 'red',
   todo: 'not started',
