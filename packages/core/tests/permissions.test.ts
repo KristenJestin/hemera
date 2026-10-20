@@ -523,6 +523,60 @@ describe('No agent of a mission writes to a remote or to the history', () => {
       'no agent of a mission may run git commit in this Project',
     )
   })
+
+  test.each([
+    [['git', 'commit', '--amend', '-m', 'x'], 'git commit --amend'],
+    [['git', 'commit', '--amen', '--no-edit'], 'git commit --amend'],
+    [['git', 'commit', '--no-verify', '-m', 'x'], 'git commit --no-verify'],
+    [['git', 'commit', '--no-ver', '-m', 'x'], 'git commit --no-verify'],
+    [['git', 'commit', '-anm', 'x'], 'git commit --no-verify'],
+  ])('%j is refused even when agents may commit', (words, what) => {
+    expect(refusalOf(words, true)).toBe(`no agent of a mission may run ${what}`)
+  })
+
+  // A setting given to Git on the line can skip the hooks (`core.hooksPath`) as --no-verify does.
+  test.each([
+    [['git', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'x']],
+    [['git', '-C', 'api', '-c', 'core.hooksPath=/tmp/none', 'commit', '-m', 'x']],
+    [['git', '--config-env=core.hooksPath=HOOKS', 'commit', '-m', 'x']],
+    [['git', '--config-env', 'core.hooksPath=HOOKS', 'commit', '-m', 'x']],
+    [['env', 'GIT_CONFIG_PARAMETERS=core.hooksPath=/dev/null', 'git', 'commit', '-m', 'x']],
+    [
+      [
+        'sh',
+        '-c',
+        'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null; git commit -m x',
+      ],
+    ],
+  ])('%j, a commit with a setting of its own, is refused even when agents may commit', (words) => {
+    expect(refusalOf(words, true)).toBe(
+      'no agent of a mission may run git commit with a setting of its own',
+    )
+  })
+
+  // What an alias runs is not read: it could be a commit with --amend or --no-verify.
+  test.each([
+    [['git', 'ci', '-m', 'x'], 'ci'],
+    [['git', '-c', 'alias.ci=commit --no-verify', 'ci', '-m', 'x'], 'ci'],
+  ])('%j, an alias, is refused while agents may commit', (words, name) => {
+    expect(refusalOf(words, true)).toBe(
+      `no agent of a mission may run git ${name}, none of Git's own commands, while it may commit`,
+    )
+  })
+
+  test('git push stays refused when agents may commit', () => {
+    expect(refusalOf(['git', 'push', 'origin', 'HEAD'], true)).toBe(
+      'no agent of a mission may run git push',
+    )
+  })
+
+  test.each([
+    [['git', '-C', 'api', 'commit', '-m', 'x']],
+    [['git', 'commit', '-c', 'HEAD']],
+    [['git', 'commit', '-a', '-m', 'ACME-1: n files, -n flags']],
+  ])('%j is not refused when agents may commit', (words) => {
+    expect(refusalOf(words, true)).toBeNull()
+  })
 })
 
 describe("A forge CLI's writes are refused, its reads are not", () => {

@@ -3,7 +3,7 @@
  * a writing command takes a lock on its repository, a command that rewrites another running task's
  * file records a conflict, a red check starts a new attempt for whoever made it, three reds become
  * an error need, an action cut by a restart is never counted done nor run again blindly, and Hemera
- * commits per task only when the mission's copy of the rule says so.
+ * commits per task only when the After each task stack the mission copied says so (#477).
  *
  * On the engine as it starts, with the fake agent of #32 as every agent, a fake `TaskChecks`, the
  * test driving the Builder's and a helper's tools through their grants; Acme's real repositories
@@ -13,7 +13,12 @@
 import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
+import {
+  ChosenAnswer,
+  type DeliveryAction,
+  WrittenAnswer,
+  defaultDeliveryRules,
+} from '@hemera/core/domain'
 import type { BuildingAttemptView, CommandDraft } from '@hemera/ipc'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Deferred, Effect, Fiber, Layer, Option, Predicate } from 'effect'
@@ -26,8 +31,8 @@ import { BuildDesk } from '../src/engine/building/desk.ts'
 import { type CheckResult, TaskChecks } from '../src/engine/building/checks.ts'
 import { buildingAttemptOf } from '../src/engine/building/tasks.ts'
 import { Snapshots } from '../src/engine/building/snapshots.ts'
-import { ONE_COMMIT_PER_TASK } from '../src/engine/building/validation.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
+import { readDeliveryRules, saveDeliveryRules } from '../src/engine/delivery-rules.ts'
 import { getMission } from '../src/engine/missions.ts'
 import { answerNeed, getNeed, retryNeed } from '../src/engine/needs.ts'
 import { getProject } from '../src/engine/projects.ts'
@@ -42,7 +47,6 @@ import {
   commandRuns,
   domainEvents,
   effectfulActions,
-  missionValidationSettings,
   sessionDeliveries,
 } from '../src/engine/storage/schema.ts'
 import { actionDone, beginAction } from '../src/engine/tools/actions.ts'
@@ -1232,25 +1236,34 @@ describe('Commits per task', () => {
       git(api, 'config', 'commit.gpgsign', 'false')
     })
 
-  /** The mission's copy of the validation settings, its "who commits" section set to `value`. */
-  const commitsSay = (missionId: string, value: typeof ONE_COMMIT_PER_TASK) =>
+  /**
+   * The Project's After each task stack set to Hemera's commit (#477), before the mission's first
+   * task is done: the copy the mission takes then commits per task.
+   */
+  const commitsSay = (projectId: string) =>
     Effect.gen(function* () {
-      const database = yield* Database
-      const [row] = yield* database
-        .select()
-        .from(missionValidationSettings)
-        .where(eq(missionValidationSettings.missionId, missionId))
-      const sections = { ...JSON.parse(row?.sections ?? '{}'), commits: value }
-      yield* database
-        .update(missionValidationSettings)
-        .set({ sections: JSON.stringify(sections) })
-        .where(eq(missionValidationSettings.missionId, missionId))
+      const view = yield* readDeliveryRules(projectId)
+      const base = defaultDeliveryRules()
+      const steps: DeliveryAction[] = [
+        { id: 'task-commit', kind: 'commit-by-hemera', mode: 'auto' },
+      ]
+      yield* saveDeliveryRules(
+        projectId,
+        {
+          ...base,
+          tasks: {
+            presets: { library: steps, application: steps, local: steps },
+            repositories: [],
+          },
+        },
+        view.rules.version,
+      )
     })
 
   const builtWith = (perTask: boolean) =>
     Effect.gen(function* () {
-      const { mission } = yield* launched(work, undefined, undefined, undefined, userAcme)
-      if (perTask) yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
+      const { project, mission } = yield* launched(work, undefined, undefined, undefined, userAcme)
+      if (perTask) yield* commitsSay(project.id)
       const { session, grantId } = yield* builderOf(mission.id)
       const api = join(session.folder, 'api')
       // The user's own identity, as their machine has it.
@@ -1293,7 +1306,7 @@ describe('Commits per task', () => {
         undefined,
         userAcme,
       )
-      yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
+      yield* commitsSay(project.id)
       const { session, grantId } = yield* builderOf(mission.id)
       const api = join(session.folder, 'api')
       const head = git(api, 'rev-parse', 'HEAD')
@@ -1328,7 +1341,7 @@ describe('Commits per task', () => {
         }),
       ),
     )
-    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+    expect(seen.log).toBe('ACME-1: Export as CSV')
     expect(seen.files).toBe('invoices.ts')
   })
 
@@ -1437,7 +1450,7 @@ describe('Commits per task', () => {
             undefined,
             userAcme,
           )
-          yield* commitsSay(mission.id, ONE_COMMIT_PER_TASK)
+          yield* commitsSay(project.id)
           const { session, grantId } = yield* builderOf(mission.id)
           const api = join(session.folder, 'api')
           // A watch of T2's that never ends, writing only under dist/.
@@ -1504,7 +1517,7 @@ describe('Commits per task', () => {
       ),
     )
     expect(seen.first).toBe(1)
-    expect(seen.log).toBe('ACME-1 T2: Export as Markdown\nACME-1 T1: Export as CSV')
+    expect(seen.log).toBe('ACME-1: Export as Markdown\nACME-1: Export as CSV')
     expect(seen.files).toBe('export.ts')
   })
 
@@ -1519,7 +1532,7 @@ describe('Commits per task', () => {
           const other = yield* beginAction(
             'git.commit',
             { kind: 'mission', missionId: mission.id, taskId: 'T1' },
-            { repository: 'web', paths: ['app.ts'], message: 'ACME-1 T1: Export as CSV' },
+            { repository: 'web', paths: ['app.ts'], message: 'ACME-1: Export as CSV' },
           )
           yield* actionDone(other, 'committed 0123456789ab')
           yield* call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' })
@@ -1528,7 +1541,7 @@ describe('Commits per task', () => {
         }),
       ),
     )
-    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+    expect(seen.log).toBe('ACME-1: Export as CSV')
   })
 
   test('a Workspace with no branch for its Building is not committed on: Hemera asks the user instead', async () => {
@@ -1648,7 +1661,7 @@ describe('Commits per task', () => {
         }),
       ),
     )
-    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+    expect(seen.log).toBe('ACME-1: Export as CSV')
   })
 
   test('a stop between a task’s done and its commit commits it at the next start', async () => {
@@ -1675,7 +1688,7 @@ describe('Commits per task', () => {
         }),
       ),
     )
-    expect(seen.log).toBe('ACME-1 T1: Export as CSV')
+    expect(seen.log).toBe('ACME-1: Export as CSV')
   })
 
   test('a stop during a task’s commit says it once: one need names the task, the repository and what to check', async () => {
@@ -1730,10 +1743,10 @@ describe('Commits per task', () => {
     expect(need?.action).toContain('git log')
   })
 
-  test('with a “one commit per task” copy, a done task is committed with only its files and the user’s identity', async () => {
+  test('with Hemera’s commit after each task in the copy, a done task is committed with only its files and the user’s identity', async () => {
     const { run } = builderEngine(data, work)
     const seen = await run(({ profile }) => within(profile, builtWith(true)))
-    expect(seen.log).toBe('Ada Lovelace <ada@example.com>|ACME-1 T1: Export as CSV')
+    expect(seen.log).toBe('Ada Lovelace <ada@example.com>|ACME-1: Export as CSV')
     expect(seen.files).toBe('invoices.ts')
     expect(seen.status).toContain('?? export.ts')
   })
