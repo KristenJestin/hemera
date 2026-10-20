@@ -444,6 +444,36 @@ describe('A mission copies each section when it starts acting', () => {
     ])
   })
 
+  test('a section already copied is answered from the copy, without reading the forge again', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        const mission = yield* createMission({
+          projectId: world.projectId,
+          idea: { sentence: 'Export the ledger as CSV', ticket: null },
+        })
+        const port = yield* ForgePort
+        const reads = yield* Ref.make(0)
+        const counted = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.provideService(effect, ForgePort, {
+            ...port,
+            status: (projectId) =>
+              Effect.andThen(
+                Ref.update(reads, (one) => one + 1),
+                port.status(projectId),
+              ),
+          })
+        const first = yield* counted(copySection(mission.id, 'tasks'))
+        const copying = yield* Ref.get(reads)
+        const again = yield* counted(copySection(mission.id, 'tasks'))
+        return { first, again, copying, reads: yield* Ref.get(reads) }
+      }),
+    )
+    expect(seen.again).toEqual(seen.first)
+    expect(seen.copying).toBe(1)
+    expect(seen.reads).toBe(1)
+  })
+
   test('two copies of one section asked at once make one copy and one Journal line', async () => {
     const seen = await engine(
       Effect.gen(function* () {

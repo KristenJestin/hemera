@@ -305,6 +305,11 @@ export const copySection = (
 ) =>
   Effect.gen(function* () {
     const mission = yield* getMission(missionId)
+    // A section already copied is answered from its copy: the forge is read only to make one.
+    const copied = (yield* reading((reader) =>
+      copiesIn(reader, mission.projectId, missionId),
+    )).find((copy) => copy.section === section)
+    if (copied !== undefined) return copied
     const project = yield* getProject(mission.projectId)
     const delivery = yield* deliveryProjectOf(project)
     yield* hold
