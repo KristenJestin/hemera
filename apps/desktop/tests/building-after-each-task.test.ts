@@ -38,10 +38,11 @@ import { getProject } from '../src/engine/projects.ts'
 import { retryNeed } from '../src/engine/needs.ts'
 import { CommitRights, Judge, stepCommitRights } from '../src/engine/permissions/ports.ts'
 import { Secrets } from '../src/engine/secrets.ts'
+import { openSession } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { effectfulActions, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
-import { acmeAt, call, eventsOf } from './building-world.ts'
+import { acmeAt, call, eventsOf, grantOf } from './building-world.ts'
 import { builderAgents, builderOf, launched, taskIn } from './builder-world.ts'
 import { nodeLine } from './commands-engine.ts'
 import { git } from './repositories.ts'
@@ -186,6 +187,37 @@ const t2Done = (missionId: string, grantId: string) =>
     yield* taskIn(missionId, 'T2', 'done')
   })
 
+/**
+ * A pre-commit hook in a folder of its own that refuses every commit, saying "lint failed", until
+ * `allowed` exists: outside the hooks, since Hemera stops its Git when what shapes Git there changes.
+ */
+const refusingHook = () => {
+  const hooks = join(work, 'hooks')
+  const allowed = join(work, 'allowed')
+  mkdirSync(hooks)
+  writeFileSync(
+    join(hooks, 'pre-commit'),
+    `#!/bin/sh\ntest -e '${allowed.replaceAll('\\', '/')}' && exit 0\necho 'lint failed' >&2\nexit 1\n`,
+    { mode: 0o755 },
+  )
+  return { hooks, allowed }
+}
+
+/** A helper session of the mission, in the Builder's Workspace: its grant. */
+const helperOf = (missionId: string, folder: string) =>
+  Effect.gen(function* () {
+    const helper = yield* openSession({
+      provider: 'claude',
+      owner: { kind: 'mission', missionId },
+      role: 'helper',
+      folder,
+      parent: null,
+      chosen: { model: null, effort: null, mode: null },
+      modelLevel: null,
+    })
+    return yield* grantOf(helper.id)
+  })
+
 const commitsOf = (missionId: string) => eventsOf(missionId, 'building.commit')
 
 const committedTimes = (missionId: string, count: number) =>
@@ -299,7 +331,7 @@ describe('After each task: Hemera commits', () => {
     expect(seen.actions).toEqual([{ state: 'done', taskId: 'T1' }])
   })
 
-  test('a commit that fails stops the stack there, and is made at the next pass', async () => {
+  test('a commit that fails stops the stack there, asks the user with Git’s words, and is made at its Retry', async () => {
     const seen = await engine().run(({ profile }) =>
       within(
         profile,
@@ -309,27 +341,32 @@ describe('After each task: Hemera commits', () => {
           const lock = join(git(api, 'rev-parse', '--absolute-git-dir'), 'index.lock')
           writeFileSync(lock, '')
           yield* t1Done(mission.id, grantId)
+          yield* asked(mission.id)
+          const failed = {
+            log: logOf(api, head),
+            needs: yield* environments(mission.id),
+            next: yield* call(grantId, 'task_start', { task: 'T2' }),
+          }
+          rmSync(lock)
+          yield* retryNeed(failed.needs[0]?.id ?? '')
+          // Committed at the Retry, then the confirm after it is asked.
+          yield* committedTimes(mission.id, 1)
           yield* until(
-            Effect.map(actionsOf('git.commit'), (rows) =>
-              rows.some((row) => row.state === 'failed'),
+            Effect.map(environments(mission.id), (rows) =>
+              rows.some((row) => row.missing.includes('the diff was read')),
             ),
           )
-          const failed = { log: logOf(api, head), needs: yield* environments(mission.id) }
-          rmSync(lock)
-          // The next pass, after T2: T1 is committed first, then T2, and T1's confirm is asked.
-          yield* t2Done(mission.id, grantId)
-          yield* committedTimes(mission.id, 1)
-          yield* asked(mission.id)
-          return { failed, log: logOf(api, head), needs: yield* environments(mission.id) }
+          return { failed, log: logOf(api, head) }
         }),
       ),
     )
     expect(seen.failed.log).toBe('')
-    // Nothing after the failed step runs: the confirm is not asked.
-    expect(seen.failed.needs).toEqual([])
+    // One need, the commit's: nothing after the failed step runs, the confirm is not asked.
+    expect(seen.failed.needs).toHaveLength(1)
+    expect(seen.failed.needs[0]?.missing).toContain('T1 was not committed in api')
+    expect(seen.failed.needs[0]?.missing).toContain('index.lock')
+    expect(seen.failed.next).toContain('T2 waits')
     expect(seen.log).toBe('ACME-1: Export as CSV')
-    expect(seen.needs).toHaveLength(1)
-    expect(seen.needs[0]?.missing).toContain('T1')
   })
 
   test('a step that failed holds the next tasks of its repository back until it is done', async () => {
@@ -337,38 +374,30 @@ describe('After each task: Hemera commits', () => {
       within(
         profile,
         Effect.gen(function* () {
-          // The repository's own hook refuses T1's file until the test lets it through.
-          const hooks = join(work, 'hooks')
-          // Outside the hooks: Hemera stops its Git when what shapes Git there changes.
-          const allowed = join(work, 'allowed')
-          mkdirSync(hooks)
-          writeFileSync(
-            join(hooks, 'pre-commit'),
-            `#!/bin/sh\ngit diff --cached --name-only | grep -q invoices.ts && test ! -e '${allowed.replaceAll('\\', '/')}' && exit 1\nexit 0\n`,
-            { mode: 0o755 },
-          )
-          const { mission, grantId, api, head } = yield* building([HEMERA], null, hooks)
+          const { hooks, allowed } = refusingHook()
+          const { mission, session, grantId, api, head } = yield* building([HEMERA], null, hooks)
+          // T2 runs beside T1, on a helper: it is done while T1's commit waits for the user.
+          const helper = yield* helperOf(mission.id, session.folder)
+          yield* call(helper, 'task_start', { task: 'T2' })
+          yield* call(helper, 'fs_write', {
+            repository: 'api',
+            path: 'export.ts',
+            content: 'export const markdown = true\n',
+          })
           yield* t1Done(mission.id, grantId)
-          yield* until(
-            Effect.map(actionsOf('git.commit'), (rows) =>
-              rows.some((row) => row.state === 'failed'),
-            ),
-          )
-          yield* t2Done(mission.id, grantId)
-          yield* until(
-            Effect.map(
-              actionsOf('git.commit'),
-              (rows) => rows.filter((row) => row.state === 'failed').length >= 2,
-            ),
-          )
+          yield* asked(mission.id)
+          const waiting = yield* call(grantId, 'task_start', { task: 'T4' })
+          yield* call(helper, 'task_finished', { task: 'T2', summary: 'Markdown.' })
+          yield* taskIn(mission.id, 'T2', 'done')
           writeFileSync(allowed, '')
-          // A command of no task runs the stacks again: T1 first, then T2.
-          yield* call(grantId, 'commands_run', { line: 'git status', repository: 'api' })
+          yield* retryNeed((yield* environments(mission.id))[0]?.id ?? '')
           yield* committedTimes(mission.id, 2)
-          return { log: logOf(api, head) }
+          return { waiting, log: logOf(api, head) }
         }),
       ),
     )
+    expect(seen.waiting).toContain('T4 waits: T1 was not committed in api')
+    // T1 first, once retried; T2's commit never went before it.
     expect(seen.log.split('\n')).toEqual(['ACME-1: Export as Markdown', 'ACME-1: Export as CSV'])
   })
 
@@ -921,5 +950,58 @@ describe('After each task: the end waits for the last task’s steps', () => {
     )
     // Called once, after T3's commit, which holds what the command wrote last.
     expect(seen).toEqual([1])
+  })
+
+  test('the last task’s commit refused by a hook asks the user and holds the end; fixed and retried, it commits and the Building ends', async () => {
+    const order: string[] = []
+    const seen = await recordedEnd(order).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { hooks, allowed } = refusingHook()
+          const { mission, grantId, api, head } = yield* building([HEMERA], null, hooks)
+          yield* lastTaskDone(mission.id, grantId)
+          yield* asked(mission.id)
+          const needs = yield* environments(mission.id)
+          order.push('fixed')
+          writeFileSync(allowed, '')
+          yield* retryNeed(needs[0]?.id ?? '')
+          yield* until(Effect.sync(() => order.includes('end')))
+          return { needs, log: logOf(api, head) }
+        }),
+      ),
+    )
+    expect(seen.needs).toHaveLength(1)
+    expect(seen.needs[0]?.missing).toContain('T3 was not committed in api')
+    expect(seen.needs[0]?.missing).toContain('lint failed')
+    expect(order).toEqual(['fixed', 'end'])
+    expect(seen.log).toBe('ACME-1: Document the exports')
+  })
+
+  test('a Cancel while the last task’s failed commit waits for the user ends the Building cleanly', async () => {
+    const order: string[] = []
+    const seen = await recordedEnd(order).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { hooks } = refusingHook()
+          const { mission, grantId, api, head } = yield* building([HEMERA], null, hooks)
+          yield* lastTaskDone(mission.id, grantId)
+          yield* asked(mission.id)
+          const state = yield* mutate('cancelling in a test', (transaction) =>
+            Effect.gen(function* () {
+              const events = yield* cancelMissionIn(transaction, mission.id)
+              const one = yield* latestBuildingIn(transaction, mission.id)
+              return { result: one?.state, events }
+            }),
+          )
+          return { state, needs: yield* environments(mission.id), log: logOf(api, head) }
+        }),
+      ),
+    )
+    expect(seen.state).toBe('cancelled')
+    expect(seen.needs).toEqual([])
+    expect(seen.log).toBe('')
+    expect(order).toEqual([])
   })
 })

@@ -2197,7 +2197,7 @@ export const buildingLoop = (parts: LoopParts) => {
         case 'commit-by-hemera': {
           if ((yield* committedIn(building, task.id)).has(base.repository)) return 'done'
           const message = yield* messageOf(building, task, base, template)
-          return yield* commitTask(building, task, base, paths, message)
+          return yield* commitTask(building, task, base, paths, message, key)
         }
         case 'commit-by-me': {
           if (!(yield* onItsBranch(building, task.id, base))) return 'stopped'
@@ -2333,6 +2333,7 @@ export const buildingLoop = (parts: LoopParts) => {
     base: BuildingBase,
     paths: ReadonlyArray<string>,
     message: string,
+    key: string,
   ) =>
     Effect.gen(function* () {
       yield* hold('committing')
@@ -2373,8 +2374,16 @@ export const buildingLoop = (parts: LoopParts) => {
       )
       if (Result.isFailure(committed)) {
         yield* actionFailed(intent, committed.failure.message)
-        yield* said(
-          `${task.id} was not committed in ${base.repository}: ${committed.failure.message}`,
+        const failed = `${task.id} was not committed in ${base.repository}: ${committed.failure.message}`
+        yield* said(failed)
+        // The user is asked, in Git's words (a hook that refused it, a lock): the stack, and the
+        // end after the last task, wait for the Retry, which commits again.
+        yield* askStep(
+          building,
+          task.id,
+          key,
+          failed,
+          'Fix what stopped the commit, then choose Retry: Hemera commits it again.',
         )
         return 'stopped' satisfies StepState
       }
