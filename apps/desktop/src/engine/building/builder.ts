@@ -428,6 +428,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
        */
       const commitsLeft = (building: BuildingRow) =>
         loop.commitLeft(building).pipe(
+          // Every step done: the end, which waits for them, is judged again (#477).
+          Effect.flatMap((state) => (state === 'done' ? endIfReady(building) : Effect.void)),
           provided,
           Effect.catchCause((cause) => said(`the commits were not made: ${String(cause)}`)),
           Effect.forkIn(layerScope),
@@ -923,6 +925,18 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (row?.id !== building.id || row.tasksDoneAt === null) return
             const refreshing = row.endCalledAt !== null
             if (refreshing && row.phase !== 'refresh') return
+            // The last task's After each task steps are done before the end (#477): the pass runs
+            // here, and once a step it waits on is done, its own pass judges the end again.
+            if (!refreshing) {
+              const stacks = yield* loop
+                .commitLeft(row)
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(said(`the end waits on the commits: ${String(cause)}`), 'stopped'),
+                  ),
+                )
+              if (stacks !== 'done') return
+            }
             const red = yield* proofs.unproven(row, refreshing)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))

@@ -2080,6 +2080,7 @@ export const buildingLoop = (parts: LoopParts) => {
    * start (a stop between a done and its steps), and once the user answers a step. In each
    * repository the task changed, its steps run in order; the first that is not done (it waits, or
    * failed) stops that repository's stack, for this task and the ones after it, until a later pass.
+   * Answers `done` once every stack of every done task is done: the end waits for it.
    */
   const commitLeft = (building: BuildingRow) =>
     Semaphore.withPermits(
@@ -2089,9 +2090,10 @@ export const buildingLoop = (parts: LoopParts) => {
       Effect.gen(function* () {
         const database = yield* Database
         const done = (yield* tasksIn(database, building.id)).filter((one) => one.state === 'done')
-        if (done.length === 0) return
+        if (done.length === 0) return 'done' satisfies StepState
         const copy = yield* copySection(building.missionId, 'tasks')
-        if (copy.section !== 'tasks') return
+        if (copy.section !== 'tasks') return 'done' satisfies StepState
+        let settled: StepState = 'done'
         const { projectId } = yield* ownerOf(building, null)
         const project = yield* getProject(projectId)
         for (const entry of copy.repositories) {
@@ -2102,12 +2104,19 @@ export const buildingLoop = (parts: LoopParts) => {
           for (const task of done) {
             // A command of its own still going may still write what is to be committed: its end
             // runs the steps then.
-            if (going.has(goingKey(building.id, task.id))) continue
+            if (going.has(goingKey(building.id, task.id))) {
+              settled = 'stopped'
+              continue
+            }
             const paths = yield* ownPaths(building, task, base.repository)
             if (paths.length === 0) continue
-            if ((yield* stackOf(building, task, base, entry, paths)) !== 'done') break
+            if ((yield* stackOf(building, task, base, entry, paths)) !== 'done') {
+              settled = 'stopped'
+              break
+            }
           }
         }
+        return settled
       }),
     )
 

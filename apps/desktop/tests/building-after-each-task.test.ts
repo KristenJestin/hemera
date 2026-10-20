@@ -24,7 +24,7 @@ import { and, eq } from 'drizzle-orm'
 import { Effect, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { BuilderHold } from '../src/engine/building/builder.ts'
+import { type BuilderHold, BuildingEnd } from '../src/engine/building/builder.ts'
 import { latestBuildingIn } from '../src/engine/building/tasks.ts'
 import {
   missionCopies,
@@ -710,5 +710,101 @@ describe('After each task: the Building’s own steps', () => {
     expect(seen.rights).toBe(false)
     expect(seen.needs).toHaveLength(1)
     expect(seen.needs[0]?.missing).toContain('T1')
+  })
+})
+
+/**
+ * The engine whose Building end only records, in `seen`, that it was called: the order of the
+ * end and of what the test did shows whether the end waited.
+ */
+const recordedEnd = (seen: string[]) =>
+  sessionsEngine(data, builderAgents, {
+    roles: [HELPER],
+    tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+    building: {
+      end: Layer.succeed(BuildingEnd, {
+        end: () => Effect.sync(() => void seen.push('end')),
+      }),
+    },
+  })
+
+/** T1, T2 and T4 done with no change, then T3, the last task, done with its README changed. */
+const lastTaskDone = (missionId: string, grantId: string) =>
+  Effect.gen(function* () {
+    for (const id of ['T1', 'T2', 'T4']) {
+      const started = yield* call(grantId, 'task_start', { task: id })
+      if (!started.startsWith(`${id} started`)) return yield* Effect.die(new Error(started))
+      yield* call(grantId, 'task_finished', { task: id, summary: 'Nothing to change.' })
+      yield* taskIn(missionId, id, 'done')
+    }
+    yield* call(grantId, 'task_start', { task: 'T3' })
+    yield* call(grantId, 'fs_read', { repository: 'api', path: 'README.md' })
+    yield* call(grantId, 'fs_write', {
+      repository: 'api',
+      path: 'README.md',
+      content: 'Acme api, with exports\n',
+    })
+    yield* call(grantId, 'task_finished', { task: 'T3', summary: 'README.' })
+    yield* taskIn(missionId, 'T3', 'done')
+  })
+
+describe('After each task: the end waits for the last task’s steps', () => {
+  test('the last task with commit-by-agent: the end waits for the agent’s commit', async () => {
+    const order: string[] = []
+    await recordedEnd(order).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId } = yield* building([AGENT])
+          yield* lastTaskDone(mission.id, grantId)
+          yield* until(Effect.map(actionsOf('delivery.commit_by_agent'), (rows) => rows.length > 0))
+          order.push('commit')
+          const made = yield* call(grantId, 'commands_run', {
+            line: 'git commit -a -m ACME-1',
+            repository: 'api',
+          })
+          if (made.includes('refused')) return yield* Effect.die(new Error(made))
+          yield* until(Effect.sync(() => order.includes('end')))
+        }),
+      ),
+    )
+    expect(order).toEqual(['commit', 'end'])
+  })
+
+  test('the last task with commit-by-me: the end waits for the user’s commit', async () => {
+    const order: string[] = []
+    await recordedEnd(order).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api } = yield* building([ME])
+          yield* lastTaskDone(mission.id, grantId)
+          yield* asked(mission.id)
+          order.push('commit')
+          git(api, 'commit', '-q', '-a', '-m', 'README, by hand')
+          yield* retryNeed((yield* environments(mission.id))[0]?.id ?? '')
+          yield* until(Effect.sync(() => order.includes('end')))
+        }),
+      ),
+    )
+    expect(order).toEqual(['commit', 'end'])
+  })
+
+  test('the last task with a confirm: the end waits for the user’s confirm', async () => {
+    const order: string[] = []
+    await recordedEnd(order).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId } = yield* building([CHECKED])
+          yield* lastTaskDone(mission.id, grantId)
+          yield* asked(mission.id)
+          order.push('confirm')
+          yield* retryNeed((yield* environments(mission.id))[0]?.id ?? '')
+          yield* until(Effect.sync(() => order.includes('end')))
+        }),
+      ),
+    )
+    expect(order).toEqual(['confirm', 'end'])
   })
 })
