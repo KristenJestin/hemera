@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { startProfile } from '../src/engine/profile.ts'
 import { engineHandlers } from '../src/engine/serve.ts'
 import { windowHandlers } from '../src/main/window-link.ts'
+import { NO_AGENTS } from './commands-engine.ts'
 import { SHIPPED, removeFolders, temporaryFolder } from './storage.ts'
 
 let start: EngineStart
@@ -47,7 +48,11 @@ const chain = Effect.gen(function* () {
   const engineServer = yield* makeServerProtocol
   engineServer.accept(fromMessagePort(engineEnd))
   const quiet = (): void => undefined
-  const profile = yield* startProfile(start, { backupFolders: [], reconciliationSteps: [] }, quiet)
+  const profile = yield* startProfile(
+    start,
+    { backupFolders: [], reconciliationSteps: [], sessions: { discovery: NO_AGENTS } },
+    quiet,
+  )
   yield* RpcServer.make(EngineMainRpcs, { disableFatalDefects: true }).pipe(
     Effect.provide(engineHandlers(start, profile, quiet)),
     Effect.provideService(RpcServer.Protocol, engineServer.protocol),

@@ -1,4 +1,5 @@
-import type { Proposal, ProposedCommand, SetupKind } from './proposal.tsx'
+import type { Proposal, ProposedCommand } from './proposal.tsx'
+import type { SetupKind } from './setup-kinds.tsx'
 
 /**
  * What the setup agent proposes for Acme, read from `~/work/acme`: its three repositories, its

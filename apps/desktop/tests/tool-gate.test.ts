@@ -18,17 +18,17 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { eq } from 'drizzle-orm'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
+import type { Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
 import { secretsRegistry } from '../src/engine/secrets.ts'
+import { Sessions } from '../src/engine/sessions/service.ts'
+import { getSession, sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { agentSessions, effectfulActions, toolCalls } from '../src/engine/storage/schema.ts'
 import { saveCommand } from '../src/engine/catalogue.ts'
@@ -36,7 +36,10 @@ import { placesForWorkflow } from '../src/engine/tools/gate.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { SensitivePlaces, Verdicts } from '../src/engine/tools/ports.ts'
 import { commandsEngine, nodeLine, script } from './commands-engine.ts'
-import { endChild, removeFolders, temporaryFolder } from './storage.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
+import { watchedSecrets } from './paced-masking.ts'
+import { acmeIn, sessionsEngine, until, within } from './sessions-world.ts'
+import { endChild, holdFile, removeFolders, temporaryFolder } from './storage.ts'
 import {
   ALLOW,
   acmeWithMission,
@@ -538,23 +541,6 @@ describe('Writing only on the version that was read', () => {
 
   test('a write over a file another process holds open replaces it, or fails clearly and leaves it whole', async () => {
     const file = join(work, 'acme', 'held.txt')
-    const holder = async () => {
-      // On Windows the holder shares nothing, as an editor or an antivirus may; elsewhere an
-      // open file never stops a rename.
-      const child =
-        process.platform === 'win32'
-          ? spawn('powershell.exe', [
-              '-NoProfile',
-              '-Command',
-              `$f = [System.IO.File]::Open('${file}', 'Open', 'Read', 'None'); 'held'; Start-Sleep -Seconds 60`,
-            ])
-          : spawn(process.execPath, [
-              '-e',
-              `require('node:fs').openSync(${JSON.stringify(file)}, 'r'); console.log('held'); setInterval(() => {}, 1000)`,
-            ])
-      await once(child.stdout, 'data')
-      return child
-    }
     const answer = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
@@ -563,7 +549,9 @@ describe('Writing only on the version that was read', () => {
           const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
           yield* callTool(builder.grantId, 'fs_read', { path: 'held.txt' })
           return yield* Effect.acquireUseRelease(
-            Effect.promise(holder),
+            // On Windows a file held open cannot be replaced; elsewhere an open file never stops a
+            // rename.
+            Effect.promise(() => holdFile(file)),
             () => callTool(builder.grantId, 'fs_write', { path: 'held.txt', content: 'after\n' }),
             (child) => Effect.promise(() => endChild(child)),
           )
@@ -573,9 +561,11 @@ describe('Writing only on the version that was read', () => {
     const now = readFileSync(file, 'utf8')
     // Which of the two the system chose, for the record of a run on each system.
     console.info(`a held file on ${process.platform}: ${answer.ok ? 'replaced' : answer.text}`)
+    // Held open, the file cannot be replaced on Windows: the test did hold it.
+    if (process.platform === 'win32') expect(answer.ok).toBe(false)
     if (answer.ok) expect(now).toBe('after\n')
     else {
-      // A file shared with no one cannot even be read for its version: refused before writing.
+      // Refused while reading its version or while replacing it, the file is left as it was.
       expect(answer.text).toMatch(
         /^could not (?:write held\.txt: .*; the file is as it was|read held\.txt: .*; nothing was written)$/,
       )
@@ -636,32 +626,71 @@ describe('Writing only on the version that was read', () => {
     )
   })
 
-  test('the fingerprint of a read survives a restart with the session', async () => {
-    let grant = ''
-    let mission = ''
-    const first = engine()
-    await first(({ profile }) =>
-      profile.use(
+  test('the session rebuilt at restart keeps the fingerprint of the read before it', async () => {
+    const verdicts = verdictsSaying(() => ALLOW).layer
+    // Its agent reads a.txt on its first turn, through Hemera's MCP server.
+    const before = sessionsEngine(
+      data,
+      () => ({
+        turns: [
+          [{ does: 'uses', id: 'toolu_read', tool: 'fs_read', arguments: { path: 'a.txt' } }],
+        ],
+        steps: [{ does: 'says', text: 'Read.' }],
+      }),
+      { tools: { verdicts } },
+    )
+    const builder = await before.run(({ profile }) =>
+      within(
+        profile,
         Effect.gen(function* () {
-          const made = yield* acmeWithMission(work)
-          mission = made.mission.id
-          writeFileSync(join(made.main, 'a.txt'), 'one\n')
-          const builder = yield* sessionOf('builder', made.main, { kind: 'mission', id: mission })
-          grant = builder.sessionId
-          yield* callTool(builder.grantId, 'fs_read', { path: 'a.txt' })
+          const { owner, main } = yield* acmeIn(work)
+          writeFileSync(join(main, 'a.txt'), 'one\n')
+          const session = yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', provider: 'claude', folder: main }),
+          )
+          yield* Sessions.use((sessions) => sessions.settled(session.id))
+          return session
         }),
       ),
     )
-    const answer = await engine()(({ profile }) =>
-      profile.use(
+    expect(before.world.agents[0]?.answers.toolAnswers[0]?.text).toContain('one')
+    // The start's rebuild replaces the session; its successor's agent writes on its first turn.
+    const after = sessionsEngine(
+      data,
+      () => ({
+        turns: [
+          [
+            {
+              does: 'uses',
+              id: 'toolu_write',
+              tool: 'fs_write',
+              arguments: { path: 'a.txt', content: 'two\n' },
+            },
+          ],
+        ],
+        steps: [{ does: 'says', text: 'Written.' }],
+      }),
+      { tools: { verdicts } },
+    )
+    const [replaced, successors] = await after.run(({ profile }) =>
+      within(
+        profile,
         Effect.gen(function* () {
-          const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(grant))
-          const again = yield* ToolAccess.use((access) => access.byToken(token))
-          return yield* callTool(again?.id ?? '', 'fs_write', { path: 'a.txt', content: 'two\n' })
+          yield* until(
+            Effect.sync(() => (after.world.agents[0]?.answers.toolAnswers.length ?? 0) > 0),
+          )
+          return [
+            yield* getSession(builder.id),
+            yield* sessionsIn(['starting', 'working', 'idle'], builder.owner),
+          ] as const
         }),
       ),
     )
-    expect(answer).toMatchObject({ ok: true })
+    expect(replaced.state).toBe('replaced')
+    expect(successors).toEqual([expect.objectContaining({ lineage: builder.lineage, epoch: 1 })])
+    expect(after.world.agents[0]?.answers.toolAnswers).toEqual([
+      { text: 'wrote a.txt (4 bytes)', isError: false },
+    ])
     expect(readFileSync(join(work, 'acme', 'a.txt'), 'utf8')).toBe('two\n')
   })
 })
@@ -733,6 +762,184 @@ describe('Every call is recorded', () => {
       },
     ])
     expect(calls[0]?.durationMs).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('A call’s arguments are kept masked as JSON (#397)', () => {
+  test('arguments that are not a record, holding a quoted credential and a known value, are kept with nothing of either, and still JSON', async () => {
+    const verdicts = verdictsSaying(() => ALLOW)
+    const secrets = secretsRegistry()
+    secrets.register('project-variables:acme', [KNOWN_SECRET])
+    const calls = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', [QUOTED_SECRET, `key ${KNOWN_SECRET}`])
+            return yield* callsOf(builder.sessionId)
+          }),
+        ),
+    )
+    expect(calls).toHaveLength(1)
+    expectMaskedJson(calls[0]?.arguments)
+  })
+})
+
+describe('A large call’s arguments and a large refusal’s diff are masked in slices (#392)', () => {
+  /** A value no shape of a credential recognises, kept by the user as a secret. */
+  const VALUE = 'violet-heron-5521-quartz'
+
+  test('a call whose arguments are a megabyte is kept cut and masked in slices, with nothing of a known value, even one the cut falls in', async () => {
+    const { secrets, watch } = watchedSecrets((real) => real.register('suite', [VALUE]))
+    const verdicts = verdictsSaying(() => ALLOW)
+    // The value straddles where the record cuts the arguments, and again far past it.
+    const content = `${'x'.repeat(1985)}${VALUE}${'y'.repeat(1024 * 1024)}${VALUE}`
+    const calls = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', { path: 'big.txt', content })
+            return yield* callsOf(builder.sessionId)
+          }),
+        ),
+    )
+    const kept = calls[0]?.arguments ?? ''
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('xxxx')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  /** What the record of a Builder's one call keeps of its arguments, and how long the call took. */
+  const keptOf = async (tool: string, args: Schema.Json) => {
+    const { secrets, watch } = watchedSecrets((real) => real.register('suite', [VALUE]))
+    const verdicts = verdictsSaying(() => ALLOW)
+    const { calls, took } = await commandsEngine(data, {
+      tools: { verdicts: verdicts.layer },
+      secrets,
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { mission, main } = yield* acmeWithMission(work)
+          const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+          const began = performance.now()
+          yield* callTool(builder.grantId, tool, args)
+          const elapsed = performance.now() - began
+          return { calls: yield* callsOf(builder.sessionId), took: elapsed }
+        }),
+      ),
+    )
+    return { kept: calls[0]?.arguments ?? '', watch, took }
+  }
+
+  /**
+   * How long recording a call may take, whatever its arguments: masking them whole took seconds
+   * for the shapes below, cutting them first takes milliseconds.
+   */
+  const RECORDED_WITHIN = 1500
+
+  test('a call whose 4 MiB string lies 40 levels deep is kept cut, masked in slices, and recorded quickly', async () => {
+    let deep: Schema.Json = `${'z'.repeat(4 * 1024 * 1024)}${VALUE}`
+    for (let level = 0; level < 40; level += 1) deep = [deep]
+    const { kept, watch, took } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: deep,
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('zzzz')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+    expect(took).toBeLessThan(RECORDED_WITHIN)
+  })
+
+  test('a call made of 4,000 strings of 1,999 characters is kept cut, never masked whole, and recorded quickly', async () => {
+    const many = Array.from({ length: 4000 }, (_, at) =>
+      at === 3999 ? `${'m'.repeat(1975)}${VALUE}` : 'm'.repeat(1999),
+    )
+    const { kept, watch, took } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: many,
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('mmmm')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+    expect(took).toBeLessThan(RECORDED_WITHIN)
+  })
+
+  test('a call made of 2,000,000 empty records is kept cut, never masked whole', async () => {
+    const { kept, watch } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: Array.from({ length: 2_000_000 }, () => ({})),
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('a call made of 3,000,000 empty lists is kept cut, never masked whole', async () => {
+    const { kept, watch } = await keptOf('fs_write', {
+      path: 'a.txt',
+      content: 'x',
+      extra: Array.from({ length: 3_000_000 }, () => []),
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('an fs_edit whose new text is a megabyte is kept cut, its head masked in slices', async () => {
+    const { kept, watch } = await keptOf('fs_edit', {
+      path: 'a.txt',
+      edits: [{ old: 'x', new: `${'n'.repeat(1985)}${VALUE}${'n'.repeat(1024 * 1024)}` }],
+    })
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('nnnn')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('arguments that are one megabyte-long text, not a record, are kept cut and masked in slices', async () => {
+    const { kept, watch } = await keptOf(
+      'fs_write',
+      `${'t'.repeat(1985)}${VALUE}${'t'.repeat(1024 * 1024)}`,
+    )
+    expect(kept.length).toBeLessThan(2100)
+    expect(kept).toContain('tttt')
+    expect(kept).not.toContain(VALUE.slice(0, 6))
+    expect(watch.syncOnLarge).toBe(0)
+  })
+
+  test('a write refused because the file changed shows the head of a megabyte-long changed line, masked in slices, and not the rest of it', async () => {
+    const { secrets, watch } = watchedSecrets((real) => real.register('suite', [VALUE]))
+    const verdicts = verdictsSaying(() => ALLOW)
+    const minified = `${'a'.repeat(100)}${VALUE}${'b'.repeat(1024 * 1024)}`
+    const refused = await commandsEngine(data, { tools: { verdicts: verdicts.layer }, secrets })(
+      ({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { mission, main } = yield* acmeWithMission(work)
+            const builder = yield* sessionOf('builder', main, { kind: 'mission', id: mission.id })
+            yield* callTool(builder.grantId, 'fs_write', { path: 'bundle.js', content: 'one\n' })
+            // A build rewrites the file beside the session: one line of a megabyte.
+            writeFileSync(join(main, 'bundle.js'), `${minified}\n`)
+            return yield* callTool(builder.grantId, 'fs_write', {
+              path: 'bundle.js',
+              content: 'two\n',
+            })
+          }),
+        ),
+    )
+    expect(refused).toMatchObject({ ok: false, refused: true })
+    expect(refused.text).toContain('What changed:')
+    expect(refused.text).toContain(`+ ${'a'.repeat(100)}•••bbb`)
+    expect(refused.text).not.toContain(VALUE.slice(0, 6))
+    expect(refused.text.length).toBeLessThan(10_000)
+    expect(watch.syncOnLarge).toBe(0)
   })
 })
 

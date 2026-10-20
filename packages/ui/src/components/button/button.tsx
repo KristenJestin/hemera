@@ -1,6 +1,7 @@
 import { Button as BaseButton } from '@base-ui/react/button'
 import { type VariantProps, cva } from 'class-variance-authority'
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import type { ReactNode } from 'react'
 

@@ -9,12 +9,19 @@ import type { SettingsForm } from '@hemera/ui'
 import type { ReactNode } from 'react'
 
 import { ChecksPart, DocRecipesPart } from './checks-sections.tsx'
+import { DeliveryPart } from './delivery-section.tsx'
 import type { Link } from './link.ts'
 import { ResourcesPart } from './resources-section.tsx'
 import { SpecSettingsPart } from './spec-settings.tsx'
 import { ProvidersPart } from './ticket-providers.tsx'
 
-export const TICKET_SECTIONS = ['tickets', 'resources', 'checks', 'documentation'] as const
+export const TICKET_SECTIONS = [
+  'tickets',
+  'resources',
+  'checks',
+  'documentation',
+  'delivery',
+] as const
 export type TicketSectionId = (typeof TICKET_SECTIONS)[number]
 
 export const isTicketSection = (id: string): id is TicketSectionId =>
@@ -30,6 +37,10 @@ export interface TicketSectionProps {
   /** Shows a dialog over the page, or closes it with null. */
   show: (form: SettingsForm | null) => void
   copy: (text: string) => void
+  /** Opened by a link: a need about a forge's command line opens the Delivery rules. */
+  linked: boolean
+  /** What is wrong in the Delivery rules, for their glyph in the list. */
+  onProblem: (problem: string | undefined) => void
 }
 
 /**
@@ -45,7 +56,24 @@ export function TicketSection({
   catalogue,
   show,
   copy,
+  linked,
+  onProblem,
 }: TicketSectionProps): ReactNode {
+  if (section === 'delivery') {
+    return (
+      <DeliveryPart
+        link={link}
+        engineReady={engineReady}
+        projectId={projectId}
+        project={project}
+        catalogue={catalogue}
+        show={show}
+        copy={copy}
+        linked={linked}
+        onProblem={onProblem}
+      />
+    )
+  }
   if (section === 'checks') {
     return (
       <ChecksPart

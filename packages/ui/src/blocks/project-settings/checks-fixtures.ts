@@ -1,6 +1,8 @@
-import type { CheckDraft, CheckRefusals, SettingsCheck } from './checks.tsx'
+import type { CheckRefusals } from './checks.tsx'
+import type { CheckDraft, SettingsCheck } from './checks-model.ts'
 import type { CatalogueChoice } from './command-line.tsx'
-import type { DocRecipeDraft, DocRecipeRefusals, SettingsDocRecipe } from './doc-recipes.tsx'
+import type { DocRecipeRefusals } from './doc-recipes.tsx'
+import type { DocRecipeDraft, SettingsDocRecipe } from './doc-recipes-model.ts'
 import { shellRefusal } from './project-settings-fixtures.ts'
 
 /**
@@ -311,4 +313,14 @@ export function recipeRefusals(draft: DocRecipeDraft): DocRecipeRefusals {
         ? 'Name at least one word the Impact may hold.'
         : undefined,
   }
+}
+
+/** What the engine refuses of how long a proof may run, in its words; empty is the default. */
+export function proofLimitRefusal(value: string | null): string | undefined {
+  if (value === null) return undefined
+  const typed = value.trim()
+  if (!/^-?\d+$/.test(typed)) return 'Write a whole number of minutes.'
+  const minutes = Number(typed)
+  if (minutes < 1) return 'A proof needs at least 1 minute.'
+  return minutes > 1440 ? 'A proof may run 1440 minutes (24 hours) at most.' : undefined
 }

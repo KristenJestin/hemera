@@ -15,6 +15,7 @@ import {
   markModel,
   modelMarksOf,
   roleModelsOf,
+  sessionSetting,
   setRoleModel,
 } from '../src/engine/sessions/cascade.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
@@ -106,6 +107,36 @@ describe('Models by role', () => {
       'This setting was not saved: the app level has no scope.',
       'This setting was not saved: no role nobody is registered.',
     ])
+  })
+
+  test('the Planner in round mode takes the Planner’s model: no row of its own, and no setting', async () => {
+    const { run } = sessionsEngine(data, () => SAYS_DONE)
+    const { rows, refused, resolved } = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission } = yield* acme
+          const setting = { agent: 'codex' as const, model: 'medium', effort: null }
+          yield* setRoleModel('mission', mission.id, 'planner', setting)
+          return {
+            rows: (yield* roleModelsOf(project.id, mission.id)).map((role) => role.role),
+            refused: yield* Effect.map(
+              Effect.flip(setRoleModel('mission', mission.id, 'round-planner', setting)),
+              (one) => one.message,
+            ),
+            resolved: yield* sessionSetting(
+              { kind: 'mission', missionId: mission.id },
+              'round-planner',
+            ),
+          }
+        }),
+      ),
+    )
+    expect(rows).not.toContain('round-planner')
+    expect(refused).toBe(
+      'This setting was not saved: the Planner in round mode takes the model of the Planner.',
+    )
+    expect(resolved).toEqual({ agent: 'codex', model: 'medium', effort: null, level: 'mission' })
   })
 
   test('a model is marked a favourite or hidden per agent, and forgotten when neither', async () => {

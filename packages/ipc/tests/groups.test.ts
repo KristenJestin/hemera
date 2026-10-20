@@ -439,6 +439,7 @@ const engineLink = Effect.gen(function* () {
           'mission.serviceDismiss': unused,
           'mission.focused': unused,
           'mission.changed': () => Stream.die('not asked of this engine'),
+          'mission.keptAgents': () => Stream.die('not asked of this engine'),
           'helpers.list': unused,
           'helpers.read': unused,
           'helpers.judge': unused,

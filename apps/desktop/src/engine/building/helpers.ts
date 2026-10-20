@@ -25,10 +25,11 @@
  * There is no stop: neither the parent nor the user stops a helper.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
 import {
+  MaskedText,
   DEFINED_HELPERS,
   FreeHelperResult,
   HELPER_DEPTH,
@@ -65,6 +66,7 @@ import { AgentRuntime } from '../agents/runtime.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
+import type { CancelIn } from '../missions.ts'
 import { putEvidence } from '../memory/evidence.ts'
 import { missionFolder, missionKeyOf } from '../memory/files.ts'
 import { Memory } from '../memory/index.ts'
@@ -87,6 +89,10 @@ import {
   queuedResults,
 } from '../storage/schema.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
+import { NotJudged, readJudged } from '../tools/judged.ts'
+import type { Grant } from '../tools/access.ts'
+import type { SensitivePlaces } from '../tools/ports.ts'
+import { Withholding } from '../tools/withholding.ts'
 import { containedIn } from '../tools/paths.ts'
 import { mutate } from '../transaction.ts'
 import { HelperDesk, type HelperWork } from './helper-desk.ts'
@@ -162,6 +168,29 @@ type Needs =
   | Memory
   | HelperDesk
   | ProbeSteps
+  | SensitivePlaces
+
+/** Hemera's own words: nothing in them to mask. */
+const MISSION_CANCELLED = MaskedText.make('the mission was cancelled')
+
+/** A cancelled mission's running helpers end as failed, in the cancel's own transaction (#378). */
+export const cancelHelpersIn: CancelIn = (transaction, missionId) =>
+  transaction
+    .update(helpers)
+    .set({
+      state: 'failed',
+      stuck: false,
+      failure: MISSION_CANCELLED,
+      endedAt: new Date().toISOString(),
+    })
+    .where(and(eq(helpers.missionId, missionId), eq(helpers.state, 'running')))
+    .returning()
+    .pipe(
+      Effect.mapError(refusedWhile('ending the helpers with their mission')),
+      Effect.map((rows) =>
+        rows.map((row) => helperEvent('helper.failed', row, { why: MISSION_CANCELLED })),
+      ),
+    )
 
 export const helpersLayer = (settings: HelpersSettings) =>
   Layer.effectDiscard(
@@ -602,9 +631,15 @@ export const helpersLayer = (settings: HelpersSettings) =>
         )
 
       /** The Prototyper's files copied into the mission's evidence, or the refusal naming one. */
-      const keepFiles = (row: HelperRow, session: RoleSession, files: ReadonlyArray<string>) =>
+      const keepFiles = (
+        grant: Grant,
+        row: HelperRow,
+        session: RoleSession,
+        files: ReadonlyArray<string>,
+      ) =>
         Effect.gen(function* () {
           const label = helperLabel(row.number)
+          const withholding = yield* Withholding.of(grant)
           const kept: string[] = []
           // Real paths on both sides: a link it made to a file outside its folder is not its own,
           // nor a path on another drive (#145).
@@ -612,13 +647,29 @@ export const helpersLayer = (settings: HelpersSettings) =>
           for (const named of files) {
             const path = resolve(row.folder, named)
             const real = existsSync(path) ? realpathSync(path) : null
-            if (real === null || !containedIn(folder, real) || !statSync(real).isFile()) {
+            if (real === null || !containedIn(folder, real)) {
               return Result.fail(`${named} is not a file of your folder`)
+            }
+            // Read from the file judged only, as the file tools read (#373): never through a link
+            // planted since, nor a file with a second name, nor a pipe, nor a sensitive one (#392).
+            const bytes = yield* Effect.tryPromise(() =>
+              readJudged(real, { oneNameFor: 'evidence', withholding }),
+            ).pipe(Effect.result)
+            if (Result.isFailure(bytes)) {
+              const cause = bytes.failure.cause
+              const reason = cause instanceof Error ? cause.message : String(cause)
+              // A file of the folder the rule refuses (a second name, a link, a pipe) is said as
+              // not kept, with why; one that could not be read is not a file of the folder.
+              return Result.fail(
+                cause instanceof NotJudged
+                  ? `${named} is not kept: ${reason}`
+                  : `${named} is not a file of your folder: ${reason}`,
+              )
             }
             const inside = relative(folder, real)
             const put = yield* putEvidence({
               missionId: row.missionId,
-              content: { bytes: readFileSync(real) },
+              content: { bytes: bytes.success },
               name: `${label}/${inside.split(sep).join('/')}`,
               about: `helper ${label}`,
               author: AgentAuthor.make({ role: session.role, sessionId: session.id }),
@@ -652,7 +703,7 @@ export const helpersLayer = (settings: HelpersSettings) =>
           let events: NewEvent[]
           if ('tried' in decoded.success) {
             const prototype: PrototyperResult = decoded.success
-            const kept = yield* keepFiles(row, session, prototype.files)
+            const kept = yield* keepFiles(grant, row, session, prototype.files)
             if (Result.isFailure(kept)) return refusal(`refused: ${kept.failure}`)
             text = prototyperResultText(prototype, kept.success.join(', '))
             events = [
@@ -814,35 +865,6 @@ export const helpersLayer = (settings: HelpersSettings) =>
           yield* fail(row.id, NO_RESULT, true)
         })
 
-      /** A mission cancelled: its helpers end with its tree, as failed. */
-      const cancelled = (missionId: string) =>
-        Effect.gen(function* () {
-          for (const row of yield* helperRowsOf(missionId)) {
-            if (row.state !== 'running') continue
-            const secrets = yield* Secrets
-            yield* mutate('ending a helper with its mission', (transaction) =>
-              transaction
-                .update(helpers)
-                .set({
-                  state: 'failed',
-                  stuck: false,
-                  failure: secrets.mask('the mission was cancelled'),
-                  endedAt: new Date().toISOString(),
-                })
-                .where(and(eq(helpers.id, row.id), eq(helpers.state, 'running')))
-                .pipe(
-                  Effect.mapError(refusedWhile('ending a helper with its mission')),
-                  Effect.as({
-                    result: undefined,
-                    events: [
-                      helperEvent('helper.failed', row, { why: 'the mission was cancelled' }),
-                    ],
-                  }),
-                ),
-            )
-          }
-        })
-
       const isHelperEvent = (payload: NewEvent['payload']) =>
         payload !== undefined && HELPER_ROLES.includes(String(payload['role']))
 
@@ -854,7 +876,6 @@ export const helpersLayer = (settings: HelpersSettings) =>
           Effect.gen(function* () {
             const payload = event.payload ?? {}
             const lineage = Option.getOrNull(readString(payload['lineage']))
-            if (event.type === 'mission.cancelled') return yield* locked(cancelled(event.entityId))
             if (event.type === 'session.stopped') helperOfSession.delete(event.entityId)
             if (lineage === null || !isHelperEvent(payload)) return
             if (event.type === 'session.stuck') yield* stuckSession(lineage)

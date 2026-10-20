@@ -1,0 +1,50 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ export.test.ts (3 tests | 2 failed) 7ms
+   ❯ export (3)
+     × saves 6ms
+     ✓ keeps 0ms
+     × throws 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  export.test.ts > export > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ export.test.ts:5:15
+      3| describe('export', () => {
+      4|   test('saves', () => {
+      5|     expect(1).toBe(2)
+       |               ^
+      6|   })
+      7|   test('keeps', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  export.test.ts > export > throws
+TypeError: missing.run is not a function
+ ❯ export.test.ts:13:50
+     11|     const missing: { run?: () => void } = {}
+     12|     missing.run?.call(null)
+     13|     ;(missing as unknown as { run: () => void }).run()
+       |                                                  ^
+     14|   })
+     15| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  10:13:05
+   Duration  130ms (transform 50%, import 22%, tests 19%, worker 8%)
+
+JSON report written to /work/acme/api/report.json
+JUNIT report written to /work/acme/api/report.xml

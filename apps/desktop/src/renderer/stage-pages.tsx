@@ -1,4 +1,4 @@
-import type { FreezeReadiness, Mission } from '@hemera/ipc'
+import type { FreezeReadiness, KeptAgent, Mission } from '@hemera/ipc'
 import {
   MissionFrameDifference,
   type MissionStage,
@@ -53,6 +53,8 @@ export interface StagePageProps {
   openChat: (chatId: string) => void
   /** Why the last Freeze was refused, each reason in words. */
   refused?: ReadonlyArray<string> | undefined
+  /** The mission's agents Hemera started before its last restart and could not stop (#320). */
+  kept: ReadonlyArray<KeptAgent>
   /** Freezes the Spec at the version the engine offered it on. */
   freeze: () => void
   /** Whether a Freeze is on its way: Freeze then works and is not sent again. */

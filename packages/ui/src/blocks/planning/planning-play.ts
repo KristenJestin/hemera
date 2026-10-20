@@ -1,6 +1,6 @@
 import { expect, userEvent, waitFor } from 'storybook/test'
 
-import { loadMentionEditor } from '../../components/mention-field/mention-field.tsx'
+import { loadMentionEditor } from '../../components/mention-field/load-mention-editor.ts'
 
 /** A story whose field is written in loads the editor first, so the field draws ready. */
 export const EDITOR_LOADED = [async () => ({ editor: await loadMentionEditor() })]

@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 

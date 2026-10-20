@@ -1,0 +1,32 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ foreach.test.ts (2 tests | 1 failed) 10ms
+   × saves 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  foreach.test.ts > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ helpers.ts:3:75
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| export const failingTest = (name: string) => test(name, () => { expect…
+       |                                                                           ^
+      4|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  16:28:06
+   Duration  212ms (transform 57%, import 22%, tests 14%, worker 7%)
+

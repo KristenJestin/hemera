@@ -43,6 +43,7 @@ import {
   Role,
   SITUATION_CHANGED,
   TOOL_NAMES,
+  maskPrinted,
   maskText,
   placesNamed,
   resultText,
@@ -54,6 +55,7 @@ import { Context, Effect, Layer, Option, Predicate, Schema, Semaphore, Stream } 
 import type { Scope } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
+import { cutJson } from '../agents/text.ts'
 import { DomainEvents } from '../domain-events.ts'
 import type { EventPayload, NewEvent } from '../journal.ts'
 import { type NeedHandler, createNeedIn, expireNeedIn, needService } from '../needs.ts'
@@ -69,6 +71,7 @@ import {
   type JudgedCall,
   PermissionRequests,
   type RequestAsked,
+  SensitiveLinks,
   SensitivePlaces,
 } from '../tools/ports.ts'
 import { fingerprintFile } from '../tools/read.ts'
@@ -299,7 +302,11 @@ const registerSensitiveValues = (call: JudgedCall, settings: RequestsSettings) =
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const places = yield* SensitivePlaces
-    const asked = { session: call.session, writes: false }
+    const asked = {
+      session: call.session,
+      writes: false,
+      links: call.links ?? new SensitiveLinks(),
+    }
     for (const { written, led } of yield* namedPaths(call, settings)) {
       const sensitive =
         (yield* places.sensitive(written, asked)) ?? (yield* places.sensitive(led, asked))
@@ -352,7 +359,7 @@ const endedWith = (
   text: Masked<string>,
 ) =>
   Effect.gen(function* () {
-    const said = maskText(resultText({ number: row.number, tool: row.tool, result, text }), [])
+    const said = maskPrinted(resultText({ number: row.number, tool: row.tool, result, text }), [])
     const written = yield* transaction
       .update(permissionRequests)
       .set({ state: 'ended', result, resultText: said, endedAt: now() })
@@ -510,7 +517,7 @@ export const permissionRequestsLayer = (settings: RequestsSettings) =>
                   sessionId: call.session.sessionId,
                   role: call.session.role,
                   tool: call.tool,
-                  call: JSON.stringify(frozen),
+                  call: JSON.stringify({ ...frozen, arguments: cutJson(frozen.arguments) }),
                   guard,
                   identity: JSON.stringify(identity),
                   described: shown,

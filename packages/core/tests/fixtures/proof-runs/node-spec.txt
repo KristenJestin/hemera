@@ -1,0 +1,71 @@
+ok 1 - throws
+▶ export
+  ✖ saves (1.029431ms)
+  ✔ keeps (0.113352ms)
+  ✖ throws (0.08873ms)
+✖ export (2.057348ms)
+✖ the scenario holds (0.605183ms)
+ℹ tests 4
+ℹ suites 1
+ℹ pass 1
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.560054
+
+✖ failing tests:
+
+test at tests/export.test.mjs:5:3
+✖ saves (1.029431ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///work/acme/api/tests/export.test.mjs:6:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.start (node:internal/test_runner/test:1177:17)
+      at node:internal/test_runner/test:1769:71
+      at node:internal/per_context/primordials:466:82
+      at new Promise (<anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:435:3)
+      at node:internal/per_context/primordials:466:9
+      at Array.map (<anonymous>) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/export.test.mjs:9:3
+✖ throws (0.08873ms)
+  TypeError: missing
+  cause: AssertionError [ERR_ASSERTION]: forged
+      at TestContext.<anonymous> (file:///work/acme/api/tests/export.test.mjs:10:11)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7)
+
+test at tests/export.test.mjs:13:1
+✖ the scenario holds (0.605183ms)
+  AssertionError [ERR_ASSERTION]: not built yet
+      at TestContext.<anonymous> (file:///work/acme/api/tests/export.test.mjs:15:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Suite.postRun (node:internal/test_runner/test:1447:19)
+      at Suite.run (node:internal/test_runner/test:1786:10)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail',
+    diff: 'simple'
+  }

@@ -13,12 +13,13 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 
+import { Machine, discoveryLayer } from '../src/engine/agents/discovery.ts'
 import { type ProfileParts, type StartedProfile, startProfile } from '../src/engine/profile.ts'
-import { SHIPPED, temporaryFolder } from './storage.ts'
+import { SHIPPED, runOnFolders, temporaryFolder } from './storage.ts'
 
 /** Fast enough for a suite: a readiness asked every 50 ms, and half a second of grace. */
 const FAST = { readinessEveryMillis: 50, readinessForMillis: 10_000, graceMillis: 500 }
@@ -28,6 +29,29 @@ const FAST = { readinessEveryMillis: 50, readinessForMillis: 10_000, graceMillis
  * (`fake-gh.ts`); none ever falls back to a real `gh` that could reach GitHub.
  */
 export const NO_GH = { path: '' }
+
+/** No forge CLI at all (#253): an empty PATH, and nothing else of the machine's environment. */
+export const NO_FORGE = { env: { PATH: '' } }
+
+/**
+ * No agent at all (#367): the engine's own discovery, on a machine where none is installed and
+ * none signed in. It never looks at this machine's `PATH` or home folder, so no real `claude`,
+ * `codex` or `opencode` is ever asked for its version; a suite that wants agents hands its fake.
+ */
+export const NO_AGENTS = discoveryLayer.pipe(
+  Layer.provide(
+    Layer.succeed(Machine, {
+      home: '',
+      env: {},
+      platform: process.platform,
+      locate: () => Effect.succeed(null),
+      version: () => Effect.succeed(null),
+      exists: () => Effect.succeed(false),
+      read: () => Effect.succeed(undefined),
+      bundled: () => Effect.succeed(null),
+    }),
+  ),
+)
 
 /** What a program of these suites is handed: the Profile, and the engine's diagnostic lines. */
 export interface Started {
@@ -53,11 +77,15 @@ export function commandsEngine(
     | 'tickets'
     | 'probes'
     | 'gh'
+    | 'forge'
     | 'jira'
     | 'snapshots'
+    | 'snapshotsGit'
+    | 'database'
     | 'ticketProviders'
     | 'ticketSync'
     | 'building'
+    | 'review'
     | 'hostProcesses'
     | 'runs'
   > &
@@ -67,7 +95,7 @@ export function commandsEngine(
 ) {
   return <A, E>(program: (started: Started) => Effect.Effect<A, E, Scope.Scope>): Promise<A> => {
     const lines: string[] = []
-    return Effect.runPromise(
+    return runOnFolders(
       Effect.scoped(
         Effect.gen(function* () {
           const profile = yield* startProfile(
@@ -78,6 +106,8 @@ export function commandsEngine(
               ...parts,
               runs: { ...FAST, ...parts.runs },
               gh: parts.gh ?? NO_GH,
+              forge: parts.forge ?? NO_FORGE,
+              sessions: { ...parts.sessions, discovery: parts.sessions?.discovery ?? NO_AGENTS },
             },
             (line) => lines.push(line),
           )

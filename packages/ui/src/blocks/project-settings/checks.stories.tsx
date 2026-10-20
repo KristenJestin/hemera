@@ -3,20 +3,16 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { foldedOut } from '../../exit-play.ts'
 import { findOpen } from '../../overlay-play.ts'
 import { IconBook2, IconChecklist } from '../../icons.ts'
 import {
   ProjectSettings,
   type SettingsForm,
 } from '../../surfaces/project-settings/project-settings.tsx'
-import { SECTIONS } from '../../surfaces/project-settings/settings-fixtures.tsx'
-import {
-  type CheckDraft,
-  CheckForm,
-  ChecksSection,
-  NEW_CHECK,
-  type SettingsCheck,
-} from './checks.tsx'
+import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
+import { CheckForm, ChecksSection } from './checks.tsx'
+import { type CheckDraft, NEW_CHECK, type SettingsCheck } from './checks-model.ts'
 import {
   CHECK_COMMANDS,
   CHECKS,
@@ -26,6 +22,7 @@ import {
   PROPOSED_CHECKS,
   checkRefusals,
   draftOf,
+  proofLimitRefusal,
 } from './checks-fixtures.ts'
 import { FormFoot } from './parts.tsx'
 import { STALE } from './project-settings-fixtures.ts'
@@ -44,6 +41,9 @@ interface PageProps {
   onRemove: (id: string) => void
   onAccept: (ids: readonly string[]) => void
   onReorder: (ids: readonly string[]) => void
+  /** How long a proof may run as its field holds it: null for the default, 10 minutes. */
+  proofLimit?: string | null | undefined
+  onProofLimit: (value: string | null) => void
 }
 
 /** What a check becomes once its proposal is accepted: its own id, the proposal's mark gone. */
@@ -63,14 +63,8 @@ function resolve(draft: CheckDraft, id: string): SettingsCheck {
 function Page(props: PageProps): ReactNode {
   const [checks, setChecks] = useState(props.checks)
   const [proposals, setProposals] = useState(props.proposals ?? [])
-  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
-  const [given, setGiven] = useState({ checks: props.checks, proposals: props.proposals })
-  if (given.checks !== props.checks || given.proposals !== props.proposals) {
-    setGiven({ checks: props.checks, proposals: props.proposals })
-    setChecks(props.checks)
-    setProposals(props.proposals ?? [])
-  }
   const [form, setForm] = useState<Open | null>(props.form ?? null)
+  const [limit, setLimit] = useState(props.proofLimit ?? null)
   const draftFor = (open: Open | null): CheckDraft => {
     if (open === null) return NEW_CHECK
     if (open.kind === 'new') return open.draft ?? NEW_CHECK
@@ -78,6 +72,23 @@ function Page(props: PageProps): ReactNode {
     return found === undefined ? NEW_CHECK : draftOf(found)
   }
   const [draft, setDraft] = useState<CheckDraft>(draftFor(props.form ?? null))
+  // What the story is given anew — an image sequence changing its arguments — replaces what it holds.
+  const [given, setGiven] = useState({
+    checks: props.checks,
+    proposals: props.proposals,
+    form: props.form,
+  })
+  if (
+    given.checks !== props.checks ||
+    given.proposals !== props.proposals ||
+    given.form !== props.form
+  ) {
+    setGiven({ checks: props.checks, proposals: props.proposals, form: props.form })
+    setChecks(props.checks)
+    setProposals(props.proposals ?? [])
+    setForm(props.form ?? null)
+    setDraft(draftFor(props.form ?? null))
+  }
   const open = (next: Open): void => {
     setDraft(draftFor(next))
     setForm(next)
@@ -156,6 +167,15 @@ function Page(props: PageProps): ReactNode {
           error={props.error}
           onOpen={(id) => open({ kind: 'edit', id })}
           onAdd={() => open({ kind: 'new' })}
+          proofLimit={{
+            value: limit,
+            fallback: 10,
+            error: proofLimitRefusal(limit),
+            onChange: (value) => {
+              props.onProofLimit(value)
+              setLimit(value)
+            },
+          }}
           onAccept={(id) => accept([id])}
           onAcceptAll={() => accept(proposals.map((one) => one.id))}
           onReorder={(ids) => {
@@ -191,6 +211,7 @@ const meta = {
     onRemove: fn(),
     onAccept: fn(),
     onReorder: fn(),
+    onProofLimit: fn(),
   },
   argTypes: {
     checks: { table: { disable: true } },
@@ -232,6 +253,52 @@ export const Filled: Story = {
     const ground = getComputedStyle(head).backgroundColor
     expect(ground).not.toBe('rgba(0, 0, 0, 0)')
     expect(ground).not.toBe(line === undefined ? '' : getComputedStyle(line).backgroundColor)
+  },
+}
+
+const limitField = (canvasElement: HTMLElement): HTMLElement =>
+  within(canvasElement).getByRole('textbox', { name: 'How long a proof may run' })
+
+/**
+ * How long a proof may run, beside the checks: empty, the field shows the default, 10 minutes, in
+ * its quiet tone, and that default applies.
+ */
+export const ProofLimitDefault: Story = {
+  play: async ({ canvasElement }) => {
+    const field = limitField(canvasElement)
+    expect(field).toHaveValue('')
+    expect(field).toHaveAttribute('placeholder', '10')
+    expect(within(canvasElement).getByText(/In minutes/)).toBeVisible()
+    expect(within(canvasElement).queryByRole('button', { name: /Back to the default/ })).toBeNull()
+  },
+}
+
+/** A limit written: 30 minutes, the × that empties it back to the default beside it. */
+export const ProofLimitChanged: Story = {
+  args: { proofLimit: '30' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    expect(limitField(canvasElement)).toHaveValue('30')
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Back to the default time limit of a proof' }),
+    )
+    expect(args.onProofLimit).toHaveBeenLastCalledWith(null)
+    await userEvent.type(limitField(canvasElement), '45')
+    expect(args.onProofLimit).toHaveBeenLastCalledWith('45')
+    expect(canvas.queryByRole('alert')).toBeNull()
+  },
+}
+
+/** A limit the engine refuses: said under the field, in its words. */
+export const ProofLimitRefused: Story = {
+  args: { proofLimit: '0' },
+  play: async ({ canvasElement }) => {
+    expect(await within(canvasElement).findByText('A proof needs at least 1 minute.')).toBeVisible()
+    await userEvent.clear(limitField(canvasElement))
+    await userEvent.type(limitField(canvasElement), '1500')
+    expect(
+      await within(canvasElement).findByText('A proof may run 1440 minutes (24 hours) at most.'),
+    ).toBeVisible()
   },
 }
 
@@ -587,6 +654,113 @@ export const Dense: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getAllByRole('button', { name: /^Move / })).toHaveLength(DENSE_CHECKS.length)
+  },
+}
+
+const rowOf = (canvasElement: HTMLElement, selector: string): HTMLElement => {
+  const row = canvasElement.querySelector<HTMLElement>(selector)
+  if (row === null) throw new Error(`no row ${selector}`)
+  return row
+}
+
+const reduced: Story['render'] = (args) => (
+  <MotionConfig reducedMotion="always">
+    <Page {...args} />
+  </MotionConfig>
+)
+
+/** The checks of Acme but e2e: build alone at the end. */
+const BUILD_ALONE = CHECKS.filter((one) => one.id !== 'e2e')
+
+/** The last check of a moment removed: the moment folds out, its line folding out with it. */
+async function removeBuild(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = rowOf(canvasElement, '[data-check="build"]')
+  const dialog = await body().findByRole('dialog', { name: 'build' })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Remove build' }))
+  await waitFor(() => {
+    expect(within(canvasElement).queryByRole('heading', { name: 'At the end' })).toBeNull()
+  })
+  expect(within(canvasElement).queryByRole('list', { name: 'At the end' })).toBeNull()
+  return row
+}
+
+/** Removing the last check of a moment: its line folds out, and the moment with it. */
+export const RemoveTheLastCheckOfAMoment: Story = {
+  args: { checks: BUILD_ALONE, form: { kind: 'edit', id: 'build' } },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await removeBuild(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the line and its moment are gone at once. */
+export const RemoveTheLastCheckOfAMomentReducedMotion: Story = {
+  args: { checks: BUILD_ALONE, form: { kind: 'edit', id: 'build' } },
+  render: reduced,
+  play: async ({ canvasElement }) => {
+    const row = await removeBuild(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
+  },
+}
+
+/** The last check of the Project removed: its line folds out while Hemera falls asleep. */
+async function removeLint(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = rowOf(canvasElement, '[data-check="lint"]')
+  const dialog = await body().findByRole('dialog', { name: 'lint' })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Remove lint' }))
+  expect(
+    await within(canvasElement).findByRole('heading', { name: 'No check yet' }),
+  ).toBeInTheDocument()
+  return row
+}
+
+/** Removing the last check: its line folds out with its list, and the section says there is none. */
+export const RemoveTheLastCheck: Story = {
+  args: { checks: CHECKS.slice(0, 1), form: { kind: 'edit', id: 'lint' } },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await removeLint(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the line is gone at once, and the section says there is none. */
+export const RemoveTheLastCheckReducedMotion: Story = {
+  args: { checks: CHECKS.slice(0, 1), form: { kind: 'edit', id: 'lint' } },
+  render: reduced,
+  play: async ({ canvasElement }) => {
+    const row = await removeLint(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
+  },
+}
+
+/** Lint alone proposed after each task: accepting it empties that moment's proposals. */
+const LINT_ALONE = PROPOSED_CHECKS.filter((one) => one.id !== 'proposed-typecheck')
+
+async function acceptLint(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const row = rowOf(canvasElement, '[data-proposal="proposed-lint"]')
+  await userEvent.click(within(canvasElement).getByRole('button', { name: 'Accept lint' }))
+  await waitFor(() => {
+    expect(
+      within(canvasElement).queryByRole('list', { name: 'Proposed after each task' }),
+    ).toBeNull()
+  })
+  expect(within(moment(canvasElement, 'After each task')).getAllByRole('listitem')).toHaveLength(1)
+  return row
+}
+
+/** Accepting the last proposal of a moment: it folds out with the proposals of its moment. */
+export const AcceptTheLastProposalOfAMoment: Story = {
+  args: { checks: [], proposals: LINT_ALONE },
+  play: async ({ canvasElement }) => {
+    await foldedOut(await acceptLint(canvasElement))
+  },
+}
+
+/** The same with reduced motion: the proposal is gone at once, lint kept in its place. */
+export const AcceptTheLastProposalOfAMomentReducedMotion: Story = {
+  args: { checks: [], proposals: LINT_ALONE },
+  render: reduced,
+  play: async ({ canvasElement }) => {
+    const row = await acceptLint(canvasElement)
+    await waitFor(() => expect(row).not.toBeInTheDocument())
   },
 }
 

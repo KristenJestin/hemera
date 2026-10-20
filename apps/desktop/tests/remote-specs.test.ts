@@ -77,7 +77,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
-  removeFolders()
+  await removeFolders()
 })
 
 const engine = (

@@ -11,28 +11,36 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 
 import { DatabaseSync } from 'node:sqlite'
-import { Effect } from 'effect'
+import { Deferred, Effect, Fiber, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
+  FOREIGN_GIT_FOLDER,
   type FileDiff,
+  READ_CAP,
   SNAPSHOTS_FOLDER,
   type SnapshotOwner,
   Snapshots,
+  sweepQuarantines,
 } from '../src/engine/building/snapshots.ts'
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
+import { NOT_A_FILE, OVER_CAP, THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
 import { createMission } from '../src/engine/missions.ts'
 import { DATABASE_FILE } from '../src/engine/migrate.ts'
 import { createProject } from '../src/engine/projects.ts'
@@ -42,6 +50,7 @@ import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { domainEvents, fileContents, snapshotFiles } from '../src/engine/storage/schema.ts'
 import { commandsEngine } from './commands-engine.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { git, remote } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -206,6 +215,150 @@ describe('A snapshot leaves the user’s repository untouched', () => {
   })
 })
 
+describe('Two first snapshots of a Project at once share one store', () => {
+  test('a snapshot taken while another creates the Project’s store never creates it over that one, and both are taken', async () => {
+    const { main, worktree } = workspace()
+    // Git refuses a second `init` over one still writing (its config lock, its templates): the
+    // first creation is held while the second snapshot runs from start to end.
+    const firstHeld = Deferred.makeUnsafe<void>()
+    const firstArrived = Deferred.makeUnsafe<void>()
+    const creating = new Set<string>()
+    const createdOver: string[] = []
+    let inits = 0
+    const seen = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (args[0] !== 'init') return real(folder, args, kind, options)
+        const target = args.at(-1) ?? ''
+        if (creating.has(target)) createdOver.push(target)
+        creating.add(target)
+        inits += 1
+        const turn =
+          inits === 1
+            ? Effect.andThen(Deferred.succeed(firstArrived, undefined), Deferred.await(firstHeld))
+            : Effect.void
+        return turn.pipe(
+          Effect.andThen(real(folder, args, kind, options)),
+          Effect.ensuring(Effect.sync(() => creating.delete(target))),
+        )
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const place = { name: 'acme', folder: worktree }
+          const first = yield* Effect.forkChild(
+            Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'start'))),
+          )
+          yield* Deferred.await(firstArrived)
+          const second = yield* Snapshots.use((snapshots) =>
+            snapshots.take(place, attempt(missionId, 'end')),
+          )
+          yield* Deferred.succeed(firstHeld, undefined)
+          return { projectId, missionId, first: yield* Fiber.join(first), second }
+        }),
+      ),
+    )
+
+    expect(createdOver).toEqual([])
+    expect(seen.first).toBe(seen.second)
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(git(store, 'for-each-ref', '--format=%(refname) %(objectname)')).toBe(
+      [
+        `refs/hemera/${seen.missionId}/attempt-1/end/acme ${seen.second}`,
+        `refs/hemera/${seen.missionId}/attempt-1/start/acme ${seen.first}`,
+      ].join('\n'),
+    )
+    expect(readdirSync(join(data, 'snapshots'))).toEqual([`${seen.projectId}.git`])
+  })
+})
+
+describe('A snapshot costs as few Git processes as it needs', () => {
+  // Every `git` is a process, and on a Windows runner one costs 40 to 50 ms where Linux takes 2:
+  // a Building takes dozens of snapshots, so the tests that run one are as slow as their count.
+  test('a snapshot of a linked worktree asks Git where its objects and its index are in one call', async () => {
+    const { main, worktree } = workspace()
+    const asked: string[][] = []
+    const seen = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (folder === worktree) asked.push([...args])
+        return real(folder, args, kind, options)
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const place = { name: 'acme', folder: worktree }
+          // The first snapshot makes the Project's store; the second is the steady state.
+          yield* Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'start')))
+          asked.length = 0
+          // A change to add: with nothing to add, a snapshot runs no `add` at all.
+          writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+          yield* Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'end')))
+          // The subcommand: what follows the options (`-c key=value`, `--no-optional-locks`).
+          return asked.map((args) => {
+            let at = 0
+            while (args[at]?.startsWith('-') === true) at += args[at] === '-c' ? 2 : 1
+            return args[at] ?? ''
+          })
+        }),
+      ),
+    )
+    expect(seen).toEqual(['rev-parse', 'ls-files', 'add', 'write-tree'])
+  })
+
+  test('a Project whose main checkout is a folder of repositories is asked about once, and a repository’s objects once', async () => {
+    // The main checkout holds `api` and is no repository itself: asking it fails every time.
+    const main = join(work, 'acme')
+    const api = mainCheckout(join(main, 'api'))
+    const worktree = join(work, 'workspace', 'api')
+    git(api, 'worktree', 'add', '-q', '-b', 'mission/login', worktree)
+    const sharedFolder = ['rev-parse', '--path-format=absolute', '--git-common-dir']
+    const asked: string[] = []
+    const seen = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (args.join(' ') === sharedFolder.join(' ')) asked.push(folder)
+        return real(folder, args, kind, options)
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const project = yield* createProject({
+            name: 'Acme',
+            mainCheckout: main,
+            repositories: ['api'],
+          })
+          const mission = yield* createMission({
+            projectId: project.id,
+            idea: { sentence: 'Add the login form', ticket: null },
+          })
+          const place = { name: 'api', folder: worktree }
+          const between = (attemptId: string) =>
+            Effect.gen(function* () {
+              writeFileSync(join(worktree, `${attemptId}.txt`), 'the form\n')
+              const first = yield* Snapshots.use((snapshots) =>
+                snapshots.take(place, attempt(mission.id, 'start', attemptId)),
+              )
+              writeFileSync(join(worktree, `${attemptId}-more.txt`), 'the form\n')
+              const second = yield* Snapshots.use((snapshots) =>
+                snapshots.take(place, attempt(mission.id, 'end', attemptId)),
+              )
+              return yield* Snapshots.use((snapshots) =>
+                snapshots.changed(mission.id, place, first, second),
+              )
+            })
+          // The first attempt looks the folders up; the second is the steady state.
+          yield* between('one')
+          asked.length = 0
+          const files = yield* between('two')
+          return { files: files.map((file) => file.path), asked: [...asked] }
+        }),
+      ),
+    )
+    expect(seen.files).toEqual(['two-more.txt'])
+    expect(seen.asked).toEqual([])
+  })
+})
+
 describe('Two snapshots around a change give exactly its files', () => {
   test('each file with its status, its old path, its line counts and the size of each side', async () => {
     const { main, worktree } = workspace()
@@ -348,6 +501,74 @@ describe('A linked worktree is snapshotted through its own index', () => {
       'tracked.txt',
     ])
     expect({ worktree: observed(worktree), main: observed(main) }).toEqual(before)
+  })
+})
+
+/** Every file of a repository's Git folders (its own, and the one it shares), by path. */
+function gitFolderFiles(cwd: string): ReadonlyArray<string> {
+  const folders = ['--absolute-git-dir', '--git-common-dir'].map((flag) =>
+    git(cwd, 'rev-parse', '--path-format=absolute', flag),
+  )
+  return [...new Set(folders.flatMap(filesUnder))].sort()
+}
+
+describe('A snapshot of a repository with a split index', () => {
+  /** A snapshot of `worktree`, and the files its Git folders held before and after it. */
+  const snapshotAround = (main: string, worktree: string) => {
+    const before = gitFolderFiles(worktree)
+    return commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const tree = yield* snapshots.take(
+            { name: 'acme', folder: worktree },
+            attempt(missionId, 'start'),
+          )
+          return { tree, before, after: gitFolderFiles(worktree) }
+        }),
+      ),
+    )
+  }
+
+  /** Enough tracked files that changing them all is more than a split index keeps in its own file. */
+  const manyFiles = (main: string, worktree: string) => {
+    for (let n = 0; n < 20; n++) writeFileSync(join(main, `file-${n}.txt`), `${n}\n`)
+    git(main, 'add', '.')
+    git(main, 'commit', '-q', '-m', 'many')
+    git(worktree, 'merge', '-q', 'main')
+    for (let n = 0; n < 20; n++) writeFileSync(join(worktree, `file-${n}.txt`), `changed ${n}\n`)
+  }
+
+  test('a snapshot of a repository with core.splitIndex set writes nothing into its Git folder', async () => {
+    const { main, worktree } = workspace()
+    manyFiles(main, worktree)
+    // Set once the index exists, whole: the first write to a copy of it is the one that splits it.
+    git(worktree, 'config', 'core.splitIndex', 'true')
+    writeFileSync(join(worktree, 'untracked.txt'), 'loose\n')
+    const before = observed(worktree)
+
+    const seen = await snapshotAround(main, worktree)
+
+    expect(seen.after).toEqual(seen.before)
+    expect(seen.after.filter((path) => path.includes('sharedindex'))).toEqual([])
+    expect(observed(worktree)).toEqual(before)
+    expect(seen.tree).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  test('a snapshot of a repository whose index is already split writes nothing into its Git folder', async () => {
+    const { main, worktree } = workspace()
+    manyFiles(main, worktree)
+    git(worktree, 'update-index', '--split-index')
+    // Many files Git has not seen: more than a split index keeps in its own file asks for a new one.
+    for (let n = 0; n < 40; n++) writeFileSync(join(worktree, `new-${n}.txt`), `${n}\n`)
+    const before = observed(worktree)
+
+    const seen = await snapshotAround(main, worktree)
+
+    expect(seen.after).toEqual(seen.before)
+    expect(observed(worktree)).toEqual(before)
+    expect(seen.tree).toMatch(/^[0-9a-f]{40}$/)
   })
 })
 
@@ -671,6 +892,74 @@ describe('A secret in a copied content is masked', () => {
   })
 })
 
+describe('A large file is masked in slices the engine answers between (#402)', () => {
+  test('a large JSON file a snapshot captures is stored masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const { main, worktree } = workspace()
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    const expected = unwatched.mask(original)
+    expect(expected).not.toContain(value)
+
+    const rows = await commandsEngine(data, { secrets })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const acme = { name: 'acme', folder: worktree }
+          const start = yield* snapshots.take(acme, attempt(missionId, 'start'))
+          writeFileSync(join(worktree, 'lock.json'), original)
+          const end = yield* snapshots.take(acme, attempt(missionId, 'end'))
+          const files = yield* snapshots.changed(missionId, acme, start, end)
+          yield* snapshots.capture(missionId, acme, start, end, files)
+          return yield* Database.use((database) => database.select().from(fileContents)).pipe(
+            Effect.orDie,
+          )
+        }),
+      ),
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.masked).toBe(true)
+    expect(rows[0]?.bytes.toString('utf8')).toBe(expected)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(1)
+    expect(watch.pacedTurns[0]).toBeGreaterThan(0)
+  })
+})
+
+describe('A large file read from a snapshot is masked in slices too (#402)', () => {
+  test('a large JSON file read back from a tree of the store comes masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const { main, worktree } = workspace()
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+
+    const read = await commandsEngine(data, { secrets })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const snapshots = yield* Snapshots
+          const acme = { name: 'acme', folder: worktree }
+          writeFileSync(join(worktree, 'lock.json'), original)
+          const end = yield* snapshots.take(acme, attempt(missionId, 'end'))
+          return yield* snapshots.read(missionId, acme, end, 'lock.json')
+        }),
+      ),
+    )
+
+    expect(text(read)).toBe(unwatched.mask(original))
+    expect(read?.masked).toBe(true)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns).toHaveLength(1)
+    expect(watch.pacedTurns[0]).toBeGreaterThan(0)
+  })
+})
+
 describe('A content is stored once across the Profile', () => {
   test('the same content changed in two missions, and captured twice, is one row', async () => {
     const { main, worktree } = workspace()
@@ -777,6 +1066,837 @@ describe('A refused snapshot leaves nothing behind', () => {
     )
 
     expect(refusal.message).toMatch(/^fatal: /)
+  })
+})
+
+describe('A checkpoint reads only the repository’s own Git folder, and never waits on it (#439)', () => {
+  /** The Workspace's worktree, and the Git folder the main checkout keeps for it. */
+  const ownEntry = () => {
+    const { main, worktree } = workspace()
+    const entry = git(worktree, 'rev-parse', '--path-format=absolute', '--absolute-git-dir')
+    return { main, worktree, entry }
+  }
+
+  /**
+   * Points the worktree's `.git` at another Git folder. It is removed first: Git for Windows makes
+   * it hidden, and Windows refuses to open a hidden file for writing over (EPERM).
+   */
+  const pointAt = (worktree: string, folder: string) => {
+    rmSync(join(worktree, '.git'))
+    writeFileSync(join(worktree, '.git'), `gitdir: ${folder}\n`)
+  }
+
+  /** A Git folder of an agent's making, which the worktree's `.git` is pointed at. */
+  const pointedAtFake = (worktree: string, index: (fake: string) => void) => {
+    const fake = join(work, 'fake-git')
+    mkdirSync(fake)
+    git(fake, 'init', '-q', '-b', 'main')
+    const folder = join(fake, '.git')
+    index(join(folder, 'index'))
+    pointAt(worktree, folder)
+    return folder
+  }
+
+  /** A checkpoint of the worktree, taken while another call of the engine is answered. */
+  const checkpointOf = (main: string, worktree: string) =>
+    commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { missionId } = yield* missionOf(main)
+          const checkpoints = yield* Checkpoints
+          const taking = yield* Effect.forkChild(
+            Effect.result(
+              checkpoints.take(missionId, 'review', [
+                { name: 'acme', folder: worktree, baseRef: 'origin/main', baseCommit: null },
+              ]),
+            ),
+          )
+          // Another call of the engine, answered while the checkpoint is taken.
+          const answered = yield* Database.use((database) =>
+            database.select().from(domainEvents),
+          ).pipe(Effect.orDie)
+          const taken = yield* Fiber.join(taking)
+          return {
+            answered: answered.length > 0,
+            refusal: Result.isFailure(taken) ? taken.failure.message : null,
+          }
+        }),
+      ),
+    )
+
+  test.skipIf(process.platform === 'win32')(
+    'a worktree whose .git points at a Git folder with a pipe as index: the checkpoint is refused at once, and the engine answers another call meanwhile',
+    async () => {
+      const { main, worktree } = workspace()
+      pointedAtFake(worktree, (index) => execFileSync('mkfifo', [index]))
+
+      const seen = await checkpointOf(main, worktree)
+
+      expect(seen.answered).toBe(true)
+      expect(seen.refusal).toContain(FOREIGN_GIT_FOLDER)
+    },
+  )
+
+  test('a worktree whose .git points at a Git folder outside the repository: its index is never read', async () => {
+    const { main, worktree } = workspace()
+    const fake = pointedAtFake(worktree, (index) => writeFileSync(index, 'an index of elsewhere'))
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(FOREIGN_GIT_FOLDER)
+    expect(seen.refusal).toContain(realpathSync.native(fake))
+  })
+
+  test('a worktree whose .git points at a Git folder of its own making that names the repository’s shared one: its index is never read', async () => {
+    const { main, worktree, entry } = ownEntry()
+    const fake = join(work, 'fake-entry')
+    mkdirSync(fake)
+    writeFileSync(join(fake, 'HEAD'), readFileSync(join(entry, 'HEAD')))
+    writeFileSync(join(fake, 'commondir'), `${join(main, '.git')}\n`)
+    writeFileSync(join(fake, 'gitdir'), `${join(worktree, '.git')}\n`)
+    writeFileSync(join(fake, 'index'), 'an index of elsewhere')
+    pointAt(worktree, fake)
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(FOREIGN_GIT_FOLDER)
+    expect(seen.refusal).toContain(realpathSync.native(fake))
+  })
+
+  test('a sensitive file reached through a folder link leading outside is never read', async () => {
+    const { main, worktree } = workspace()
+    mkdirSync(join(worktree, 'config'))
+    writeFileSync(join(worktree, 'config', '.env.local'), 'TOKEN=inside\n')
+    git(worktree, 'add', 'config/.env.local')
+    git(worktree, 'commit', '-q', '-m', 'config')
+    const outside = join(work, 'outside-config')
+    mkdirSync(outside)
+    writeFileSync(join(outside, '.env.local'), 'TOKEN=outside\n')
+    rmSync(join(worktree, 'config'), { recursive: true })
+    symlinkSync(outside, join(worktree, 'config'), 'junction')
+
+    const seen = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const tree = yield* Snapshots.use((snapshots) =>
+            snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'end')),
+          )
+          return { projectId, tree }
+        }),
+      ),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(treeFiles(store, seen.tree, objectsOf(main))).not.toContain('config/.env.local')
+    const everything = execFileSync(
+      'git',
+      ['cat-file', '--batch-all-objects', '--batch', '--unordered'],
+      { cwd: store, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    )
+    expect(everything).not.toContain('TOKEN=outside')
+  })
+
+  test('a tracked sensitive file replaced by a link is left out of the tree, its old content with it', async (context) => {
+    const { main, worktree } = workspace()
+    mkdirSync(join(worktree, 'config'))
+    writeFileSync(join(worktree, 'config', '.env.local'), 'TOKEN=committed-before-29\n')
+    writeFileSync(join(worktree, 'notes.txt'), 'notes\n')
+    git(worktree, 'add', 'config/.env.local', 'notes.txt')
+    git(worktree, 'commit', '-q', '-m', 'config')
+    rmSync(join(worktree, 'config', '.env.local'))
+    try {
+      symlinkSync(join(worktree, 'notes.txt'), join(worktree, 'config', '.env.local'), 'file')
+    } catch {
+      context.skip()
+    }
+
+    const seen = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const tree = yield* Snapshots.use((snapshots) =>
+            snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'end')),
+          )
+          return { projectId, tree }
+        }),
+      ),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).toContain('notes.txt')
+    expect(files).not.toContain('config/.env.local')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe as the index of the worktree’s own Git folder: the checkpoint is refused at once',
+    async () => {
+      const { main, worktree, entry } = ownEntry()
+      rmSync(join(entry, 'index'))
+      execFileSync('mkfifo', [join(entry, 'index')])
+
+      const seen = await checkpointOf(main, worktree)
+
+      expect(seen.answered).toBe(true)
+      expect(seen.refusal).toContain(NOT_A_FILE)
+    },
+  )
+
+  test('a link as the index of the worktree’s own Git folder is never followed', async (context) => {
+    const { main, worktree, entry } = ownEntry()
+    const elsewhere = join(work, 'elsewhere-index')
+    renameSync(join(entry, 'index'), elsewhere)
+    try {
+      symlinkSync(elsewhere, join(entry, 'index'), 'file')
+    } catch {
+      context.skip()
+    }
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(THROUGH_A_LINK)
+  })
+
+  test('an index larger than the cap is refused, never read', async () => {
+    const { main, worktree, entry } = ownEntry()
+    truncateSync(join(entry, 'index'), READ_CAP + 1)
+
+    const seen = await checkpointOf(main, worktree)
+
+    expect(seen.refusal).toContain(OVER_CAP)
+  })
+
+  test('an ordinary checkpoint of a worktree is still taken', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+    expect(await checkpointOf(main, worktree)).toEqual({ answered: true, refusal: null })
+  })
+
+  test('an ordinary checkpoint of the main checkout is still taken', async () => {
+    const { main } = workspace()
+    writeFileSync(join(main, 'form.txt'), 'the form\n')
+
+    expect(await checkpointOf(main, main)).toEqual({ answered: true, refusal: null })
+  })
+})
+
+describe('A snapshot adds only the paths it listed and checked', () => {
+  /** The subcommand of a Git call: what follows its options (`-c key=value`, `--no-optional-locks`). */
+  const subcommandOf = (args: ReadonlyArray<string>): string => {
+    let at = 0
+    while (args[at]?.startsWith('-') === true) at += args[at] === '-c' ? 2 : 1
+    return args[at] ?? ''
+  }
+
+  /** A snapshot of the worktree, `meanwhile` run once its paths are listed and before it adds. */
+  const takenWith = (main: string, worktree: string, meanwhile: () => void) => {
+    let held = false
+    return commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        if (subcommandOf(args) !== 'add' || held) return real(folder, args, kind, options)
+        held = true
+        return Effect.andThen(Effect.sync(meanwhile), real(folder, args, kind, options))
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          const tree = yield* Snapshots.use((snapshots) =>
+            snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'end')),
+          )
+          return { projectId, tree }
+        }),
+      ),
+    )
+  }
+
+  /** Every object of a Project's store, printed. */
+  const storeObjects = (projectId: string) =>
+    execFileSync('git', ['cat-file', '--batch-all-objects', '--batch', '--unordered'], {
+      cwd: join(data, 'snapshots', `${projectId}.git`),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    })
+
+  test('a sensitive file created between the listing and the add is never stored', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+    const seen = await takenWith(main, worktree, () =>
+      writeFileSync(join(worktree, '.env'), 'API_KEY=created-meanwhile-55\n'),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(existsSync(join(worktree, '.env'))).toBe(true)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).toContain('form.txt')
+    expect(files).not.toContain('.env')
+    expect(storeObjects(seen.projectId)).not.toContain('created-meanwhile-55')
+  })
+
+  test('a folder link leading outside, made between the listing and the add, is never followed', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+    const outside = join(work, 'outside-cfg')
+    mkdirSync(outside)
+    writeFileSync(join(outside, '.env'), 'TOKEN=junction-meanwhile-81\n')
+
+    const seen = await takenWith(main, worktree, () =>
+      symlinkSync(outside, join(worktree, 'cfg'), 'junction'),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).toContain('form.txt')
+    expect(files).not.toContain('cfg/.env')
+    expect(storeObjects(seen.projectId)).not.toContain('junction-meanwhile-81')
+  })
+
+  test('with only a sensitive file to add, a snapshot runs no add that would take the whole folder', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, '.env'), 'API_KEY=listed-and-withheld\n')
+
+    // An add with no path at all would take the whole folder, and what was made there since.
+    const seen = await takenWith(main, worktree, () =>
+      writeFileSync(join(worktree, '.env.production'), 'API_KEY=whole-folder-37\n'),
+    )
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(treeFiles(store, seen.tree, objectsOf(main))).toContain('.env')
+    expect(existsSync(join(worktree, '.env.production'))).toBe(false)
+    expect(storeObjects(seen.projectId)).not.toContain('whole-folder-37')
+  })
+
+  /** The Workspace with a tracked `settings` file, committed, that the test then replaces. */
+  const withSettings = () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'settings'), 'plain settings\n')
+    git(worktree, 'add', 'settings')
+    git(worktree, 'commit', '-q', '-m', 'settings')
+    return { main, worktree }
+  }
+
+  test('a tracked file replaced by a folder holding a sensitive file: its other files are kept, the secret never reaches the store', async () => {
+    const { main, worktree } = withSettings()
+    rmSync(join(worktree, 'settings'))
+    mkdirSync(join(worktree, 'settings'))
+    writeFileSync(join(worktree, 'settings', '.env.local'), 'TOKEN=probe-secret-17\n')
+    writeFileSync(join(worktree, 'settings', 'notes.txt'), 'notes\n')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).toContain('settings/notes.txt')
+    expect(files).not.toContain('settings')
+    expect(storeObjects(seen.projectId)).not.toContain('probe-secret-17')
+  })
+
+  test('a tracked file replaced by a folder holding only a sensitive file leaves the tree', async () => {
+    const { main, worktree } = withSettings()
+    rmSync(join(worktree, 'settings'))
+    mkdirSync(join(worktree, 'settings'))
+    writeFileSync(join(worktree, 'settings', '.env.local'), 'TOKEN=probe-secret-19\n')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).not.toContain('settings')
+    expect(storeObjects(seen.projectId)).not.toContain('probe-secret-19')
+  })
+
+  test('a repository nested in the Workspace is kept as its commit, never walked into', async () => {
+    const { main, worktree } = workspace()
+    const nested = join(worktree, 'vendor', 'lib')
+    mkdirSync(nested, { recursive: true })
+    git(nested, 'init', '-q', '-b', 'main')
+    writeFileSync(join(nested, 'index.js'), 'export {}\n')
+    git(nested, 'add', 'index.js')
+    git(nested, 'commit', '-q', '-m', 'lib')
+    const commit = git(nested, 'rev-parse', 'HEAD')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(execInStore(store, objectsOf(main), 'ls-tree', seen.tree, 'vendor/lib')).toBe(
+      `160000 commit ${commit}\tvendor/lib`,
+    )
+  })
+
+  test('a path holding glob characters is added as itself, and its neighbours with it', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'x[1]'), 'bracketed\n')
+    mkdirSync(join(worktree, 'x1'))
+    writeFileSync(join(worktree, 'x1', 'notes.txt'), 'notes\n')
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    expect(treeFiles(store, seen.tree, objectsOf(main))).toEqual(
+      expect.arrayContaining(['x[1]', 'x1/notes.txt']),
+    )
+  })
+
+  test('a tracked file replaced by a link to a folder outside is never followed', async (context) => {
+    const { main, worktree } = withSettings()
+    const outside = join(work, 'outside-settings')
+    mkdirSync(outside)
+    writeFileSync(join(outside, '.env'), 'TOKEN=outside-folder-23\n')
+    rmSync(join(worktree, 'settings'))
+    try {
+      symlinkSync(outside, join(worktree, 'settings'), 'junction')
+    } catch {
+      context.skip()
+    }
+
+    const seen = await takenWith(main, worktree, () => {})
+
+    expect(storeObjects(seen.projectId)).not.toContain('outside-folder-23')
+  })
+
+  test('a tracked file replaced by a folder between the listing and the add: nothing under it is added', async () => {
+    const { main, worktree } = withSettings()
+    writeFileSync(join(worktree, 'settings'), 'changed settings\n')
+
+    const seen = await takenWith(main, worktree, () => {
+      rmSync(join(worktree, 'settings'))
+      mkdirSync(join(worktree, 'settings'))
+      writeFileSync(join(worktree, 'settings', '.env.local'), 'TOKEN=made-meanwhile-41\n')
+    })
+
+    expect(existsSync(join(worktree, 'settings', '.env.local'))).toBe(true)
+    expect(storeObjects(seen.projectId)).not.toContain('made-meanwhile-41')
+  })
+
+  test('a file removed between the listing and the add leaves the snapshot taken without it', async () => {
+    const { main, worktree } = workspace()
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+    writeFileSync(join(worktree, 'build.tmp'), 'scratch\n')
+
+    const seen = await takenWith(main, worktree, () => rmSync(join(worktree, 'build.tmp')))
+
+    const store = join(data, 'snapshots', `${seen.projectId}.git`)
+    const files = treeFiles(store, seen.tree, objectsOf(main))
+    expect(files).toContain('form.txt')
+    expect(files).not.toContain('build.tmp')
+  })
+  describe('A checkpoint never stores a file reached through a link leading outside (#449)', () => {
+    /** A folder outside the repository holding a plain `notes.txt` with this marker. */
+    const outsideNotes = (name: string, marker: string) => {
+      const outside = join(work, name)
+      mkdirSync(outside)
+      writeFileSync(join(outside, 'notes.txt'), `${marker}\n`)
+      return outside
+    }
+
+    /** The tree's entry at a path as `ls-tree` prints it, its mode first; '' when it has none. */
+    const entryAt = (projectId: string, main: string, tree: string, path: string) =>
+      execInStore(
+        join(data, 'snapshots', `${projectId}.git`),
+        objectsOf(main),
+        'ls-tree',
+        tree,
+        '--',
+        path,
+      )
+
+    /** The files of a snapshot's tree, by path. */
+    const filesOf = (projectId: string, main: string, tree: string) =>
+      treeFiles(join(data, 'snapshots', `${projectId}.git`), tree, objectsOf(main))
+
+    test('an untracked junction to an outside folder: the link is kept, notes.txt is not', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      symlinkSync(outsideNotes('outside-a', 'OUTSIDE-NOTES-11'), join(worktree, 'link'), 'junction')
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('link/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'link')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-11')
+    })
+
+    test('a tracked file replaced by a junction to an outside folder: the link is kept, notes.txt is not', async () => {
+      const { main, worktree } = withSettings()
+      rmSync(join(worktree, 'settings'))
+      symlinkSync(
+        outsideNotes('outside-b', 'OUTSIDE-NOTES-12'),
+        join(worktree, 'settings'),
+        'junction',
+      )
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('settings/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'settings')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-12')
+    })
+
+    test('a junction nested below a normal folder: its neighbour is kept, notes.txt is not', async () => {
+      const { main, worktree } = workspace()
+      mkdirSync(join(worktree, 'a', 'b'), { recursive: true })
+      writeFileSync(join(worktree, 'a', 'b', 'plain.txt'), 'plain\n')
+      symlinkSync(
+        outsideNotes('outside-c', 'OUTSIDE-NOTES-13'),
+        join(worktree, 'a', 'b', 'link'),
+        'junction',
+      )
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('a/b/plain.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('a/b/link/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'a/b/link')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-13')
+    })
+
+    test('a tracked folder replaced by a junction to an outside folder: the snapshot is taken with the link alone', async () => {
+      const { main, worktree } = workspace()
+      mkdirSync(join(worktree, 'docs'))
+      writeFileSync(join(worktree, 'docs', 'notes.txt'), 'the committed notes\n')
+      git(worktree, 'add', 'docs')
+      git(worktree, 'commit', '-q', '-m', 'docs')
+      rmSync(join(worktree, 'docs'), { recursive: true })
+      symlinkSync(outsideNotes('outside-d', 'OUTSIDE-NOTES-14'), join(worktree, 'docs'), 'junction')
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('docs/notes.txt')
+      expect(entryAt(seen.projectId, main, seen.tree, 'docs')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-14')
+    })
+
+    test('a link swapped for a folder between the listing and the add: nothing under it is added', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      symlinkSync(
+        outsideNotes('outside-e', 'OUTSIDE-NOTES-15'),
+        join(worktree, 'cache'),
+        'junction',
+      )
+
+      const seen = await takenWith(main, worktree, () => {
+        rmSync(join(worktree, 'cache'))
+        mkdirSync(join(worktree, 'cache'))
+        writeFileSync(join(worktree, 'cache', '.env'), 'TOKEN=swapped-in-65\n')
+        writeFileSync(join(worktree, 'cache', 'notes.txt'), 'swapped-notes-66\n')
+      })
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      const objects = storeObjects(seen.projectId)
+      expect(objects).not.toContain('swapped-in-65')
+      expect(objects).not.toContain('swapped-notes-66')
+      expect(objects).not.toContain('OUTSIDE-NOTES-15')
+    })
+
+    test('a file swapped for a junction to an outside folder between the listing and the add: notes.txt is not stored', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      writeFileSync(join(worktree, 'report'), 'the report\n')
+      const outside = outsideNotes('outside-f', 'OUTSIDE-NOTES-16')
+
+      const seen = await takenWith(main, worktree, () => {
+        rmSync(join(worktree, 'report'))
+        symlinkSync(outside, join(worktree, 'report'), 'junction')
+      })
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('report/notes.txt')
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-16')
+    })
+
+    test('a folder on the way swapped for a junction to an outside folder between the listing and the add: notes.txt is not stored', async () => {
+      const { main, worktree } = workspace()
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+      mkdirSync(join(worktree, 'a', 'b'), { recursive: true })
+      writeFileSync(join(worktree, 'a', 'b', 'notes.txt'), 'the inside notes\n')
+      const outside = outsideNotes('outside-g', 'OUTSIDE-NOTES-17')
+
+      const seen = await takenWith(main, worktree, () => {
+        rmSync(join(worktree, 'a', 'b'), { recursive: true })
+        symlinkSync(outside, join(worktree, 'a', 'b'), 'junction')
+      })
+
+      expect(filesOf(seen.projectId, main, seen.tree)).toContain('form.txt')
+      expect(filesOf(seen.projectId, main, seen.tree)).not.toContain('a/b/notes.txt')
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-17')
+    })
+
+    test('a link to a file outside: the checkpoint keeps the link, and its copy never holds the file', async (context) => {
+      const { main, worktree } = workspace()
+      const target = join(outsideNotes('outside-h', 'OUTSIDE-NOTES-18'), 'notes.txt')
+      try {
+        symlinkSync(target, join(worktree, 'notes-link'), 'file')
+      } catch {
+        context.skip()
+      }
+      const copy = join(work, 'copy')
+
+      const seen = await commandsEngine(data)(({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const { projectId, missionId } = yield* missionOf(main)
+            const repository = { name: 'acme', folder: worktree }
+            const tree = yield* Snapshots.use((snapshots) =>
+              snapshots.take(repository, attempt(missionId, 'end')),
+            )
+            yield* Snapshots.use((snapshots) =>
+              snapshots.materialize(missionId, repository, tree, copy),
+            )
+            return { projectId, tree }
+          }),
+        ),
+      )
+
+      expect(entryAt(seen.projectId, main, seen.tree, 'notes-link')).toMatch(/^120000 blob /)
+      expect(storeObjects(seen.projectId)).not.toContain('OUTSIDE-NOTES-18')
+      // The copy holds the link back, which the reviewers' reads refuse to follow, never the file.
+      const copied = join(copy, 'notes-link')
+      expect(lstatSync(copied).isFile() ? readFileSync(copied, 'utf8') : '').not.toContain(
+        'OUTSIDE-NOTES-18',
+      )
+    })
+
+    test('a link inside the repository is kept as the link Git stores', async (context) => {
+      const { main, worktree } = workspace()
+      mkdirSync(join(worktree, 'inner'))
+      writeFileSync(join(worktree, 'inner', 'x.txt'), 'x\n')
+      symlinkSync(join(worktree, 'inner'), join(worktree, 'alias'), 'junction')
+      try {
+        symlinkSync('tracked.txt', join(worktree, 'tracked-link'), 'file')
+        symlinkSync(join(worktree, 'inner'), join(worktree, 'inner-link'), 'dir')
+      } catch {
+        context.skip()
+      }
+
+      const seen = await takenWith(main, worktree, () => {})
+
+      const files = filesOf(seen.projectId, main, seen.tree)
+      expect(files).toEqual(expect.arrayContaining(['inner/x.txt', 'alias', 'tracked-link']))
+      expect(files).not.toContain('alias/x.txt')
+      const blob = execFileSync('git', ['hash-object', '--stdin'], {
+        cwd: worktree,
+        input: 'tracked.txt',
+        encoding: 'utf8',
+      }).trim()
+      expect(entryAt(seen.projectId, main, seen.tree, 'tracked-link')).toBe(
+        `120000 blob ${blob}\ttracked-link`,
+      )
+      expect(entryAt(seen.projectId, main, seen.tree, 'alias')).toMatch(/^120000 blob /)
+      // A folder link to an absolute target, as Git itself stores it (`/` on Windows too).
+      const own = { ...process.env, GIT_INDEX_FILE: join(work, 'own-index') }
+      execFileSync('git', ['add', '--', 'inner-link'], { cwd: worktree, env: own })
+      const stored = execFileSync('git', ['ls-files', '-s', '--', 'inner-link'], {
+        cwd: worktree,
+        env: own,
+        encoding: 'utf8',
+      })
+      expect(entryAt(seen.projectId, main, seen.tree, 'inner-link')).toBe(
+        stored.trim().replace(/^120000 (\w+) 0\t/, '120000 blob $1\t'),
+      )
+    })
+  })
+})
+
+describe('A quarantine left by a crash is swept when the store opens (#455)', () => {
+  /** The folders of an object folder that are a snapshot's quarantine. */
+  const quarantinesIn = (objects: string) =>
+    readdirSync(objects).filter((name) => name.startsWith('incoming-'))
+
+  /**
+   * A Project whose store a first run made, closed. The suite then plants what a crash left, and
+   * the next opening of the engine is the one that must sweep it.
+   */
+  const closedStore = async () => {
+    const { main, worktree } = workspace()
+    const made = await commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { projectId, missionId } = yield* missionOf(main)
+          yield* Snapshots.use((snapshots) =>
+            snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'start')),
+          )
+          return { projectId, missionId }
+        }),
+      ),
+    )
+    const store = join(data, 'snapshots', `${made.projectId}.git`)
+    return { main, worktree, store, objects: join(store, 'objects'), missionId: made.missionId }
+  }
+
+  /** The engine opened again over the same data: one snapshot of the worktree, nothing held. */
+  const reopened = (missionId: string, worktree: string) =>
+    commandsEngine(data)(({ profile }) =>
+      profile.use(
+        Snapshots.use((snapshots) =>
+          snapshots.take({ name: 'acme', folder: worktree }, attempt(missionId, 'end')),
+        ),
+      ),
+    )
+
+  /** A quarantine as a crash leaves it: a folder of objects, with what Git wrote half done. */
+  const strayIn = (objects: string, name: string) => {
+    const folder = join(objects, name)
+    mkdirSync(join(folder, 'ab'), { recursive: true })
+    writeFileSync(join(folder, 'ab', 'cdef0123'), 'half written object\n')
+    return folder
+  }
+
+  test('a stray objects/incoming-x folder with a file in it is gone after the store opens, and a snapshot works', async () => {
+    const { worktree, store, objects, missionId } = await closedStore()
+    const stray = strayIn(objects, 'incoming-x')
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+    const tree = await reopened(missionId, worktree)
+
+    expect(existsSync(stray)).toBe(false)
+    expect(quarantinesIn(objects)).toEqual([])
+    expect(git(store, 'rev-parse', '--verify', `refs/hemera/${missionId}/attempt-1/end/acme`)).toBe(
+      tree,
+    )
+    expect(git(store, 'cat-file', '-t', tree)).toBe('tree')
+  })
+
+  test('two snapshots in parallel: the quarantine of the one still running is never removed by the other', async () => {
+    const { worktree, objects, missionId } = await closedStore()
+    const stray = strayIn(objects, 'incoming-stray')
+    writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+    const firstHeld = Deferred.makeUnsafe<void>()
+    const firstArrived = Deferred.makeUnsafe<void>()
+    let adds = 0
+    let whileHeld: string[] = []
+    let afterSecond: string[] = []
+
+    const trees = await commandsEngine(data, {
+      snapshotsGit: (real) => (folder, args, kind, options) => {
+        const subcommand = args.find((arg) => !arg.startsWith('-') && !arg.includes('=')) ?? ''
+        if (subcommand !== 'add') return real(folder, args, kind, options)
+        adds += 1
+        if (adds > 1) return real(folder, args, kind, options)
+        // The first snapshot stands at its `add` with its quarantine made, until the second ends.
+        return Effect.andThen(
+          Effect.sync(() => {
+            whileHeld = quarantinesIn(objects)
+          }),
+          Effect.andThen(
+            Deferred.succeed(firstArrived, undefined),
+            Effect.andThen(Deferred.await(firstHeld), real(folder, args, kind, options)),
+          ),
+        )
+      },
+    })(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const place = { name: 'acme', folder: worktree }
+          const first = yield* Effect.forkChild(
+            Snapshots.use((snapshots) => snapshots.take(place, attempt(missionId, 'end'))),
+          )
+          yield* Deferred.await(firstArrived)
+          const second = yield* Snapshots.use((snapshots) =>
+            snapshots.take(place, attempt(missionId, 'start', 'attempt-2')),
+          )
+          afterSecond = quarantinesIn(objects)
+          yield* Deferred.succeed(firstHeld, undefined)
+          return { first: yield* Fiber.join(first), second }
+        }),
+      ),
+    )
+
+    expect(existsSync(stray)).toBe(false)
+    // The first snapshot's own quarantine was there when it stood at `add`, and still there when
+    // the second had been taken.
+    expect(whileHeld).toHaveLength(1)
+    expect(afterSecond).toEqual(whileHeld)
+    expect(trees.first).toBe(trees.second)
+    expect(quarantinesIn(objects)).toEqual([])
+  })
+
+  test('a sweep given the quarantine of a running snapshot leaves it, and removes the others', () => {
+    const objects = join(work, 'objects')
+    const running = strayIn(objects, 'incoming-running')
+    const left = strayIn(objects, 'incoming-left')
+
+    sweepQuarantines(objects, new Set([running]))
+
+    expect(existsSync(running)).toBe(true)
+    expect(existsSync(left)).toBe(false)
+  })
+
+  test('only an incoming-* folder directly under objects is removed: packs, object folders and look-alikes stay', async () => {
+    const { worktree, store, objects, missionId } = await closedStore()
+    mkdirSync(join(objects, 'pack'), { recursive: true })
+    writeFileSync(join(objects, 'pack', 'pack-incoming-1.pack'), 'a pack\n')
+    writeFileSync(join(objects, 'pack', 'pack-incoming-1.idx'), 'its index\n')
+    mkdirSync(join(objects, 'info'), { recursive: true })
+    writeFileSync(join(objects, 'info', 'packs'), 'P pack-incoming-1.pack\n')
+    // A folder of Git's own fan-out holding something named like a quarantine.
+    mkdirSync(join(objects, 'ab', 'incoming-nested'), { recursive: true })
+    writeFileSync(join(objects, 'ab', 'incoming-nested', 'kept'), 'kept\n')
+    // Not a folder: a file with the name.
+    writeFileSync(join(objects, 'incoming-file'), 'a file, not ours\n')
+    // Near misses of the name, and a folder of the store itself beside objects.
+    mkdirSync(join(objects, 'incoming'))
+    writeFileSync(join(objects, 'incoming', 'kept'), 'kept\n')
+    mkdirSync(join(objects, 'Incoming-capital'))
+    mkdirSync(join(store, 'incoming-beside'))
+    writeFileSync(join(store, 'incoming-beside', 'kept'), 'kept\n')
+    const stray = strayIn(objects, 'incoming-x')
+    const before = filesUnder(store).filter((file) => !file.startsWith(stray))
+
+    await reopened(missionId, worktree)
+
+    expect(existsSync(stray)).toBe(false)
+    // Every file of the store is still there, but the stray's; the snapshot added its own.
+    expect(filesUnder(store)).toEqual(expect.arrayContaining(before))
+    expect(existsSync(join(objects, 'incoming'))).toBe(true)
+    expect(existsSync(join(objects, 'Incoming-capital'))).toBe(true)
+    expect(existsSync(join(objects, 'incoming-file'))).toBe(true)
+    expect(existsSync(join(store, 'incoming-beside', 'kept'))).toBe(true)
+    expect(existsSync(join(objects, 'ab', 'incoming-nested', 'kept'))).toBe(true)
+  })
+
+  test('a link named incoming-x leading outside is removed itself, and what it leads to is never followed', async (context) => {
+    const { worktree, objects, missionId } = await closedStore()
+    const outside = join(work, 'outside-quarantine')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'keep.txt'), 'outside content\n')
+    const link = join(objects, 'incoming-link')
+    try {
+      symlinkSync(outside, link, 'junction')
+    } catch {
+      context.skip()
+    }
+
+    await reopened(missionId, worktree)
+
+    expect(() => lstatSync(link)).toThrow()
+    expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('outside content\n')
+    expect(existsSync(outside)).toBe(true)
+  })
+
+  test('a quarantine that cannot be removed does not stop the store opening, and the others are swept', async (context) => {
+    // Windows holds a file open against its removal; here a folder that refuses it does the same.
+    if (process.platform === 'win32' || process.getuid?.() === 0) context.skip()
+    const { worktree, store, objects, missionId } = await closedStore()
+    const held = strayIn(objects, 'incoming-a-held')
+    const locked = join(held, 'ab')
+    const other = strayIn(objects, 'incoming-b-free')
+    chmodSync(locked, 0o555)
+    try {
+      writeFileSync(join(worktree, 'form.txt'), 'the form\n')
+
+      const tree = await reopened(missionId, worktree)
+
+      expect(existsSync(join(locked, 'cdef0123'))).toBe(true)
+      expect(existsSync(other)).toBe(false)
+      expect(git(store, 'cat-file', '-t', tree)).toBe('tree')
+    } finally {
+      chmodSync(locked, 0o755)
+    }
   })
 })
 

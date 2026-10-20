@@ -13,6 +13,7 @@ import type { DomainEvent } from '../../src/engine/journal.ts'
 import { createMission } from '../../src/engine/missions.ts'
 import { startProfile } from '../../src/engine/profile.ts'
 import { createProject } from '../../src/engine/projects.ts'
+import { NO_AGENTS } from '../commands-engine.ts'
 
 const [dataFolder = '', migrations = '', main = ''] = process.argv.slice(2)
 
@@ -33,6 +34,7 @@ Effect.runFork(
         {
           backupFolders: [],
           reconciliationSteps: [],
+          sessions: { discovery: NO_AGENTS },
           memory: { beforeProjecting: holdAtTheStart },
         },
         () => {},

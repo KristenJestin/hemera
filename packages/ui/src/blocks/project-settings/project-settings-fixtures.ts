@@ -1,6 +1,7 @@
-import type { SettingsCommand } from './commands.tsx'
-import type { SettingsStep } from './recipe.tsx'
-import type { RemoteChoice, SettingsRepository } from './repositories.tsx'
+import type { SettingsCommand } from './commands-model.ts'
+import type { SettingsStep } from './recipe-model.ts'
+import type { RemoteChoice } from './repositories.tsx'
+import type { SettingsRepository } from './repositories-model.ts'
 import type { RunnableCommand, SettingsRun } from './services.tsx'
 import type { SettingsVariable } from './variables.tsx'
 

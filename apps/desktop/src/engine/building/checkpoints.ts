@@ -1,6 +1,6 @@
 /**
  * The checkpoints of a mission's Workspace (#140, CT-01): at a key moment (before the automatic
- * review, at the entry into Review, at the end of each round), each repository's `HEAD`, the
+ * review, at the entry into Review, at the end of each round, at each push), each repository's `HEAD`, the
  * snapshot tree of its working tree with untracked files, its base branch and the merge base of
  * `HEAD` with it, and the files from the merge base to the tree with their contents, copied into
  * the database. A checkpoint is read from the database alone: the same whether its Workspace still
@@ -15,7 +15,13 @@ import { Context, Effect, Layer, Option } from 'effect'
 
 import { DomainEvents } from '../domain-events.ts'
 import { Git, type GitBytesSpawn, type GitRefusal } from '../git.ts'
-import { Database, type DatabaseError, refusedWhile } from '../storage/database.ts'
+import type { NewEvent } from '../journal.ts'
+import {
+  Database,
+  type DatabaseError,
+  type EngineTransaction,
+  refusedWhile,
+} from '../storage/database.ts'
 import {
   checkpointFiles,
   checkpointRepositories,
@@ -34,7 +40,7 @@ import {
 } from './snapshots.ts'
 
 /** The moment a checkpoint is taken at. */
-export type CheckpointKind = 'review' | 'review_entry' | 'round_end'
+export type CheckpointKind = 'review' | 'review_entry' | 'round_end' | 'push'
 
 /**
  * A repository of the Workspace as a checkpoint takes it: its name there, its working tree, and
@@ -64,11 +70,19 @@ export interface CheckpointFile {
 }
 
 export interface CheckpointsService {
-  /** Takes a checkpoint of each repository, writes it, and answers its id. */
+  /**
+   * Takes a checkpoint of each repository, writes it, and answers its id. `keep` writes where it
+   * is kept in the same transaction, and says what the Journal is told: a stop never leaves it
+   * written and unkept.
+   */
   readonly take: (
     missionId: string,
     kind: CheckpointKind,
     places: ReadonlyArray<CheckpointPlace>,
+    keep?: (
+      transaction: EngineTransaction,
+      checkpointId: string,
+    ) => Effect.Effect<ReadonlyArray<NewEvent>, DatabaseError>,
   ) => Effect.Effect<string, SnapshotFailed | DatabaseError>
   /** Its files, repository by repository in the order taken, each in Git's order. */
   readonly files: (
@@ -238,7 +252,7 @@ export const checkpointsLayer = (run: GitBytesSpawn) =>
         (['A', 'M', 'D', 'R', 'T'] as const).find((one) => one === row.status) ?? 'M'
 
       const service: CheckpointsService = {
-        take: (missionId, kind, places) =>
+        take: (missionId, kind, places, keep) =>
           Effect.gen(function* () {
             const id = crypto.randomUUID()
             const taken: Taken[] = []
@@ -279,7 +293,8 @@ export const checkpointsLayer = (run: GitBytesSpawn) =>
                     })
                   }
                 }
-                return { result: id, events: [] }
+                const said = keep === undefined ? [] : yield* keep(transaction, id)
+                return { result: id, events: said }
               }).pipe(Effect.mapError(refusedWhile('writing a checkpoint'))),
             )
             return id

@@ -4,6 +4,7 @@
  *
  *   node tools/commit-message.ts <file>    validate the message held by <file>
  *   node tools/commit-message.ts --range <base>..<head>   validate a range of commits
+ *   node tools/commit-message.ts --description <file>      validate a pull request description
  */
 
 import { spawnSync } from 'node:child_process'
@@ -45,7 +46,37 @@ export function stripComments(message: string): string {
     .trim()
 }
 
+// A trailer naming Claude, or the address Claude Code signs with, whatever name sits before it.
+const CLAUDE_TRAILER = /^\s*co-authored-by:.*(?:\bclaude\b|noreply@anthropic\.com)/i
+
+// The footer Claude Code appends: its emoji and its link are optional, the rest of the line is not.
+const CLAUDE_FOOTER = /^[^\p{L}\p{N}]*generated with \[?claude code\]?(?:\(\S*\))?\s*$/iu
+
+/** The first line of `text` that carries Claude Code's attribution, whole, or undefined. */
+export function findClaudeAttribution(text: string): string | undefined {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => CLAUDE_TRAILER.test(line) || CLAUDE_FOOTER.test(line))
+}
+
+function refuseAttribution(text: string, where: string): ValidationResult {
+  const line = findClaudeAttribution(text)
+  if (line === undefined) return { ok: true }
+  return {
+    ok: false,
+    error: `${where} carries "${line}": remove that line; this repository has no Claude attribution`,
+  }
+}
+
+/** The description of a pull request, which a squash merge turns into the body of a commit. */
+export function validatePullRequestDescription(description: string): ValidationResult {
+  return refuseAttribution(description, 'the pull request description')
+}
+
 export function validateCommitMessage(message: string): ValidationResult {
+  const attribution = refuseAttribution(stripComments(message), 'the commit message')
+  if (!attribution.ok) return attribution
   const header = stripComments(message).split('\n')[0] ?? ''
   // Merge commits are produced by the flow itself (feature into dev, dev into main).
   if (header.startsWith('Merge ')) return { ok: true }
@@ -122,9 +153,26 @@ if (import.meta.main) {
     process.exit(failed ? 1 : 0)
   }
 
+  const descriptionIndex = process.argv.indexOf('--description')
+  if (descriptionIndex !== -1) {
+    const descriptionFile = process.argv[descriptionIndex + 1]
+    if (descriptionFile === undefined) {
+      console.error('--description requires a <file> argument')
+      process.exit(2)
+    }
+    const verdict = validatePullRequestDescription(readFileSync(descriptionFile, 'utf8'))
+    if (!verdict.ok) {
+      console.error(`pull request rejected: ${verdict.error}`)
+      process.exit(1)
+    }
+    process.exit(0)
+  }
+
   const file = process.argv[2]
   if (file === undefined) {
-    console.error('usage: node tools/commit-message.ts <file> | --range <base>..<head>')
+    console.error(
+      'usage: node tools/commit-message.ts <file> | --range <base>..<head> | --description <file>',
+    )
     process.exit(2)
   }
   const result = validateCommitMessage(readFileSync(file, 'utf8'))

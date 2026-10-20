@@ -57,6 +57,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { ADAPTERS } from '../agents/adapters/index.ts'
 import { type AgentEvent, type ImageNotAccepted, TextBlock } from '../agents/client.ts'
 import { Discovery } from '../agents/discovery.ts'
+import { cancelledIn } from '../cancelled.ts'
 import { promptText } from '../agents/prompt-blocks.ts'
 import { type AgentFailure, AgentRuntime, SessionInstructions } from '../agents/runtime.ts'
 import type { DomainEvents } from '../domain-events.ts'
@@ -74,6 +75,7 @@ import {
 import { commandRuns, missions, runnerLeases } from '../storage/schema.ts'
 import { ProcessSupervisor } from '../supervisor.ts'
 import { ToolAccess } from '../tools/access.ts'
+import { passFingerprints } from '../tools/files.ts'
 import { mutate } from '../transaction.ts'
 import { type BriefSources, type Predecessor, briefOf } from './brief.ts'
 import {
@@ -238,7 +240,27 @@ export interface SessionsSettings {
   readonly log: Log
   /** Shorter bounds, for the suites; the ticket's otherwise. */
   readonly timings?: Partial<SessionTimings> | undefined
+  /** Where a suite holds the start's rebuild of the sessions; never held otherwise. */
+  readonly rebuildHold?: Effect.Effect<void> | undefined
+  /** Where a suite holds a session, or fails it; never otherwise. */
+  readonly sessionHold?: SessionHold | undefined
+  /**
+   * Where a suite holds a session's opening: before it is written, once written, or once its write
+   * was refused; never otherwise.
+   */
+  readonly openHold?:
+    | ((at: 'opening' | 'written' | 'refused', asked: OpenAsked) => Effect.Effect<void>)
+    | undefined
+  /** Where a suite holds the health sweep, as each look begins; never held otherwise. */
+  readonly sweepHold?: Effect.Effect<void> | undefined
 }
+
+/**
+ * Where a suite holds a session: as its start begins, before anything of it starts (a defect there
+ * is a start that fails before it has a driver); as it fails, between its turn's end and its
+ * failure written.
+ */
+export type SessionHold = (at: 'starting' | 'failing', session: RoleSession) => Effect.Effect<void>
 
 /** One live session, as its driver holds it. */
 interface Driver {
@@ -317,6 +339,7 @@ const projectOf = (owner: SessionOwner) =>
 
 /** Why a Builder's lineage is not started again: its mission left the Building. */
 const NOT_BUILDING = 'the Building of its mission ended'
+const CANCELLED = 'the mission was cancelled'
 
 /**
  * Whether a lineage's successor would be a Builder outside the Building. Read in the transaction
@@ -332,6 +355,13 @@ const builderOutOfStage = (transaction: EngineTransaction, session: RoleSession)
       .pipe(Effect.mapError(refusedWhile('reading a mission')))
     return mission?.stage !== 'building'
   })
+
+/** What a replacement left: the successor and whether leases passed to it, or why it ended. */
+const replacement = (successor: RoleSession | null, leased: boolean, ended: string | null) => ({
+  successor,
+  leased,
+  ended,
+})
 
 /** What a replacement says in the Journal, from the role's own name. */
 const capitalized = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
@@ -372,6 +402,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const startedAt = new Date().toISOString()
       const run = <A, E>(effect: Effect.Effect<A, E, Needs>) => Effect.provide(effect, context)
       const said = (line: string) => Effect.sync(() => settings.log(`sessions: ${line}`))
+      const hold: SessionHold = settings.sessionHold ?? (() => Effect.void)
 
       /** The driver of a lineage's live session, if one runs. */
       const liveOfLineage = (lineage: string): Driver | undefined =>
@@ -587,6 +618,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       /** Starts a session's driver once automations may run and the Memory is ready. */
       const start = (session: RoleSession, predecessor: Predecessor | null) =>
         Effect.gen(function* () {
+          yield* hold('starting', session)
           yield* AutomationGate.use((gate) => gate.pass)
           yield* Memory.use((memory) => memory.ready)
           const entry = roleNamed(registry, session.role)
@@ -742,6 +774,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       const fail = (driver: Driver, reason: string) =>
         Effect.gen(function* () {
           yield* letGo(driver)
+          yield* hold('failing', driver.session)
           yield* endQuietly(driver.session, 'failed', reason)
           yield* addToThread(driver.session.id, 'state', `failed: ${reason}`)
           yield* tellParent(
@@ -824,7 +857,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
       /**
        * Stops a session and opens its successor in one transaction: the old one kept, replaced,
        * the new one of the same role, lineage and owner at the next epoch, its leases passed, and
-       * the Journal's line. A Builder whose mission left the Building is ended instead: null.
+       * the Journal's line. A Builder whose mission left the Building, or a session of a cancelled
+       * mission, is ended instead: null.
        */
       const succeed = (session: RoleSession, reason: string) =>
         Effect.gen(function* () {
@@ -832,14 +866,25 @@ export const sessionsLayer = (settings: SessionsSettings) =>
             Effect.gen(function* () {
               if (yield* builderOutOfStage(transaction, session)) {
                 const ended = yield* endSession(transaction, session, 'ended', NOT_BUILDING)
-                return { result: null, events: [ended] }
+                return { result: replacement(null, false, NOT_BUILDING), events: [ended] }
+              }
+              // A cancelled mission's session is ended instead: nothing takes over from it.
+              if (
+                session.owner.kind === 'mission' &&
+                (yield* cancelledIn(transaction, session.owner.missionId))
+              ) {
+                const ended = yield* endSession(transaction, session, 'ended', CANCELLED)
+                return { result: replacement(null, false, CANCELLED), events: [ended] }
               }
               const stopped = yield* endSession(transaction, session, 'replaced', reason)
-              const next = yield* insertSession(transaction, successorOf(session))
+              // Read just above, in this transaction: a refusal here is a defect.
+              const next = yield* insertSession(transaction, successorOf(session)).pipe(
+                Effect.catchTag('MissionCancelled', Effect.die),
+              )
               const passed = yield* passLeasesIn(transaction, session, next)
               const roleName = roleNamed(registry, session.role)?.displayName ?? session.role
               return {
-                result: [next, passed.length > 0] as const,
+                result: replacement(next, passed.length > 0, null),
                 events: [
                   stopped,
                   ...passed,
@@ -852,14 +897,13 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               }
             }),
           )
-          if (replaced === null) {
+          if (replaced.successor === null) {
             yield* cap.release(session.lineage)
-            yield* addToThread(session.id, 'state', `ended: ${NOT_BUILDING}`)
+            yield* addToThread(session.id, 'state', `ended: ${replaced.ended ?? NOT_BUILDING}`)
             return null
           }
-          const [successor, leased] = replaced
-          yield* revokeIfLeased(session, leased)
-          return successor
+          yield* revokeIfLeased(session, replaced.leased)
+          return replaced.successor
         })
 
       const replace = (sessionId: string, reason: string) =>
@@ -919,7 +963,12 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           if (driver === undefined) return
           driver.lastSign = yield* Clock.currentTimeMillis
           // However long the provider makes it wait, the session is not stuck until it speaks again.
-          driver.waiting = !event.replay && Predicate.isTagged(event, 'ProviderWait')
+          driver.waiting = false
+          if (!event.replay && Predicate.isTagged(event, 'ProviderWait')) {
+            driver.waiting = true
+            // Said, so the diagnostic tells why a long silence was not judged stuck.
+            yield* said(`${sessionId} waits on its provider: ${event.title}`)
+          }
           if (!event.replay && TOOK_THE_TURN.some((tag) => Predicate.isTagged(event, tag))) {
             driver.took = true
           }
@@ -1024,6 +1073,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
        * an idle child holding back a phase gives its slot.
        */
       const sweep = Effect.gen(function* () {
+        yield* settings.sweepHold ?? Effect.void
         const now = yield* Clock.currentTimeMillis
         const limit = Duration.toMillis(timings.stuckAfter)
         for (const driver of [...drivers.values()]) {
@@ -1103,6 +1153,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
 
       const rebuild = Effect.gen(function* () {
         yield* AutomationGate.use((gate) => gate.pass)
+        yield* settings.rebuildHold ?? Effect.void
         yield* Memory.use((memory) => memory.ready)
         // Orphan agent processes a stopped engine left are ended before anything starts.
         const orphans = (yield* ProcessSupervisor.use((supervisor) =>
@@ -1135,6 +1186,8 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           }
           const successor = yield* succeed(session, RESTARTED)
           if (successor === null) continue
+          // What it read survives the restart: its successor writes on the versions it read.
+          yield* passFingerprints(session.id, successor.id)
           rebuilt.push(successor)
           starts.push(() =>
             start(successor, { lineage: session.lineage, stoppedAt: session.updatedAt }),
@@ -1170,7 +1223,10 @@ export const sessionsLayer = (settings: SessionsSettings) =>
               Effect.gen(function* () {
                 if (yield* builderOutOfStage(transaction, session))
                   return { result: null, events: [] }
-                const next = yield* insertSession(transaction, successorOf(session))
+                const next = yield* insertSession(transaction, successorOf(session)).pipe(
+                  Effect.catchTag('MissionCancelled', () => Effect.succeed(null)),
+                )
+                if (next === null) return { result: null, events: [] }
                 const passed = yield* passLeasesIn(transaction, session, next)
                 return {
                   result: [next, passed.length > 0] as const,
@@ -1257,6 +1313,7 @@ export const sessionsLayer = (settings: SessionsSettings) =>
           // Until its session is written, whatever stops an agent's launch gives back its slot.
           const session = yield* Effect.gen(function* () {
             if (asked.requestedBy === 'agent') yield* launchAllowed(asked, entry, id)
+            if (settings.openHold !== undefined) yield* settings.openHold('opening', asked)
             const setting =
               asked.provider === undefined
                 ? yield* ModelChoice.use((choice) => choice.of(asked.owner, asked.role))
@@ -1279,8 +1336,21 @@ export const sessionsLayer = (settings: SessionsSettings) =>
                 mode: null,
               },
               modelLevel: setting?.level ?? null,
-            })
-          }).pipe(Effect.onError(() => Effect.ignore(cap.release(id))))
+            }).pipe(
+              Effect.catchTag(
+                'MissionCancelled',
+                (cancelled) => new SessionRefused({ reason: cancelled.message }),
+              ),
+            )
+          }).pipe(
+            Effect.onError(() =>
+              Effect.andThen(
+                Effect.ignore(cap.release(id)),
+                settings.openHold?.('refused', asked) ?? Effect.void,
+              ),
+            ),
+          )
+          if (settings.openHold !== undefined) yield* settings.openHold('written', asked)
           yield* start(session, null).pipe(Effect.forkIn(scope))
           return session
         }).pipe(run)

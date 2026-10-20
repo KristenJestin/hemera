@@ -6,6 +6,9 @@
  * Saving checks the whole check first (`checkRefusal`), then what only the Project knows: a
  * command of its catalogue, a repository it declares. A refusal carries the sentence the settings
  * show. A running mission never reads these rows: it reads the copy taken at its launch (CT-34).
+ *
+ * Beside them, how long a proof may run (#321): read by the proof runner at each run, so a change
+ * reaches the next run of a mission already launched.
  */
 
 import {
@@ -16,9 +19,16 @@ import {
   type CheckWhere,
   type ProjectCheck,
   checkRefusal,
+  proofLimitRefusal,
   proposeChecks,
 } from '@hemera/core/domain'
-import { CheckRefused, type Project, UnknownProjectCheck } from '@hemera/ipc'
+import {
+  CheckRefused,
+  InvalidProofLimit,
+  type Project,
+  UnknownProject,
+  UnknownProjectCheck,
+} from '@hemera/ipc'
 import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
@@ -26,7 +36,7 @@ import { listCommands } from './catalogue.ts'
 import type { EventPayload } from './journal.ts'
 import { getProject } from './projects.ts'
 import { Database, type EngineTransaction, refusedWhile } from './storage/database.ts'
-import { projectChecks } from './storage/schema.ts'
+import { projectChecks, projects } from './storage/schema.ts'
 import { mutate } from './transaction.ts'
 
 type CheckRow = typeof projectChecks.$inferSelect
@@ -272,4 +282,39 @@ export const moveCheck = (projectId: string, id: string, rank: number) =>
       }),
     )
     return yield* listChecks(projectId)
+  })
+
+/** How long a proof of the Project may run, in minutes; null while it keeps the default. */
+export const proofLimitOf = (projectId: string) =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const [row] = yield* database
+      .select({ minutes: projects.proofLimitMinutes })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .pipe(Effect.mapError(refusedWhile('reading the Project')))
+    if (row === undefined) return yield* new UnknownProject({ id: projectId })
+    return row.minutes
+  })
+
+/** Sets how long a proof may run, or empties it back to the default with null. */
+export const setProofLimit = (projectId: string, minutes: number | null) =>
+  Effect.gen(function* () {
+    const refused = minutes === null ? null : proofLimitRefusal(minutes)
+    if (refused !== null) return yield* new InvalidProofLimit({ reason: refused })
+    return yield* mutate('setting how long a proof may run', (transaction) =>
+      Effect.gen(function* () {
+        const [row] = yield* transaction
+          .update(projects)
+          .set({ proofLimitMinutes: minutes })
+          .where(eq(projects.id, projectId))
+          .returning({ id: projects.id })
+          .pipe(Effect.mapError(refusedWhile('writing how long a proof may run')))
+        if (row === undefined) return yield* new UnknownProject({ id: projectId })
+        return {
+          result: minutes,
+          events: [checkEvent('checks.proof_limit_set', projectId, { minutes })],
+        }
+      }),
+    )
   })

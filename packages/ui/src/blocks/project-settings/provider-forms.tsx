@@ -17,7 +17,7 @@ import {
   IconShieldCheck,
   IconWorld,
 } from '../../icons.ts'
-import type { JiraTokenView, ProviderView } from './ticket-providers.tsx'
+import { type JiraTokenView, type ProviderView, providerTroubled } from './provider-model.ts'
 
 /**
  * What the dialogs of the ticket providers are made of: a provider's state as one glyph, the
@@ -27,14 +27,6 @@ import type { JiraTokenView, ProviderView } from './ticket-providers.tsx'
 
 /** Jira Cloud (REST v3, an account email and an API token) or Data Center (a personal access token). */
 export type ProviderDeployment = 'cloud' | 'datacenter'
-
-/** Whether something of a provider waits on the user: its state is not ready, or its token is not saved. */
-export function providerTroubled(provider: ProviderView): boolean {
-  return (
-    (provider.status !== null && provider.status.state !== 'ready') ||
-    (provider.token !== undefined && provider.token !== 'saved')
-  )
-}
 
 /** A provider's state as one glyph, its words in its legend; a skeleton while it is read. */
 export function ProviderGlyph({ provider }: { provider: ProviderView }): ReactNode {
@@ -86,7 +78,13 @@ const LINE =
   'flex min-h-control-md min-w-0 items-center gap-2 rounded-md border border-border bg-surface-rim pr-1 pl-3 font-mono text-xs'
 
 /** The command that fixes a provider, as the user runs it in their own terminal, and Copy. */
-function FixCommand({ line, onCopy }: { line: string; onCopy: (line: string) => void }): ReactNode {
+export function FixCommand({
+  line,
+  onCopy,
+}: {
+  line: string
+  onCopy: (line: string) => void
+}): ReactNode {
   return (
     <div className={LINE}>
       <span className="min-w-0 flex-1 truncate">{line}</span>
@@ -300,7 +298,9 @@ const REPOSITORY = /^[^/\s]+\/[^/\s]+$/
 export function GithubForm({ draft, onChange, proposed }: GithubFormProps): ReactNode {
   const [another, setAnother] = useState('')
   const [refused, setRefused] = useState<string | undefined>(undefined)
-  const listed = [...proposed, ...draft.repositories.filter((one) => !proposed.includes(one))]
+  const proposedNames = new Set(proposed)
+  const read = new Set(draft.repositories)
+  const listed = [...proposed, ...draft.repositories.filter((one) => !proposedNames.has(one))]
   const toggle = (name: string, on: boolean): void =>
     onChange({
       ...draft,
@@ -336,7 +336,7 @@ export function GithubForm({ draft, onChange, proposed }: GithubFormProps): Reac
           {listed.map((name) => (
             <Checkbox
               key={name}
-              checked={draft.repositories.includes(name)}
+              checked={read.has(name)}
               onCheckedChange={(on) => toggle(name, on)}
               label={name}
             />

@@ -72,7 +72,8 @@ export async function lineIdentity(asked: LineAsked): Promise<ActionIdentity> {
   if (resolved !== null && (await fileOfPlace(asked.root, resolved))) {
     script = await fingerprintFile(resolved).catch(() => null)
   } else if (first !== undefined && (await fileOfPlace(asked.root, resolve(folder, first)))) {
-    script = await fingerprintFile(resolve(folder, first)).catch(() => null)
+    // Read at its real path: the fingerprint never follows a link as the last name (#439).
+    script = await fingerprintFile(await really(resolve(folder, first))).catch(() => null)
   }
   const relativeFolder = relative(asked.root, folder).split(sep).join('/')
   return {

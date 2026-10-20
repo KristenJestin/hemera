@@ -3,12 +3,18 @@
  * held for a moment, Linux never does: the hold is simulated by a remover given to the removal.
  */
 
-import { existsSync } from 'node:fs'
-import { basename } from 'node:path'
+import { spawn } from 'node:child_process'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 
+import { Effect } from 'effect'
 import { describe, expect, test } from 'vite-plus/test'
 
+import { commandsEngine } from './commands-engine.ts'
 import {
+  endChild,
+  holdFile,
+  readyWithin,
   removeFolders,
   removeTree,
   removeFoldersWith,
@@ -55,25 +61,25 @@ describe('A temporary folder held for a moment', () => {
 })
 
 describe('A temporary folder held for good', () => {
-  test('still fails, naming the folder, after the retries', () => {
+  test('still fails, naming the folder, after the retries', async () => {
     const folder = temporaryFolder('stuck')
     const { calls, remove } = holding('EPERM', Infinity)
     expect(() => removeWithRetries(folder, remove, () => undefined)).toThrow(basename(folder))
     expect(calls.length).toBeGreaterThan(1)
     expect(calls.length).toBeLessThan(100)
-    removeFolders()
+    await removeFolders()
     expect(existsSync(folder)).toBe(false)
   })
 
-  test('is not retried when the refusal is not a transient hold', () => {
+  test('is not retried when the refusal is not a transient hold', async () => {
     const folder = temporaryFolder('refused')
     const { calls, remove } = holding('EACCES', Infinity)
     expect(() => removeWithRetries(folder, remove, () => undefined)).toThrow(/EACCES/)
     expect(calls).toHaveLength(1)
-    removeFolders()
+    await removeFolders()
   })
 
-  test('does not leave the other folders behind', () => {
+  test('does not leave the other folders behind', async () => {
     const stuck = temporaryFolder('stuck')
     const other = temporaryFolder('other')
     const remove: Remover = (folder) => {
@@ -82,6 +88,67 @@ describe('A temporary folder held for good', () => {
     }
     expect(() => removeFoldersWith(remove, () => undefined)).toThrow(basename(stuck))
     expect(existsSync(other)).toBe(false)
-    removeFolders()
+    await removeFolders()
+  })
+})
+
+describe('A folder an engine still stands in when its test ends', () => {
+  test('an engine its test left running is closed before its data folder is removed', async () => {
+    const data = temporaryFolder('left-running')
+    let closedOnItsFolder: boolean | null = null
+    const { promise: started, resolve } = Promise.withResolvers<void>()
+    // What a test that timed out leaves: its engine still running, its promise awaited by no one.
+    const abandoned = commandsEngine(data)(() =>
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            closedOnItsFolder = existsSync(data)
+          }),
+        )
+        resolve()
+        return yield* Effect.never
+      }),
+    )
+    abandoned.catch(() => undefined)
+    await started
+    await removeFolders()
+    expect(closedOnItsFolder).toBe(true)
+    expect(existsSync(data)).toBe(false)
+  })
+})
+
+describe('A child a test starts says it is ready within a bound (#417)', () => {
+  test('a child that never says it is ready fails within the bound, naming what it wrote on its errors', async () => {
+    const child = spawn(process.execPath, [
+      '-e',
+      "process.stderr.write('stuck on something\\n'); setInterval(() => {}, 1000)",
+    ])
+    const began = performance.now()
+    await expect(readyWithin(child, 500)).rejects.toThrow(
+      /not ready after 500 ms[\s\S]*stuck on something/,
+    )
+    expect(performance.now() - began).toBeLessThan(5_000)
+    await endChild(child)
+  })
+
+  test('a child that ends before it is ready fails at once', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.exit(3)'])
+    await expect(readyWithin(child, 20_000)).rejects.toThrow(/ended \(3\) before it was ready/)
+  })
+
+  test('a held file is held until its holder ends: Windows will not replace it meanwhile', async () => {
+    const folder = temporaryFolder('held-file')
+    const file = join(folder, 'held.txt')
+    writeFileSync(file, 'before\n')
+    writeFileSync(join(folder, 'next.txt'), 'after\n')
+    const holder = await holdFile(file)
+    if (process.platform === 'win32') {
+      expect(() => renameSync(join(folder, 'next.txt'), file)).toThrow(/EPERM/)
+      expect(readFileSync(file, 'utf8')).toBe('before\n')
+    }
+    await endChild(holder)
+    renameSync(join(folder, 'next.txt'), file)
+    expect(readFileSync(file, 'utf8')).toBe('after\n')
+    await removeFolders()
   })
 })

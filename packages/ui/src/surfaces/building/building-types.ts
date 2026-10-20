@@ -3,7 +3,7 @@ import type { MissionStage } from '../../blocks/mission/vocabulary.ts'
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import type { LiveState } from '../../components/live-chip/live-chip.tsx'
 import type { ModelChoice, PickerAgent } from '../../components/model-picker/model-picker.tsx'
-import type { MarkState } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
 
 /**
  * What the Ready and Building pages draw, as #149 designed them: plain values, by the words the

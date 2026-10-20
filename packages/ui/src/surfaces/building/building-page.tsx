@@ -9,11 +9,8 @@ import { LiveChip } from '../../components/live-chip/live-chip.tsx'
 import { Popover } from '../../components/popover/popover.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
-import {
-  MARK_LEGENDS,
-  type MarkState,
-  StatusMark,
-} from '../../components/status-mark/status-mark.tsx'
+import { MARK_LEGENDS, type MarkState } from '../../components/status-mark/mark-legends.ts'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconAlertTriangle,

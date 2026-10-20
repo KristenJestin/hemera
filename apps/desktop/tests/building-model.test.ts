@@ -804,6 +804,7 @@ describe('The Building page in its own words', () => {
               branch: 'feat/acme-12-export-invoices',
               baseBranch: 'origin/main',
               baseCommit: 'a1',
+              tree: null,
               files: [
                 { ...file, repository: 'api', path: 'a.ts', added: 10, removed: 2 },
                 { ...file, repository: 'api', path: 'b.ts', added: 4, removed: 0 },
@@ -819,6 +820,7 @@ describe('The Building page in its own words', () => {
               branch: 'feat/acme-12-export-invoices',
               baseBranch: 'origin/main',
               baseCommit: 'b1',
+              tree: null,
               files: [
                 {
                   ...file,

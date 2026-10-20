@@ -62,7 +62,8 @@ pnpm test                        # vitest (in a terminal: `pnpm exec vp test run
 pnpm build                       # the bundles of the application
 pnpm package                     # portable package of this target, channel dev
 pnpm package --channel beta      # refused outside CI: prod and beta are the pipeline's to build
-pnpm check                       # typecheck, lint, fmt:check and test, in that order
+pnpm check                       # typecheck, lint, fmt:check and test, in that order: CI's run,
+                                 # not an agent's (see "When done")
 pnpm storybook                   # the catalogue of the design system, on port 6006
 
 pnpm --filter @hemera/desktop e2e:headless   # the built application, driven by wdio, no window on screen
@@ -176,9 +177,13 @@ lighter model for simple tasks.
    parallel only when their files do not overlap.
 2. Read the pull request when it reports: the scope, the body, the decisions taken on the way,
    what was not verified.
-3. Merge it (squash) once CI is green, when the change needs no check in the app and no design
-   choice and the maintainer has delegated that merge; otherwise ask first. Then close the issue
-   and remove the worktree, after checking it holds no uncommitted or unpushed work.
+3. Watch CI on the pull request: a sub-agent reports without waiting for it, so a red comes back
+   to you, and you send it to the sub-agent that wrote the pull request. Merge it (squash) once
+   CI is green, when the change needs no check in the app and no design choice and the
+   maintainer has delegated that merge; otherwise ask first. Do not ask the sub-agent to merge
+   the integration branch again, unless the commits that landed since touch a file of the pull
+   request: CI on `feature/1.0` after the merge catches the rest. Then close the issue and
+   remove the worktree, after checking it holds no uncommitted or unpushed work.
 4. Tell the maintainer in a few lines: what landed, what was decided, what is not verified,
    what waits for them.
 
@@ -194,12 +199,14 @@ than to a new one. A sub-agent the maintainer stopped is not resumed without the
 - The rules of this file, in particular: the failing test or story first, nothing private in the
   pull request, the end-to-end suite under the lock, never a real profile, never a merge, nothing
   published outside the pull request (no gist, no upload).
-- Verify: `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`, `pnpm build`,
-  `npx vp test run --project repository`, and the Storybook projects when the interface is
-  touched.
-- Deliver: a pull request into `feature/1.0` titled as the issue, ending with `Closes #<n>`, CI
-  green on Linux and Windows, and a short report (pull request, CI, decisions, what was not
-  verified).
+- Verify, locally: `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`, and only the test files the
+  change touches or that cover the code it changed (`pnpm exec vp test run <paths>`, the
+  Storybook projects included when the interface is touched); `pnpm build` and `pnpm run doctor`
+  when the bundle or React code changed. Never the full repository suite, never a check commit
+  by commit: CI runs everything on Linux and Windows and alone counts.
+- Deliver: a pull request into `feature/1.0` titled as the issue, ending with `Closes #<n>`, and
+  a short report (pull request, head sha with "CI pending", decisions, what was not verified).
+  The sub-agent does not wait for CI: it pushes and reports, and the lead agent watches CI.
 
 ### Porting from `hemera-legacy`
 
@@ -275,7 +282,7 @@ BREAKING CHANGE: <description — only if a schema or an internal API changes>
   are second checkouts with their own dependencies.
 - Small scratch files (briefs, state, reports, drafts, logs, screenshots) go in `.agent-relay/` at
   the root of the repository. That folder is never committed.
-- Heavy commands (builds, full test runs, the end-to-end suite) run at low priority
+- Heavy commands (builds, test runs, the end-to-end suite) run at low priority
   (`nice -n 19` on Linux), one at a time.
 - The end-to-end suite takes a lock folder kept outside the repository before it starts and
   releases it after: one run at a time on a machine.
@@ -295,5 +302,9 @@ BREAKING CHANGE: <description — only if a schema or an internal API changes>
 
 ## When done
 
-Run `pnpm check`, `pnpm run doctor`, `pnpm build` and, when the window changed, the headless
-end-to-end suite, and report the real output. If something fails, say so; don't claim green.
+Run `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check` and the test files you touched or that
+cover the code you changed; add `pnpm run doctor` and `pnpm build` when the bundle or React code
+changed and, when the window changed, the headless end-to-end suite. Report the real output. Never
+run the full repository suite locally: CI runs it on Linux and Windows and alone counts, and you
+report "CI pending on <sha>" rather than wait for it. If something fails, say so; don't claim
+green.

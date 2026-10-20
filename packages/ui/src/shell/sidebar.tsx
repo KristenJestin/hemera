@@ -1,8 +1,10 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
-import { type Ball, BallMark } from '../blocks/ball/ball-mark.tsx'
+import { BallMark } from '../blocks/ball/ball-mark.tsx'
+import { type Ball } from '../blocks/ball/ball-legends.ts'
 import { type MissionStage, STAGE_DOT } from '../blocks/mission/vocabulary.ts'
 import { Face } from '../components/face/face.tsx'
 import { LetterAvatar } from '../components/letter-avatar/letter-avatar.tsx'

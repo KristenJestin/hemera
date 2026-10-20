@@ -8,9 +8,11 @@
  * says why in a sentence the window shows, and every call on the Profile is refused with it.
  */
 
-import { release, type } from 'node:os'
+import { realpathSync } from 'node:fs'
+import { homedir, release, tmpdir, type } from 'node:os'
 import { join } from 'node:path'
 
+import { ROOT_REPOSITORY } from '@hemera/core/domain'
 import {
   type AutomaticBackups,
   DatabaseOpen,
@@ -44,6 +46,7 @@ import {
   type BuildingEnd,
   type TaskVerdict,
   builderLayer,
+  cancelBuildingIn,
 } from './building/builder.ts'
 import { type TaskChecks, checksVerdict } from './building/checks.ts'
 import { proofRunnerLayer } from './building/proof-runner.ts'
@@ -52,12 +55,14 @@ import { type BuildDesk, buildDeskLayer, buildingGuards, deskAttribution } from 
 import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
+import { roundDeskLayer } from './review/round-desk.ts'
+import { type Rounds, roundsLayer } from './review/rounds.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
-import { type HelpersSettings, helpersLayer } from './building/helpers.ts'
+import { type HelpersSettings, cancelHelpersIn, helpersLayer } from './building/helpers.ts'
 import { type Documenter, documenterLayer } from './building/documenter.ts'
-import { END_NEEDS, buildingEndLayer } from './building/end.ts'
-import { autoReviewLayer } from './building/review.ts'
+import { END_NEEDS, type EndHold, buildingEndLayer } from './building/end.ts'
+import { autoReviewLayer, cancelReviewIn } from './building/review.ts'
 import { BUILDING_MAPPERS } from './building/journal.ts'
 import { checkRunsLayer } from './building/runs.ts'
 import { DomainEvents, domainEventsLayer } from './domain-events.ts'
@@ -83,7 +88,8 @@ import type { Delivery } from './permissions/delivery.ts'
 import type { HemeraAuto } from './permissions/hemera-auto.ts'
 import { type SessionTurns, sessionTurnsLayer } from './permissions/ports.ts'
 import { runAtOpen } from './at-open.ts'
-import { SYSTEM_GIT, gitLayer, spawnGit, spawnGitBytes } from './git.ts'
+import { GIT_GUARD, engineGitGuard } from './git-guard.ts'
+import { type GitBytesSpawn, SYSTEM_GIT, gitLayer, spawnGit, spawnGitBytes } from './git.ts'
 import { SWEEP_EVERY, sweepDiagnostics } from './retention.ts'
 import { Secrets, type SecretsRegistry, secretsRegistry, registerAllVariables } from './secrets.ts'
 import { resumeInterrupted } from './preparation.ts'
@@ -96,9 +102,15 @@ import {
   runsLayer,
   runsRecipeRunnerLayer,
 } from './runs.ts'
-import { type Database, DatabaseError, databaseLayer, refusedWhile } from './storage/database.ts'
+import {
+  Database,
+  DatabaseError,
+  type EngineDatabase,
+  databaseLayer,
+  refusedWhile,
+} from './storage/database.ts'
 import { type HostProcesses, supervisorLayer } from './supervisor.ts'
-import { type WorkspaceServices, preparationsLayer } from './workspaces.ts'
+import { type WorkspaceServices, listWorkspaces, preparationsLayer } from './workspaces.ts'
 import {
   type MissionParts,
   type MissionServices,
@@ -124,7 +136,7 @@ import {
   memoryLayer,
 } from './memory/index.ts'
 import type { HemeraEndpoint } from './agents/endpoint.ts'
-import { assignKeyPrefixes } from './projects.ts'
+import { assignKeyPrefixes, listProjects } from './projects.ts'
 import { LaunchFailed } from '@hemera/ipc'
 import { defaultPermissionAnswerLayer } from './agents/client.ts'
 import { type Discovery, discoveryLayer, machineLayer } from './agents/discovery.ts'
@@ -146,6 +158,9 @@ import { setupDeskLayer } from './setup/desk.ts'
 import { Setup, setupLayer } from './setup/service.ts'
 import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
+import { FORGE_NEEDS, type ForgePort, forgePort } from './forges/port.ts'
+import { screenshotIn, screenshotsFolder } from './screenshots.ts'
+import { type ForgeRunner, type ForgeSettings, forgeRunnerLayer } from './forges/runner.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
 import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
 import { type TicketProviders, ticketProvidersLayer, ticketSearchLayer } from './tickets/search.ts'
@@ -170,7 +185,7 @@ import {
   probeDeskLayer,
 } from './planning/probe-desk.ts'
 import { type ProbeSteps, probeStepsLayer } from './planning/probe-steps.ts'
-import { PROBE_MAPPERS } from './planning/probe-store.ts'
+import { PROBES_FOLDER, PROBE_MAPPERS } from './planning/probe-store.ts'
 import { type ProbesSettings, interruptLeftProbes, probesLayer } from './planning/probes.ts'
 import { COLD_READ_MAPPERS } from './planning/cold-read-store.ts'
 import { coldReadsLayer } from './planning/cold-reads.ts'
@@ -180,6 +195,10 @@ import { type FreezeLog, freezeLayer } from './planning/freeze.ts'
 import { type Checkpoints, checkpointsLayer } from './building/checkpoints.ts'
 import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/snapshots.ts'
 import { type Diffs, diffsLayer } from './review/diffs.ts'
+import { Review, type ReviewHold, reviewLayer } from './review/feedback.ts'
+import { DELIVERY_NEEDS, Pushes, type PushesHold, pushesLayer } from './delivery/pushes.ts'
+import { DELIVERY_MAPPERS } from './delivery/journal.ts'
+import { REVIEW_MAPPERS } from './review/journal.ts'
 import {
   type OutsideChanges,
   type OutsideSettings,
@@ -200,7 +219,13 @@ import {
   type RoleRegistry,
   roleRegistryLayer,
 } from './sessions/roles.ts'
-import { type SessionTimings, Sessions, sessionsLayer } from './sessions/service.ts'
+import {
+  type SessionHold,
+  type SessionsSettings,
+  type SessionTimings,
+  Sessions,
+  sessionsLayer,
+} from './sessions/service.ts'
 import {
   ExclusiveResources,
   RESOURCE_EVENTS,
@@ -264,10 +289,34 @@ export interface ProfileParts {
   }
   /** Where a suite holds a helper's launch (see `HelpersSettings`); never held otherwise. */
   readonly helpers?: { readonly hold?: HelpersSettings['hold'] }
+  /** Where a suite holds Review's feedback (#341, see `ReviewHold`); never held otherwise. */
+  readonly review?:
+    | {
+        readonly hold?: ReviewHold | undefined
+        /** Where a suite holds a round's Fix once committed, before its Planner opens (#468). */
+        readonly fixed?: Effect.Effect<void> | undefined
+      }
+    | undefined
+  /**
+   * The pushes' Git as a suite sees it, wrapped around the machine's, and where a suite holds a
+   * repository's sequence (R6): the machine's and never held otherwise.
+   */
+  readonly delivery?:
+    | {
+        readonly git?: ((real: GitBytesSpawn) => GitBytesSpawn) | undefined
+        readonly hold?: PushesHold | undefined
+      }
+    | undefined
+  /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
+  readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
   readonly snapshots?: (real: SnapshotsService) => SnapshotsService
+  /** The snapshots' Git as a suite sees it, wrapped around the machine's (#369): itself otherwise. */
+  readonly snapshotsGit?: (real: GitBytesSpawn) => GitBytesSpawn
   /** Where `gh` is found and how long a call may run (#95); this machine's otherwise. */
   readonly gh?: GhSettings | undefined
+  /** Where the forge CLIs are found, in which environment, and their limits (#253); this machine's otherwise. */
+  readonly forge?: ForgeSettings | undefined
   /** How the supervisor asks about and ends the machine's processes; this machine's otherwise. */
   readonly hostProcesses?: Layer.Layer<HostProcesses> | undefined
   /**
@@ -284,10 +333,14 @@ export interface ProfileParts {
         readonly end?: Layer.Layer<BuildingEnd, never, Database | DomainEvents | Secrets>
         /** Where a suite holds the Builder between a check and its transaction. */
         readonly hold?: BuilderHold | undefined
+        /** Where a suite holds the end of a Building as it takes in a Builder's turn end. */
+        readonly endHold?: EndHold | undefined
         /** The detector of changes outside Hemera's timers, and where a suite holds it (#148). */
         readonly outside?: Partial<OutsideSettings>
         /** How long a proof may run before Hemera ends it (#290): `PROOF_LIMIT` otherwise. */
         readonly proofLimit?: Duration.Duration | undefined
+        /** How long a minute of the Project's proof limit lasts (#321): a minute otherwise. */
+        readonly proofMinute?: Duration.Duration | undefined
       }
     | undefined
   /**
@@ -309,6 +362,14 @@ export interface SessionsParts {
   readonly testerMode?: Layer.Layer<TesterMode>
   /** Shorter bounds for the suites; the ticket's otherwise. */
   readonly timings?: Partial<SessionTimings>
+  /** Where a suite holds the start's rebuild of the sessions a stopped engine left. */
+  readonly rebuildHold?: Effect.Effect<void>
+  /** Where a suite holds a session as it starts or fails, or fails its start. */
+  readonly sessionHold?: SessionHold
+  /** Where a suite holds a session's opening, before it is written. */
+  readonly openHold?: SessionsSettings['openHold']
+  /** Where a suite holds the health sweep, as each look begins (CT-12). */
+  readonly sweepHold?: Effect.Effect<void>
   /** Whether a new mission starts its Planner on its own (#85); off unless said. */
   readonly plannerStarts?: boolean
   /** Whether adding a Project starts the bootstrap of its living spec (#93); off unless said. */
@@ -360,6 +421,8 @@ export type EngineServices =
   | TesterFindings
   | TicketSearch
   | GhCli
+  | ForgeRunner
+  | ForgePort
   | JiraLink
   | PlannerWake
   | SpecBoard
@@ -373,6 +436,9 @@ export type EngineServices =
   | OutsideChanges
   | Checkpoints
   | Diffs
+  | Review
+  | Pushes
+  | Rounds
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -432,6 +498,15 @@ const refusedProfile = (sentence: string): Effect.Effect<StartedProfile, never, 
     }
   })
 
+/** The events after which the Git guard sees the places Hemera knows again (#457). */
+const SIGHTED_ON: ReadonlySet<string> = new Set([
+  'project.created',
+  'project.updated',
+  'repository.added',
+  'repository.updated',
+  'workspace.created',
+])
+
 export const startProfile = (
   start: ProfileStart,
   parts: ProfileParts,
@@ -453,6 +528,26 @@ export const startProfile = (
     if (restored !== null) log(`restored the backup taken at ${restored.takenAt}`)
 
     const secrets = parts.secrets ?? secretsRegistry()
+    // The guard on the engine's own Git (#457), which every Git spawn below asks first; the home
+    // it reads is the gate's, a suite's own folder when it hands one.
+    const guardHome = parts.tools?.home
+    const guard = yield* engineGitGuard(
+      guardHome === undefined
+        ? {
+            home: homedir(),
+            configHome: process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config'),
+          }
+        : { home: guardHome, configHome: join(guardHome, '.config') },
+      log,
+      secrets.mask,
+      // The engine's scratch repositories, never a scope of the guard. Its snapshot stores are
+      // watched as any repository; of its data, only the Probes' worktrees' bookkeeping is its own.
+      [
+        join(realpathSync.native(tmpdir()), 'hemera-scratch-'),
+        join(realpathSync.native(tmpdir()), 'hemera-patch-'),
+      ],
+      join(realpathSync.native(dataFolder), PROBES_FOLDER),
+    )
     // Where the gate and a cancel reach the Probes, which stand on the sessions above them (#89).
     const deskContext = yield* Layer.build(probeDeskLayer)
     const desk = Context.get(deskContext, ProbeDesk)
@@ -468,9 +563,24 @@ export const startProfile = (
     const docsContext = yield* Layer.build(docsDeskLayer)
     // Where the gate reaches the reviewers' tools, served by the automatic review (#147).
     const reviewContext = yield* Layer.build(reviewDeskLayer)
+    // Where the gate reaches a Review round's tools, served by the rounds (#468).
+    const roundContext = yield* Layer.build(roundDeskLayer)
+    // The database as a suite sees it, wrapped around the real one (#341): one connection either way.
+    const realDatabase = databaseLayer(file)
+    const wrapDatabase = parts.database
+    const databases =
+      wrapDatabase === undefined
+        ? realDatabase
+        : Layer.merge(
+            realDatabase,
+            Layer.effect(
+              Database,
+              Database.use((real) => Effect.succeed(wrapDatabase(real))),
+            ).pipe(Layer.provide(realDatabase)),
+          )
     const profileLayers = Layer.mergeAll(
       Layer.succeed(Secrets, secrets),
-      databaseLayer(file),
+      databases,
       domainEventsLayer,
       automationGateLayer,
       backupFoldersLayer(parts.backupFolders),
@@ -484,9 +594,11 @@ export const startProfile = (
       Layer.succeedContext(helperContext),
       Layer.succeedContext(docsContext),
       Layer.succeedContext(reviewContext),
+      Layer.succeedContext(roundContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
-      gitLayer(spawnGit(SYSTEM_GIT, secrets.mask)),
+      gitLayer(spawnGit(SYSTEM_GIT, secrets.mask, guard.spawn)),
+      guard.layer,
       sessionTurnsLayer,
       repositoryStatusesLayer,
       preparationsLayer(log),
@@ -509,14 +621,17 @@ export const startProfile = (
     const postLayer = Layer.succeedContext(postContext)
     // The reservations of the exclusive resources, and where their needs' answers go (#88).
     const resources = exclusiveReservations(log)
+    // The forge port, and where its needs' Retry goes (#253).
+    const forge = forgePort(parts.forge)
     // The launches, and where their failed preparations' Retry goes (#139).
     const launches = buildingLaunchesLayer(log)
     // The Builder, and where its needs' answers go (#141).
     const builder = builderLayer(log, parts.building?.hold)
     // The end of a Building, and where the answers to the review's findings go (#147).
-    const ending = buildingEndLayer(log)
+    const ending = buildingEndLayer(log, parts.building?.endHold)
     // One store of the snapshots, for the checkpoints, the Builder and the Freeze alike (#140).
-    const machineSnapshots = snapshotsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask))
+    const snapshotsGit = spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn)
+    const machineSnapshots = snapshotsLayer(parts.snapshotsGit?.(snapshotsGit) ?? snapshotsGit)
     const wrapped = parts.snapshots
     const snapshots =
       wrapped === undefined
@@ -530,22 +645,36 @@ export const startProfile = (
     // One detector of the changes outside Hemera, for the Builder and the calls alike (#148).
     const outside = outsideChangesLayer(log, parts.building?.outside).pipe(Layer.provide(snapshots))
     // One store of the checkpoints: the review at the end of a Building, the live diff, the calls.
-    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask)).pipe(
+    const checkpoints = checkpointsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn)).pipe(
       Layer.provideMerge(snapshots),
     )
+    // One live diff: the calls and Review's anchors (#341) read the same repositories' turns.
+    const diffs = diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn), log).pipe(
+      Layer.provide(Layer.mergeAll(checkpoints, outside)),
+    )
+    // The pushes and pull requests, and where their needs' answers go (R6).
+    const deliveryGit = spawnGitBytes(SYSTEM_GIT, secrets.mask, guard.spawn)
+    const pushes = pushesLayer({
+      log,
+      git: parts.delivery?.git?.(deliveryGit) ?? deliveryGit,
+      hold: parts.delivery?.hold,
+    })
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
         [RUN_CONSENT, consent.handler],
+        [GIT_GUARD, guard.handler],
         [SESSION_NEEDS, post.needs],
         [BUDGET_NEEDS, budgetHandler],
         [PERMISSION_REQUESTS, requestsHandler],
         [RESOURCE_NEEDS, resources.handler],
         [TICKET_WRITES, ticketWritesNeeds],
+        [FORGE_NEEDS, forge.handler],
         [BUILDING_NEEDS, launches.handler],
         [BUILDER_NEEDS, builder.handler],
         [REVIEW_NEEDS, ending.handler],
         [END_NEEDS, ending.retry],
+        [DELIVERY_NEEDS, pushes.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -574,6 +703,8 @@ export const startProfile = (
             ]),
         ...(parts.missions?.stoppers ?? []),
       ],
+      // Ended with the stage, in the cancel's transaction: nothing of the Building starts again.
+      cancels: [cancelBuildingIn, cancelHelpersIn, cancelReviewIn],
       activity:
         parts.missions?.activity ??
         ((missionId) =>
@@ -600,6 +731,8 @@ export const startProfile = (
         ...TICKET_MAPPERS,
         ...BUILDING_MAPPERS,
         ...HELPER_MAPPERS,
+        ...REVIEW_MAPPERS,
+        ...DELIVERY_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -665,7 +798,7 @@ export const startProfile = (
                     Layer.provideMerge(
                       Layer.mergeAll(
                         parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
-                        proofRunnerLayer(parts.building?.proofLimit),
+                        proofRunnerLayer(parts.building?.proofLimit, parts.building?.proofMinute),
                       ),
                     ),
                   ),
@@ -680,11 +813,27 @@ export const startProfile = (
       agentOffersServed,
       outside,
       checkpoints,
-      diffsLayer(spawnGitBytes(SYSTEM_GIT, secrets.mask), log).pipe(
-        Layer.provide(Layer.mergeAll(checkpoints, outside)),
+      diffs,
+      // The rounds over Review's feedback (#468), which the window reaches too.
+      roundsLayer({ log, fixed: parts.review?.fixed }).pipe(
+        Layer.provideMerge(
+          reviewLayer({ log, hold: parts.review?.hold }).pipe(
+            Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),
+          ),
+        ),
       ),
+      pushes.layer.pipe(Layer.provide(Layer.mergeAll(diffs, checkpoints))),
     ).pipe(
-      Layer.provideMerge(sessionsLayer({ log, timings: parts.sessions?.timings })),
+      Layer.provideMerge(
+        sessionsLayer({
+          log,
+          timings: parts.sessions?.timings,
+          rebuildHold: parts.sessions?.rebuildHold,
+          sessionHold: parts.sessions?.sessionHold,
+          openHold: parts.sessions?.openHold,
+          sweepHold: parts.sessions?.sweepHold,
+        }),
+      ),
       Layer.provideMerge(agentRuntimeLayer({ dataFolder, log })),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -700,7 +849,7 @@ export const startProfile = (
           roles,
           replacementGuardLayer.pipe(Layer.provide(roles)),
           capLayer.pipe(Layer.provide(postLayer)),
-          modelChoiceLayer,
+          modelChoiceLayer.pipe(Layer.provide(roles)),
           parts.sessions?.specLanguage ?? projectSpecLanguages,
           parts.sessions?.testerMode ?? testerModeLayer,
           postLayer,
@@ -719,9 +868,17 @@ export const startProfile = (
       ),
       Layer.provideMerge(memoryLayer(memoryParts, log)),
       Layer.provideMerge(resources.layer),
+      Layer.provideMerge(forge.layer),
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
       Layer.provideMerge(parts.ticketProviders ?? ticketProvidersLayer),
+      // Images are attached from Hemera's own screenshot folder only (#253).
+      Layer.provideMerge(
+        forgeRunnerLayer({
+          attachable: screenshotIn(screenshotsFolder(dataFolder)),
+          ...parts.forge,
+        }),
+      ),
       Layer.provideMerge(ghCliLayer(parts.gh)),
       Layer.provideMerge(jiraLinkLayer(parts.jira)),
       Layer.provideMerge(runsRecipeRunnerLayer),
@@ -776,6 +933,47 @@ export const startProfile = (
 
     // The Journal catches up with the event log before anything reads the Memory, then follows it.
     yield* Context.get(context, Memory).start.pipe(Effect.forkScoped)
+    // The Git guard's holds a stopped engine left are read back, before any Git of the engine
+    // runs; its questions are written as its holds need them (#457).
+    yield* run(guard.restore)
+    // Added before the writer is forked, so it runs once the writer is stopped: what is left is
+    // written before the database closes.
+    yield* Effect.addFinalizer(() => run(guard.flush))
+    yield* run(guard.questions).pipe(Effect.forkScoped)
+    // Every place Hemera knows is seen by the guard, at the start and as one is added (#457): no
+    // repository waits for an agent's action to be given its baseline.
+    const placesKnown = Effect.gen(function* () {
+      const places: Array<{ readonly projectId: string; readonly checkouts: string[] }> = []
+      for (const project of yield* listProjects) {
+        const of = (root: string) => [
+          root,
+          ...project.repositories
+            .filter((one) => one.path !== ROOT_REPOSITORY)
+            .map((one) => join(root, one.path)),
+        ]
+        places.push({ projectId: project.id, checkouts: of(project.mainCheckout) })
+        for (const workspace of yield* listWorkspaces(project.id)) {
+          places.push({ projectId: project.id, checkouts: of(workspace.folder) })
+        }
+      }
+      return places
+    })
+    const sightKnown = run(Effect.flatMap(placesKnown, guard.sight)).pipe(
+      Effect.catch((refusal) =>
+        Effect.sync(() => log(`the Git guard did not see the places: ${said(refusal)}`)),
+      ),
+    )
+    // Off the start: a scope an action or an engine call reaches first is sighted there.
+    const placesAdded = yield* Context.get(context, DomainEvents).subscribe
+    yield* sightKnown.pipe(
+      Effect.andThen(
+        placesAdded.pipe(
+          Stream.filter((event) => SIGHTED_ON.has(event.type)),
+          Stream.runForEach(() => sightKnown),
+        ),
+      ),
+      Effect.forkScoped,
+    )
 
     let reconciliation: Reconciliation = 'none'
     const databaseNow = (): DatabaseStatus =>
@@ -853,6 +1051,8 @@ export const startProfile = (
     yield* Effect.addFinalizer(() => run(runsEndWithEngine))
     // A `gh` call a stopped engine left (#95) is ended: none outlives the call that started it.
     yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('tickets')))
+    // So is a forge CLI's call (#253).
+    yield* run(ProcessSupervisor.use((supervisor) => supervisor.endOrphans('forge')))
     // The reservations a stop left: those whose mission is no longer in Building are released.
     yield* run(ExclusiveResources.use((reservations) => reservations.atStart)).pipe(
       Effect.tap((released) =>
@@ -960,6 +1160,20 @@ export const startProfile = (
     const ticketsRead = yield* Context.get(context, DomainEvents).subscribe
     yield* gate.pass.pipe(
       Effect.andThen(run(deliverReadTickets(ticketsRead, log))),
+      Effect.forkScoped,
+    )
+    // Review's checkpoints and refused proofs (#341): followed from now, what a stop left caught up
+    // once automations may run.
+    const reviewEvents = yield* Context.get(context, DomainEvents).subscribe
+    yield* gate.pass.pipe(
+      Effect.andThen(run(Review.use((review) => review.follow(reviewEvents)))),
+      Effect.forkScoped,
+    )
+    // The pushes and pull requests (R6): followed from now, what a stop cut resumed once
+    // automations may run.
+    const pushEvents = yield* Context.get(context, DomainEvents).subscribe
+    yield* gate.pass.pipe(
+      Effect.andThen(run(Pushes.use((one) => one.follow(pushEvents)))),
       Effect.forkScoped,
     )
     // Once automations may run: the reservations are settled, then again at each change (#88).

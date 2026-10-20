@@ -28,6 +28,8 @@ import {
 } from '@hemera/ui'
 import { Match, Predicate } from 'effect'
 
+import type { SettingsPlace } from './navigation.ts'
+
 import type { Link } from './link.ts'
 
 /** How long a need that ended stays in the list, settled, before it leaves. */
@@ -107,6 +109,26 @@ const RETRY = 'Retry'
 const sectionOf = (id: string | null): AppSection | undefined =>
   [...APP_SECTIONS.keys()].find((section) => section === id)
 
+/** The sections of a Project's settings a need may open (#321), with their names. */
+const PROJECT_SECTIONS: ReadonlyMap<string, string> = new Map([
+  ['checks', 'Checks'],
+  ['delivery', 'Delivery rules'],
+])
+
+/** Where a need's settings section is, and its name, when the window has it. */
+const placeOf = (
+  need: Need,
+  id: string | null,
+): { readonly place: SettingsPlace; readonly label: string } | undefined => {
+  const section = sectionOf(id)
+  const app = section === undefined ? undefined : APP_SECTIONS.get(section)
+  if (section !== undefined && app !== undefined) return { place: section, label: app }
+  const projectId = projectOf(need)
+  const label = id === null ? undefined : PROJECT_SECTIONS.get(id)
+  if (projectId === null || id === null || label === undefined) return undefined
+  return { place: { projectId, section: id }, label }
+}
+
 /** The name of a settings section, when the window has it. */
 const settingsLabel = (id: string | null): string | undefined => {
   const section = sectionOf(id)
@@ -181,8 +203,7 @@ const wordsOf = (
   Match.value(need.fields).pipe(
     Match.tagsExhaustive({
       Environment: (fields) => {
-        const section = sectionOf(fields.settingsSection)
-        const label = section === undefined ? undefined : APP_SECTIONS.get(section)
+        const label = placeOf(need, fields.settingsSection)?.label
         return {
           title: fields.missing,
           text: fields.action,
@@ -360,7 +381,7 @@ export function needRowsOf(
 export interface NeedTools {
   readonly answer: (id: string, label: string, answer: NeedAnswer) => void
   readonly recheck: (id: string) => void
-  readonly openSettings: (section: AppSection) => void
+  readonly openSettings: (place: SettingsPlace) => void
 }
 
 export type NeedHandlers = Pick<
@@ -376,10 +397,10 @@ export function handlersFor(need: Need, tools: NeedTools): NeedHandlers {
   return Match.value(need.fields).pipe(
     Match.tagsExhaustive({
       Environment: (fields): NeedHandlers => {
-        const section = sectionOf(fields.settingsSection)
+        const place = placeOf(need, fields.settingsSection)?.place
         return {
           onRetry: () => tools.recheck(need.id),
-          onSettings: section === undefined ? undefined : () => tools.openSettings(section),
+          onSettings: place === undefined ? undefined : () => tools.openSettings(place),
         }
       },
       Decision: (): NeedHandlers => ({

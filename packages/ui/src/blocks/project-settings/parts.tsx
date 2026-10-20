@@ -4,6 +4,7 @@ import { Button } from '../../components/button/button.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { Menu } from '../../components/menu/menu.tsx'
 import { IconBraces, IconTrash } from '../../icons.ts'
+import { TEMPLATE_NAMES } from './template-names.ts'
 
 /**
  * What the sections of a Project's settings share: the head of a section, the foot of the dialog a
@@ -35,14 +36,6 @@ export function SectionRefusal({ error }: { error: string | undefined }): ReactN
     </p>
   )
 }
-
-/** The names Hemera fills in a value or a line, and what each is filled with. */
-export const TEMPLATE_NAMES = [
-  { name: '{workspace}', filled: 'Workspace name' },
-  { name: '{workspace.path}', filled: 'Workspace folder' },
-  { name: '{project}', filled: 'Project, as a slug' },
-  { name: '{branch}', filled: 'Workspace branch' },
-] as const
 
 export interface TemplateMenuProps {
   /** What the field it belongs to is called: the menu is `Insert in <field>`. */

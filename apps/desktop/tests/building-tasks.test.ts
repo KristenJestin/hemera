@@ -13,7 +13,8 @@ import { realpathSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ChosenAnswer, WrittenAnswer } from '@hemera/core/domain'
-import { Effect, Fiber, Layer, Predicate } from 'effect'
+import { and, eq } from 'drizzle-orm'
+import { Deferred, Effect, Fiber, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import {
@@ -23,12 +24,21 @@ import {
   buildingOf,
   inRepository,
 } from '../src/engine/building/builder.ts'
-import { getMission, moveMission } from '../src/engine/missions.ts'
+import { type Stopper, getMission, moveMission } from '../src/engine/missions.ts'
 import { answerNeed } from '../src/engine/needs.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
+import { Database } from '../src/engine/storage/database.ts'
+import {
+  buildingAttempts,
+  buildingDecisions,
+  sessionDeliveries,
+} from '../src/engine/storage/schema.ts'
 import { getSession, openSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { call, eventsOf, grantOf } from './building-world.ts'
 import {
+  builderAgents,
   builderEngine,
   builderOf,
   buildingNow,
@@ -36,7 +46,8 @@ import {
   statesOf,
   taskIn,
 } from './builder-world.ts'
-import { text, until, within } from './sessions-world.ts'
+import { KNOWN_SECRET, QUOTED_SECRET, expectMaskedJson } from './json-masked.ts'
+import { HELPER, sessionsEngine, text, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -615,7 +626,13 @@ describe('An amendment the plan moved under expires, and the Builder is told', (
           yield* until(
             Effect.sync(() => promptsOf(world).some((one) => one.includes('[hemera:expiry]'))),
           )
-          return { view: yield* buildingNow(mission.id) }
+          const expiries = yield* (yield* Database)
+            .select({ id: sessionDeliveries.id })
+            .from(sessionDeliveries)
+            .where(
+              and(eq(sessionDeliveries.ownerId, mission.id), eq(sessionDeliveries.kind, 'expiry')),
+            )
+          return { view: yield* buildingNow(mission.id), expiries }
         }),
       ),
     )
@@ -624,6 +641,78 @@ describe('An amendment the plan moved under expires, and the Builder is told', (
     expect(statesOf(seen.view)['T4']).toBe('available')
     const decision = seen.view.decisions.find((one) => one.tasks.includes('T1'))
     expect(decision?.state).toBe('expired')
+    // Stored once, by the answer that expired it: the follower only hands it over.
+    expect(seen.expiries).toHaveLength(1)
+  })
+
+  test('an amendment that expires as it is answered, right before a stop, is told to the Builder after the start', async () => {
+    const removing = (task: string, out: string) => ({
+      task,
+      kind: 'impossible',
+      reason: `${out} is not needed.`,
+      options: [`Remove ${out}`, 'Keep it'],
+      recommended: `Remove ${out}`,
+      recommended_reason: 'It does nothing more.',
+      amendment: { kind: 'remove', task: out, reason: 'Not needed.' },
+    })
+    let lagging = false
+    let reached = false
+    // The follower that tells the Builder of the expiry never gets past it before the stop.
+    const hold: BuilderHold = (at) =>
+      at === 'releasing' && lagging
+        ? Effect.andThen(
+            Effect.sync(() => {
+              reached = true
+            }),
+            Effect.never,
+          )
+        : Effect.void
+    const before = builderEngine(data, work, { hold })
+    const first = await before.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* call(grantId, 'task_blocked', removing('T1', 'T4'))
+          yield* call(grantId, 'task_start', { task: 'T2' })
+          yield* call(grantId, 'task_blocked', removing('T2', 'T1'))
+          const needs = (yield* getMission(mission.id)).needs
+          const needOf = (taskId: string) =>
+            needs.find(
+              (one) => Predicate.isTagged(one.owner, 'Mission') && one.owner.taskId === taskId,
+            )?.id ?? ''
+          yield* answerNeed({
+            id: needOf('T2'),
+            answer: ChosenAnswer.make({ option: 'Remove T1' }),
+            key: 'answer-t2',
+          })
+          lagging = true
+          yield* answerNeed({
+            id: needOf('T1'),
+            answer: ChosenAnswer.make({ option: 'Remove T4' }),
+            key: 'answer-t1',
+          })
+          yield* until(Effect.sync(() => reached))
+          return { mission }
+        }),
+      ),
+    )
+    const after = builderEngine(data, work)
+    const told = () => [...promptsOf(before.world), ...promptsOf(after.world)]
+    await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          yield* until(Effect.map(buildingNow(first.mission.id), (view) => view.tasks.length > 0))
+          // Taken by the Builder before the stop, or by the one the start brought back.
+          yield* until(Effect.sync(() => told().some((one) => one.includes('[hemera:expiry]'))))
+        }),
+      ),
+    )
+    const expiry = told().find((one) => one.includes('[hemera:expiry]')) ?? ''
+    expect(expiry).toContain('Removing T4 leaves R1.S1 covered by no task of the plan.')
   })
 })
 
@@ -792,6 +881,69 @@ describe('The end and Cancel', () => {
     expect(statesOf(seen.view)['T1']).toBe('in_progress')
   })
 
+  test('a Cancel whose stops a stop cut ends its Building as cancelled, its stops done after the start, and brings no Builder back', async () => {
+    const reached = Deferred.makeUnsafe<void>()
+    let armed = false
+    // Once armed, the tree's stop never ends: the engine stops in the middle of the cancel's stops.
+    // The launch's Freeze stops the tree too, before.
+    const tree: Stopper = {
+      name: 'sessions',
+      stop: () =>
+        armed ? Effect.andThen(Deferred.succeed(reached, undefined), Effect.never) : Effect.void,
+    }
+    const first = await sessionsEngine(data, builderAgents, {
+      roles: [HELPER],
+      tools: { home: work },
+      missions: { stoppers: [tree] },
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          armed = true
+          yield* Effect.forkChild(moveMission(mission.id, 'cancel', 'user'))
+          yield* Deferred.await(reached)
+          return { mission }
+        }),
+      ),
+    )
+    const seen = await builderEngine(data, work).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          // The stops a stop cut run after the start, beside what reads the Building: both waited for.
+          yield* until(
+            Effect.map(
+              Effect.all([buildingOf(first.mission.id), getMission(first.mission.id)]),
+              ([view, mission]) => view?.state === 'cancelled' && mission.unstopped.length === 0,
+            ),
+          )
+          yield* until(
+            Effect.map(getMission(first.mission.id), (one) => one.unstopped.length === 0),
+          )
+          const live = yield* sessionsIn(['starting', 'working', 'idle'], {
+            kind: 'mission',
+            missionId: first.mission.id,
+          })
+          const database = yield* Database
+          return {
+            mission: yield* getMission(first.mission.id),
+            view: yield* buildingNow(first.mission.id),
+            builders: live.filter((one) => one.role === 'builder'),
+            attempts: yield* database.select().from(buildingAttempts),
+          }
+        }),
+      ),
+    )
+    expect(seen.view.state).toBe('cancelled')
+    expect(seen.mission.unstopped).toEqual([])
+    expect(seen.builders).toEqual([])
+    expect(seen.attempts.map((one) => one.outcome)).toEqual(['cancelled'])
+    expect(statesOf(seen.view)['T1']).toBe('in_progress')
+  })
+
   test('a Cancel while the last task is judged ends nothing: BuildingEnd is not called and the task stays checking', async () => {
     const ended: string[] = []
     const end = Layer.succeed(BuildingEnd, {
@@ -887,5 +1039,51 @@ describe('The end and Cancel', () => {
     )
     expect(seen.builders).toHaveLength(1)
     expect(seen.started).toHaveLength(1)
+  })
+})
+
+describe('A decision’s options and amendment are masked as JSON (#397)', () => {
+  test('task_blocked with an option and a new task holding a quoted credential and a known value stores nothing of either, and still JSON', async () => {
+    const { run } = builderEngine(data, work)
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work)
+          const { grantId } = yield* builderOf(mission.id)
+          ;(yield* Secrets).register('project-variables:suite', [KNOWN_SECRET])
+          yield* call(grantId, 'task_start', { task: 'T2' })
+          const option = `Sign with ${QUOTED_SECRET} and ${KNOWN_SECRET}`
+          const answer = yield* call(grantId, 'task_blocked', {
+            ...REPLACE_T2,
+            options: [option, 'Keep it whole'],
+            recommended: option,
+            amendment: {
+              ...REPLACE_T2.amendment,
+              by: [
+                {
+                  id: 'T2a',
+                  title: `Read the invoices with ${QUOTED_SECRET} and ${KNOWN_SECRET}`,
+                  result: 'The invoices are read.',
+                  requirements: ['R1'],
+                  scenarios: ['R1.S2'],
+                  targets: [{ repository: 'api', path: 'read.ts', intent: 'create' }],
+                  depends_on: [],
+                },
+                ...REPLACE_T2.amendment.by.slice(1),
+              ],
+            },
+          })
+          const database = yield* Database
+          const [row] = yield* database
+            .select({ options: buildingDecisions.options, amendment: buildingDecisions.amendment })
+            .from(buildingDecisions)
+          return { answer, row }
+        }),
+      ),
+    )
+    expect(seen.answer).toMatch(/T2 is blocked/)
+    expectMaskedJson(seen.row?.options)
+    expectMaskedJson(seen.row?.amendment)
   })
 })

@@ -10,7 +10,15 @@
  * Workspace as the user or through the Builder's tools.
  */
 
-import { readFileSync, rmSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -25,20 +33,23 @@ import {
   type MissionDiff,
 } from '@hemera/ipc'
 import { asc, desc, eq } from 'drizzle-orm'
-import { Effect, Fiber, Predicate, Ref, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Ref, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { Checkpoints } from '../src/engine/building/checkpoints.ts'
 import { OutsideChanges, type OutsideSettings } from '../src/engine/building/outside.ts'
-import { Diffs } from '../src/engine/review/diffs.ts'
+import type { SnapshotsService } from '../src/engine/building/snapshots.ts'
+import { Diffs, LARGE_BYTES } from '../src/engine/review/diffs.ts'
+import type { SecretsRegistry } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   buildingLaunches,
   workspaceRepositories,
   workspaces,
 } from '../src/engine/storage/schema.ts'
-import { call } from './building-world.ts'
+import { acmeAt, call } from './building-world.ts'
 import { builderAgents, builderOf, launched } from './builder-world.ts'
+import { LARGE_TEXT, largeJson, watchedSecrets } from './paced-masking.ts'
 import { git } from './repositories.ts'
 import { HELPER, sessionsEngine, until, within } from './sessions-world.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
@@ -59,12 +70,33 @@ const QUIET_TIMERS: Partial<OutsideSettings> = {
   baseEveryMillis: 3_600_000,
 }
 
-const engine = () =>
+const engine = (
+  snapshots: (real: SnapshotsService) => SnapshotsService = (real) => real,
+  secrets?: SecretsRegistry,
+) =>
   sessionsEngine(data, builderAgents, {
     roles: [HELPER],
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     building: { outside: QUIET_TIMERS },
+    snapshots,
+    secrets,
   })
+
+/**
+ * The live diff's snapshots of one repository held while `held` is set, until `release`: the test
+ * decides which repository is computed last.
+ */
+const holding = (repository: string) => {
+  const hold = { held: false, release: Deferred.makeUnsafe<void>() }
+  const wrap = (real: SnapshotsService): SnapshotsService => ({
+    ...real,
+    take: (place, owner) =>
+      hold.held && owner.kind === 'live' && place.name === repository
+        ? Effect.andThen(Deferred.await(hold.release), real.take(place, owner))
+        : real.take(place, owner),
+  })
+  return { hold, wrap }
+}
 
 /** A few bytes no text holds: the start of a PNG. */
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 1, 2, 3])
@@ -87,9 +119,22 @@ const moreOnBase = () =>
 /** A `.env` whose value must never leave the engine. */
 const SECRET = 'TOKEN=hunter2-not-a-real-one\n'
 
-const launchedOverBoth = () =>
+/**
+ * `configured` sets Acme's `api` config before Hemera knows the repository, as the user's machine
+ * has it: set later, it is a change of what shapes its Git, which the guard asks about (#457).
+ */
+const launchedOverBoth = (
+  onBase: () => Effect.Effect<void> = moreOnBase,
+  configured: (api: string) => void = () => {},
+) =>
   Effect.gen(function* () {
-    const { mission } = yield* launched(work, moreOnBase, 'It touches api and web, nothing else.')
+    const { mission } = yield* launched(
+      work,
+      onBase,
+      'It touches api and web, nothing else.',
+      undefined,
+      (folder) => acmeAt(folder, 'acme', configured),
+    )
     const database = yield* Database
     const [launch] = yield* database
       .select({ workspaceId: buildingLaunches.workspaceId })
@@ -115,6 +160,8 @@ const launchedOverBoth = () =>
     }
   })
 
+const crlf = (api: string) => git(api, 'config', 'core.autocrlf', 'true')
+
 const live = (missionId: string) => Diffs.use((diffs) => diffs.live(missionId))
 const fileOf = (missionId: string, repository: string, path: string, force = false) =>
   Diffs.use((diffs) => diffs.file(missionId, repository, path, force))
@@ -137,15 +184,17 @@ describe('Each change gives Git’s letter', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api } = yield* launchedOverBoth()
+          const { missionId, api } = yield* launchedOverBoth(moreOnBase, (main) =>
+            git(main, 'config', 'core.symlinks', 'false'),
+          )
           writeFileSync(join(api, 'invoices.ts'), 'export const invoices = ["csv"]\n')
           writeFileSync(join(api, 'export.ts'), 'export const csv = true\n')
           git(api, 'add', 'export.ts')
           unlinkSync(join(api, 'package.json'))
           mkdirSync(join(api, 'docs'))
           renameSync(join(api, 'README.md'), join(api, 'docs', 'README.md'))
-          // A type change written as Git records it, which every platform can check out.
-          git(api, 'config', 'core.symlinks', 'false')
+          // A type change written as Git records it, which every platform can check out: its
+          // core.symlinks is set off before the launch.
           writeFileSync(join(api, 'link.txt'), 'invoices.ts')
           const blob = git(api, 'hash-object', '-w', 'link.txt')
           git(api, 'update-index', '--cacheinfo', `120000,${blob},link.txt`)
@@ -209,7 +258,13 @@ describe('Two repositories with a file of the same name are told apart', () => {
         }),
       ),
     )
-    expect(seen.repositories.map((one) => one.repository)).toEqual(['api', 'web'])
+    // A repository Git could not read would list nothing: say so rather than miss a file.
+    expect(
+      seen.repositories.map(({ repository, unreadable }) => ({ repository, unreadable })),
+    ).toEqual([
+      { repository: 'api', unreadable: null },
+      { repository: 'web', unreadable: null },
+    ])
     const readmes = seen.repositories.flatMap((one) =>
       one.files.filter((file) => file.path === 'README.md'),
     )
@@ -234,8 +289,15 @@ describe('Two repositories with a file of the same name are told apart', () => {
       ),
     )
     const web = seen.repositories.find((one) => one.repository === 'web')
-    expect(web).toMatchObject({ files: [], added: 0, removed: 0, changedOutside: false })
+    expect(web).toMatchObject({
+      files: [],
+      added: 0,
+      removed: 0,
+      changedOutside: false,
+      unreadable: null,
+    })
     expect(seen.repositories.find((one) => one.repository === 'api')).toMatchObject({
+      unreadable: null,
       branch: expect.stringContaining('/'),
       baseBranch: 'origin/main',
       added: 1,
@@ -338,6 +400,152 @@ describe('A large change is loaded on request', () => {
   })
 })
 
+describe('A large file is masked in slices the engine answers between (#402)', () => {
+  test('a large JSON file of the live diff, read with force, comes masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    const expected = unwatched.mask(original)
+    expect(expected).not.toContain(value)
+    const { run } = engine(undefined, secrets)
+    const forced = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth()
+          writeFileSync(join(api, 'lock.json'), original)
+          yield* live(missionId)
+          return yield* fileOf(missionId, 'api', 'lock.json', true)
+        }),
+      ),
+    )
+    expect(textOf(forced, 'after')).toBe(expected)
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns.length).toBeGreaterThan(0)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
+  })
+
+  test('a large JSON file whose base side is read through Git’s conversions comes masked as the whole mask gives it, while another fiber keeps its turns', async () => {
+    const value = 'variable-value-8812'
+    const original = largeJson(4 * LARGE_TEXT, value)
+    const changed = `${original.slice(0, -1)},{"extra":true}]`
+    const { secrets, watch, unwatched } = watchedSecrets((registry) =>
+      registry.register('project-variables:acme', [value]),
+    )
+    const { run } = engine(undefined, secrets)
+    const forced = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth(() =>
+            Effect.sync(() => {
+              const base = join(work, 'acme', 'api')
+              writeFileSync(join(base, 'lock.json'), original)
+              git(base, 'add', '.')
+              git(base, 'commit', '-q', '-m', 'lock')
+              git(base, 'push', '-q', 'origin', 'HEAD')
+            }),
+          )
+          writeFileSync(join(api, 'lock.json'), changed)
+          yield* live(missionId)
+          return yield* fileOf(missionId, 'api', 'lock.json', true)
+        }),
+      ),
+    )
+    expect(textOf(forced, 'before')).toBe(unwatched.mask(original))
+    expect(textOf(forced, 'after')).toBe(unwatched.mask(changed))
+    expect(watch.syncOnLarge).toBe(0)
+    expect(watch.pacedTurns.length).toBeGreaterThan(1)
+    for (const turns of watch.pacedTurns) expect(turns).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * A clean/smudge driver in the manner of git-lfs, run by Node: Git stores a short pointer text,
+ * the checkout holds the bytes, kept aside in `store` under their hash.
+ */
+const POINTER_DRIVER = `const { createHash } = require('node:crypto')
+const { existsSync, readFileSync, writeFileSync } = require('node:fs')
+const { join } = require('node:path')
+const [, , mode, store] = process.argv
+const input = readFileSync(0)
+if (mode === 'clean') {
+  const id = createHash('sha256').update(input).digest('hex')
+  writeFileSync(join(store, id), input)
+  process.stdout.write('pointer ' + id + ' size ' + input.length + '\\n')
+} else {
+  const id = /^pointer (\\w+)/.exec(input.toString('latin1'))?.[1]
+  const kept = id === undefined ? null : join(store, id)
+  process.stdout.write(kept !== null && existsSync(kept) ? readFileSync(kept) : input)
+}
+`
+
+/** A drawing as text. */
+const SVG = '<svg><circle r="1"/></svg>\n'
+
+/** The pointer driver set on Acme's `api`, its script and store under `work`. */
+const pointerDriver = (api: string) => {
+  const script = join(work, 'pointer-driver.cjs')
+  const store = join(work, 'pointer-store')
+  // Forward slashes: Git runs the command through its shell, on Windows too.
+  const quoted = (path: string) => `"${path.replaceAll('\\', '/')}"`
+  for (const mode of ['clean', 'smudge']) {
+    git(api, 'config', `filter.pointer.${mode}`, `node ${quoted(script)} ${mode} ${quoted(store)}`)
+  }
+}
+
+/** The base of Acme's `api` with two drawings under the pointer driver, pushed. */
+const filteredOnBase = () =>
+  Effect.sync(() => {
+    const api = join(work, 'acme', 'api')
+    mkdirSync(join(work, 'pointer-store'))
+    writeFileSync(join(work, 'pointer-driver.cjs'), POINTER_DRIVER)
+    writeFileSync(join(api, '.gitattributes'), '*.svg filter=pointer\n')
+    writeFileSync(join(api, 'logo.svg'), SVG)
+    writeFileSync(join(api, 'icon.svg'), SVG)
+    git(api, 'add', '.')
+    git(api, 'commit', '-q', '-m', 'assets')
+    git(api, 'push', '-q', 'origin', 'HEAD')
+  })
+
+describe('A file under a filter driver is diffed in one form on both sides', () => {
+  test('a filtered file changed in the working tree shows its stored form on both sides, judged large on it; an unchanged one shows no change', async () => {
+    // A text past the size that makes a file large, as an LFS file can be and its pointer is not.
+    const drawn = `<svg>${'<g/>'.repeat(LARGE_BYTES / 4)}</svg>\n`
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth(filteredOnBase, pointerDriver)
+          const checkedOut = readFileSync(join(api, 'icon.svg'), 'utf8')
+          writeFileSync(join(api, 'logo.svg'), drawn)
+          const diff = yield* live(missionId)
+          return { diff, checkedOut, contents: yield* fileOf(missionId, 'api', 'logo.svg') }
+        }),
+      ),
+    )
+    // The checkout holds the bytes, smudged by the driver: the scene is the one of git-lfs.
+    expect(seen.checkedOut).toBe(SVG)
+    expect(entry(seen.diff, 'api', 'icon.svg')).toBeUndefined()
+    expect(entry(seen.diff, 'api', 'logo.svg')).toMatchObject({
+      letter: 'M',
+      binary: false,
+      added: 1,
+      removed: 1,
+      large: false,
+    })
+    expect(textOf(seen.contents, 'before')).toMatch(
+      new RegExp(`^pointer \\w+ size ${String(SVG.length)}\\n$`),
+    )
+    expect(textOf(seen.contents, 'after')).toMatch(
+      new RegExp(`^pointer \\w+ size ${String(drawn.length)}\\n$`),
+    )
+  })
+})
+
 describe('A file changed outside Hemera is flagged', () => {
   test('a file B10 attributes to outside Hemera is changedOutside', async () => {
     const { run } = engine()
@@ -400,6 +608,32 @@ describe('A sensitive file is listed, its content withheld', () => {
   })
 })
 
+describe('A file on disk is read into the diff only as itself', () => {
+  test('an untracked link to a file outside the Workspace never shows that file', async (context) => {
+    const outside = join(work, 'outside-notes.txt')
+    writeFileSync(outside, 'OUTSIDE-NOTES-63\n')
+    const { run } = engine()
+    const seen = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { missionId, api } = yield* launchedOverBoth()
+          try {
+            symlinkSync(outside, join(api, 'notes.md'), 'file')
+          } catch {
+            return null
+          }
+          const diff = yield* live(missionId)
+          return { diff, contents: yield* fileOf(missionId, 'api', 'notes.md') }
+        }),
+      ),
+    )
+    if (seen === null) return context.skip()
+    expect(entry(seen.diff, 'api', 'notes.md')).toMatchObject({ letter: 'A', untracked: true })
+    expect(JSON.stringify(seen.contents)).not.toContain('OUTSIDE-NOTES-63')
+  })
+})
+
 describe('The diff follows the Workspace live', () => {
   test('a write in the Workspace produces one diff.changes event with the next sequence number', async () => {
     const { run } = engine()
@@ -442,7 +676,9 @@ describe('The diff follows the Workspace live', () => {
   })
 
   test('a change B10 reports, then one seen when the window regains the focus, each bump the sequence once', async () => {
-    const { run } = engine()
+    // The repositories are computed side by side: `web` is held to tell its change first.
+    const { hold, wrap } = holding('api')
+    const { run } = engine(wrap)
     const seen = await run(({ profile }) =>
       within(
         profile,
@@ -461,7 +697,12 @@ describe('The diff follows the Workspace live', () => {
           yield* until(Effect.map(Ref.get(heard), (all) => all.length > 0))
           rmSync(join(api, 'stray.md'))
           writeFileSync(join(web, 'notes.md'), 'mine\n')
+          hold.held = true
           yield* Diffs.use((diffs) => diffs.focused)
+          yield* until(
+            Effect.map(Ref.get(heard), (all) => all.some((one) => one.repository === 'web')),
+          )
+          yield* Deferred.succeed(hold.release, undefined)
           yield* until(Effect.map(Ref.get(heard), (all) => all.length > 2))
           yield* Effect.sleep('1 second')
           yield* Fiber.interrupt(listening)
@@ -471,17 +712,22 @@ describe('The diff follows the Workspace live', () => {
     )
     const sequenceOf = (repository: string) =>
       seen.before.repositories.find((one) => one.repository === repository)?.sequence ?? -1
-    expect(
-      seen.heard.map(({ repository, sequence, files, gone }) => ({
-        repository,
-        sequence,
-        files: files.map((one) => one.path),
-        gone,
-      })),
-    ).toEqual([
-      { repository: 'api', sequence: sequenceOf('api') + 1, files: ['stray.md'], gone: [] },
-      { repository: 'api', sequence: sequenceOf('api') + 2, files: [], gone: ['stray.md'] },
-      { repository: 'web', sequence: sequenceOf('web') + 1, files: ['notes.md'], gone: [] },
+    // Each repository's changes in the order of its sequence; two repositories in any order.
+    const heardIn = (repository: string) =>
+      seen.heard
+        .filter((one) => one.repository === repository)
+        .map(({ sequence, files, gone }) => ({
+          sequence,
+          files: files.map((one) => one.path),
+          gone,
+        }))
+    expect(seen.heard).toHaveLength(3)
+    expect(heardIn('api')).toEqual([
+      { sequence: sequenceOf('api') + 1, files: ['stray.md'], gone: [] },
+      { sequence: sequenceOf('api') + 2, files: [], gone: ['stray.md'] },
+    ])
+    expect(heardIn('web')).toEqual([
+      { sequence: sequenceOf('web') + 1, files: ['notes.md'], gone: [] },
     ])
   })
 
@@ -547,9 +793,8 @@ describe('The diff follows the Workspace live', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api } = yield* launchedOverBoth()
           // Windows runners set it system-wide: Git stores the lines with LF, the disk keeps CRLF.
-          git(api, 'config', 'core.autocrlf', 'true')
+          const { missionId, api } = yield* launchedOverBoth(moreOnBase, crlf)
           mkdirSync(join(api, 'mes docs'))
           writeFileSync(join(api, 'mes docs', 'été à noël.md'), 'un\r\ndeux\r\n')
           writeFileSync(join(api, 'crlf.txt'), 'un\r\ndeux\r\ntrois\r\n')
@@ -580,8 +825,7 @@ describe('The diff follows the Workspace live', () => {
       within(
         profile,
         Effect.gen(function* () {
-          const { missionId, api, rows } = yield* launchedOverBoth()
-          git(api, 'config', 'core.autocrlf', 'true')
+          const { missionId, api, rows } = yield* launchedOverBoth(moreOnBase, crlf)
           writeFileSync(join(api, 'crlf.txt'), 'un\r\ndeux\r\ntrois\r\n')
           const checkpointId = yield* Checkpoints.use((checkpoints) =>
             checkpoints.take(

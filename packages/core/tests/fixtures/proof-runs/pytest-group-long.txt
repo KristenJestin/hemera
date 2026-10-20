@@ -1,0 +1,46 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+plugins: timeout-2.4.0
+collected 4 items
+
+tests/test_export_of_the_invoices_as_markdown_files.py FFFF              [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export_of_the_invoices_as_markdown_files.py:5: AssertionError
+_____________ test_the_invoices_export_as_markdown_in_a_task_group _____________
+  + Exception Group Traceback (most recent call last):
+  |   File "/work/acme/api/tests/test_export_of_the_invoices_as_markdown_files.py", line 9, in test_the_invoices_export_as_markdown_in_a_task_group
+  |     raise ExceptionGroup("tasks", [AssertionError("the invoice is not saved")])
+  | ExceptionGroup: tasks (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | AssertionError: the invoice is not saved
+    +------------------------------------
+____ test_the_invoices_export_as_markdown_with_a_type_error_in_a_task_group ____
+  + Exception Group Traceback (most recent call last):
+  |   File "/work/acme/api/tests/test_export_of_the_invoices_as_markdown_files.py", line 13, in test_the_invoices_export_as_markdown_with_a_type_error_in_a_task_group
+  |     raise ExceptionGroup("tasks", [TypeError("to_markdown is not callable")])
+  | ExceptionGroup: tasks (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | TypeError: to_markdown is not callable
+    +------------------------------------
+_____________ test_the_invoices_export_as_markdown_failed_by_hand ______________
+
+    def test_the_invoices_export_as_markdown_failed_by_hand():
+>       pytest.fail("could not save\nAssertionError: the invoice is not saved")
+E       Failed: could not save
+E       AssertionError: the invoice is not saved
+
+tests/test_export_of_the_invoices_as_markdown_files.py:17: Failed
+=========================== short test summary info ============================
+FAILED tests/test_export_of_the_invoices_as_markdown_files.py::test_one_is_one
+FAILED tests/test_export_of_the_invoices_as_markdown_files.py::test_the_invoices_export_as_markdown_in_a_task_group
+FAILED tests/test_export_of_the_invoices_as_markdown_files.py::test_the_invoices_export_as_markdown_with_a_type_error_in_a_task_group
+FAILED tests/test_export_of_the_invoices_as_markdown_files.py::test_the_invoices_export_as_markdown_failed_by_hand
+============================== 4 failed in 0.05s ===============================

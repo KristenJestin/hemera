@@ -26,7 +26,8 @@ export {
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
 export { Empty, type EmptyProps } from './components/empty/empty.tsx'
 export { ErrorState, type ErrorStateProps } from './components/error-state/error-state.tsx'
-export { FACE_SIZES, Face, type FaceProps, type FaceSize } from './components/face/face.tsx'
+export { Face, type FaceProps } from './components/face/face.tsx'
+export { FACE_SIZES, type FaceSize } from './components/face/face-sizes.ts'
 export { FACE_STATES, type FaceState } from './components/face/states.ts'
 export {
   Frame,
@@ -36,14 +37,13 @@ export {
   type FrameProps,
 } from './components/frame/frame.tsx'
 export { Kbd, type KbdProps } from './components/kbd/kbd.tsx'
+export { LetterAvatar, type LetterAvatarProps } from './components/letter-avatar/letter-avatar.tsx'
 export {
   LETTER_TONES,
-  LetterAvatar,
   initialsOf,
   letterToneOf,
-  type LetterAvatarProps,
   type LetterTone,
-} from './components/letter-avatar/letter-avatar.tsx'
+} from './components/letter-avatar/letter-names.ts'
 export { List, ListItem, type ListItemProps, type ListProps } from './components/list/list.tsx'
 export {
   Loading,
@@ -52,21 +52,19 @@ export {
   type SkeletonProps,
   type SkeletonShape,
 } from './components/loading/loading.tsx'
-export {
-  LIVE_WORDS,
-  LiveChip,
-  STUCK_AFTER,
-  durationOf,
-  type LiveChipProps,
-  type LiveState,
-} from './components/live-chip/live-chip.tsx'
+export { LiveChip, type LiveChipProps, type LiveState } from './components/live-chip/live-chip.tsx'
 export {
   LiveChipGlance,
-  glanceWordsOf,
   type LiveChipGlanceProps,
   type LiveGlance,
   type LiveKind,
 } from './components/live-chip/live-chip-glance.tsx'
+export {
+  LIVE_WORDS,
+  STUCK_AFTER,
+  durationOf,
+  glanceWordsOf,
+} from './components/live-chip/live-words.ts'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export {
   ChatThread,
@@ -80,7 +78,6 @@ export {
 export { ChatPage, type ChatPageProps, type ChatTurn } from './surfaces/chat/chat-page.tsx'
 export {
   kindOf,
-  loadMentionEditor,
   MentionBadge,
   MentionField,
   MentionFieldSkeleton,
@@ -90,9 +87,8 @@ export {
   type MentionKind,
   type MentionRef,
 } from './components/mention-field/mention-field.tsx'
+export { loadMentionEditor } from './components/mention-field/load-mention-editor.ts'
 export {
-  choiceWords,
-  EFFORTS,
   EffortGauge,
   ModelPicker,
   type Effort,
@@ -102,6 +98,7 @@ export {
   type PickerAgent,
   type PickerModel,
 } from './components/model-picker/model-picker.tsx'
+export { choiceWords, EFFORTS } from './components/model-picker/model-choice.ts'
 export { Popover, type PopoverProps } from './components/popover/popover.tsx'
 export {
   Select,
@@ -122,12 +119,11 @@ export {
   type SlidingMarkProps,
 } from './components/sliding-mark/sliding-mark.tsx'
 export {
-  MARK_LEGENDS,
   StatusMark,
   type MarkSize,
-  type MarkState,
   type StatusMarkProps,
 } from './components/status-mark/status-mark.tsx'
+export { MARK_LEGENDS, type MarkState } from './components/status-mark/mark-legends.ts'
 export { Tabs, type TabsItem, type TabsProps } from './components/tabs/tabs.tsx'
 export { Legend, type LegendProps } from './components/tooltip/legend.tsx'
 export {
@@ -137,16 +133,16 @@ export {
   type TooltipSide,
 } from './components/tooltip/tooltip.tsx'
 export { OverlayContainerProvider, type OverlayContainer } from './overlay.ts'
-export { BALL_LEGENDS, BallMark, type Ball, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
+export { BallMark, type BallMarkProps } from './blocks/ball/ball-mark.tsx'
+export { BALL_LEGENDS, type Ball } from './blocks/ball/ball-legends.ts'
 export {
-  NEED_KINDS,
   NeedCard,
   type NeedAsk,
   type NeedCardProps,
-  type NeedKind,
   type NeedState,
   type PermissionChoice,
 } from './blocks/need/need-card.tsx'
+export { NEED_KINDS, type NeedKind } from './blocks/need/need-kinds.ts'
 export {
   NeedsYouList,
   type NeedRow,
@@ -169,17 +165,15 @@ export { type MissionStage } from './blocks/mission/vocabulary.ts'
 export * from './blocks/mission/vocabulary.ts'
 export * from './blocks/mission/mission-marks.tsx'
 export * from './blocks/mission/mission-row.tsx'
+export * from './blocks/mission/kept-agent-chip.tsx'
+export * from './blocks/mission/kept-agent-words.ts'
 export * from './blocks/mission/stage-card.tsx'
 export * from './surfaces/living-spec/living-spec-types.ts'
 export * from './surfaces/living-spec/living-spec-page.tsx'
 /** The values the Planning page draws, by their engine names: `Planning.Question`, `Planning.Probe`. */
 export * as Planning from './blocks/planning/planning-types.ts'
-export {
-  PlanningPage,
-  discussionViewId,
-  probeViewId,
-  type PlanningPageProps,
-} from './surfaces/planning/planning-page.tsx'
+export { PlanningPage, type PlanningPageProps } from './surfaces/planning/planning-page.tsx'
+export { discussionViewId, probeViewId } from './surfaces/planning/planning-view-ids.ts'
 export {
   freezeOf,
   planningNow,
@@ -191,7 +185,7 @@ export {
   type PlanningTarget,
 } from './blocks/planning/planning-progress.ts'
 export { FreezeButton, FreezeNote } from './blocks/planning/freeze.tsx'
-export { answerStepOf, type AnswerStep } from './blocks/planning/planning-marks.tsx'
+export { answerStepOf, type AnswerStep } from './blocks/planning/answer-step.ts'
 export { planningViews, type PlanningViewsOf } from './surfaces/planning/planning-views.tsx'
 export {
   DiscussionThread,
@@ -215,7 +209,10 @@ export {
   type ServiceAction,
 } from './surfaces/building/building-page.tsx'
 export { TaskView } from './surfaces/building/task-view.tsx'
+export * from './blocks/project-settings/provider-model.ts'
 export * from './blocks/project-settings/ticket-providers.tsx'
+export * from './blocks/project-settings/provider-forms.tsx'
+export * from './blocks/project-settings/spec-fields-model.ts'
 export * from './blocks/project-settings/spec-fields.tsx'
 export * from './blocks/project-settings/exclusive-resources.tsx'
 export {
@@ -233,6 +230,7 @@ export {
   type PageProps,
 } from './surfaces/page.tsx'
 export * from './surfaces/project/project-page.tsx'
+export * from './surfaces/project/mission-field.ts'
 export {
   ProjectSettings,
   type ProjectSettingsProps,
@@ -248,30 +246,32 @@ export {
 export {
   RepositoriesSection,
   RepositoryForm,
-  type BaseFreshness,
   type RemoteChoice,
   type RepositoryDraft,
-  type SettingsRepository,
 } from './blocks/project-settings/repositories.tsx'
+export {
+  type BaseFreshness,
+  type SettingsRepository,
+} from './blocks/project-settings/repositories-model.ts'
 export { WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
+export { CommandForm, CommandsSection } from './blocks/project-settings/commands.tsx'
 export {
   COMMAND_TYPES,
-  CommandForm,
-  CommandsSection,
-  NEW_COMMAND,
   typeIcon,
-  type CommandDraft,
   type CommandType,
+} from './blocks/project-settings/command-types.tsx'
+export {
+  NEW_COMMAND,
+  type CommandDraft,
   type SettingsCommand,
-} from './blocks/project-settings/commands.tsx'
+} from './blocks/project-settings/commands-model.ts'
+export { RecipeSection, StepForm } from './blocks/project-settings/recipe.tsx'
 export {
   NEW_STEP,
-  RecipeSection,
-  StepForm,
   type SettingsStep,
   type StepDraft,
   type StepKind,
-} from './blocks/project-settings/recipe.tsx'
+} from './blocks/project-settings/recipe-model.ts'
 export {
   VariableForm,
   VariablesSection,
@@ -287,28 +287,70 @@ export { FormFoot, TemplateMenu } from './blocks/project-settings/parts.tsx'
 export {
   CheckForm,
   ChecksSection,
+  type CheckRefusals,
+  type ProofLimitField,
+} from './blocks/project-settings/checks.tsx'
+export {
   NEW_CHECK,
   type CheckDraft,
-  type CheckRefusals,
   type SettingsCheck,
-} from './blocks/project-settings/checks.tsx'
+} from './blocks/project-settings/checks-model.ts'
 export {
   DocRecipeForm,
   DocRecipesSection,
+  type DocRecipeRefusals,
+} from './blocks/project-settings/doc-recipes.tsx'
+export {
   NEW_DOC_RECIPE,
   recipeName,
   type DocRecipeDraft,
-  type DocRecipeRefusals,
   type SettingsDocRecipe,
-} from './blocks/project-settings/doc-recipes.tsx'
+} from './blocks/project-settings/doc-recipes-model.ts'
+export {
+  DeliveryRulesSection,
+  type DeliveryTarget,
+} from './blocks/project-settings/delivery-rules.tsx'
+export {
+  PushForm,
+  RepositoryForm as DeliveryRepositoryForm,
+  ReviewersForm,
+  StepForm as DeliveryStepForm,
+  TemplateForm,
+  type PushDraft,
+  type RepositoryDraft as DeliveryRepositoryDraft,
+  type StepAnchor,
+  type StepDraft as DeliveryStepDraft,
+} from './blocks/project-settings/delivery-forms.tsx'
+export { newStep } from './blocks/project-settings/delivery-form-options.ts'
+export { filled, templateRefusal } from './blocks/project-settings/delivery-words.ts'
+export {
+  CATALOGUE,
+  MOMENT_WORDS,
+  STEP_WORDS,
+  type CleanupStep,
+  type CliState as DeliveryCliState,
+  type DeliveryRefusals,
+  type DeliveryRepository as DeliveryRepositoryShown,
+  type DeliveryRules as DeliveryRulesShown,
+  type DeliveryStep,
+  type Dependency as DeliveryDependencyShown,
+  type ForgeKind,
+  type ForgeView,
+  type Moment,
+  type Preset,
+  type PullRequestRules,
+  type RecipeStep as DeliveryRecipeStep,
+  type Reviewer,
+  type StepConfig,
+  type StepKind as DeliveryStepKind,
+} from './blocks/project-settings/delivery-model.ts'
 export { SectionHead, type SectionHeadProps } from './components/section-head/section-head.tsx'
 export {
-  MARK_ICONS,
   ProjectMark,
   type Identity,
-  type MarkIcon,
   type ProjectMarkProps,
 } from './components/project-mark/project-mark.tsx'
+export { MARK_ICONS, type MarkIcon } from './components/project-mark/mark-icons.tsx'
 export { MarkPicker, type MarkPickerProps } from './components/project-mark/mark-picker.tsx'
 export {
   CommandLineField,
@@ -332,12 +374,8 @@ export {
   type SoundStyleChoice,
   type Toggle,
 } from './blocks/app-settings/app-sections.tsx'
-export {
-  APP_SECTIONS,
-  AppSettings,
-  type AppSection,
-  type AppSettingsProps,
-} from './surfaces/app-settings/app-settings.tsx'
+export { AppSettings, type AppSettingsProps } from './surfaces/app-settings/app-settings.tsx'
+export { APP_SECTIONS, type AppSection } from './surfaces/app-settings/app-sections.tsx'
 export {
   NeverForm,
   NeverSection,
@@ -357,23 +395,23 @@ export {
 } from './blocks/project-settings/budget.tsx'
 export {
   InstructionsSection,
-  readingOf,
-  type AgentInstructions,
   type InstructionsSectionProps,
-  type Reading,
-  type RepositoryInstructions,
 } from './blocks/project-settings/instructions.tsx'
 export {
-  SETUP_KINDS,
-  SETUP_TITLES,
+  readingOf,
+  type AgentInstructions,
+  type Reading,
+  type RepositoryInstructions,
+} from './blocks/project-settings/instructions-model.ts'
+export {
   type Proposal,
   type ProposedCommand,
   type ProposedNever,
   type ProposedRepository,
   type ProposedStep,
   type ProposedVariable,
-  type SetupKind,
 } from './blocks/setup/proposal.tsx'
+export { SETUP_KINDS, SETUP_TITLES, type SetupKind } from './blocks/setup/setup-kinds.tsx'
 export { SetupCard, type CardStatus, type SetupCardProps } from './blocks/setup/setup-card.tsx'
 export {
   type ProjectSetupProps,

@@ -103,12 +103,14 @@ export const hover: Transition = { duration: durations.fast, ease: easing }
  * motion's own `reducedMotion` jumps a transform to its target and keeps animating opacity and
  * colour. What reduced motion means here is the end state without the journey, for every property
  * at once, so the journey is given no time instead. Both ways of asking are honoured: the system
- * preference, and a `MotionConfig` that says `always`.
+ * preference, and a `MotionConfig` that says `always`. A `MotionConfig` that says `never` keeps the
+ * journey whatever the system prefers: a story that reads a fold plays it so.
  */
 export function useTransition(kind: Transition = arrival): Transition {
   const { reducedMotion } = useContext(MotionConfigContext)
   const system = useReducedMotion()
   if (reducedMotion === 'always') return instant
+  if (reducedMotion === 'never') return kind
   return system === true ? instant : kind
 }
 

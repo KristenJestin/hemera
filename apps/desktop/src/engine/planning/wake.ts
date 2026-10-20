@@ -39,6 +39,7 @@ import { SpecBoard, draftedSaid } from './board.ts'
 import { prepareDeliveries, queuedForPlanner } from './handover.ts'
 import { markDelivered } from './inputs.ts'
 import { hemeraNext } from './store.ts'
+import { grillingRoundIn, workspaceFolderIn } from '../review/round-store.ts'
 
 /** What Now's next step says once the Planner started, and once a turn wrote the draft. */
 export const READING_THE_CODE = 'Reading the code'
@@ -48,8 +49,9 @@ export class PlannerWake extends Context.Service<
   PlannerWake,
   {
     /**
-     * Hands the mission's Planner a delivery, starting a fresh one when none lives; nothing for a
-     * mission that is not in Planning (false).
+     * Hands the mission's Planner a delivery, starting a fresh one when none lives: its Planner in
+     * round mode while a Review round is grilled (#468); nothing for a mission that is in neither
+     * (false).
      */
     readonly deliver: (
       missionId: string,
@@ -182,6 +184,19 @@ export const plannerLayer = (settings: PlannerSettings) =>
           }),
         ).pipe(run)
 
+      /**
+       * The Planner in round mode a delivery goes to while the mission's Review round is grilled
+       * (#468): in the Workspace the user reviewed, read-only. Null otherwise.
+       */
+      const roundAsked = (missionId: string) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          if ((yield* grillingRoundIn(database, missionId)) === null) return null
+          const folder = yield* workspaceFolderIn(database, missionId)
+          if (folder === null) return null
+          return { owner: { kind: 'mission', missionId } as const, role: 'round-planner', folder }
+        })
+
       const deliver = (missionId: string, kind: string, body: string, id?: string) =>
         Semaphore.withPermits(
           lock,
@@ -189,6 +204,33 @@ export const plannerLayer = (settings: PlannerSettings) =>
         )(
           Effect.gen(function* () {
             const mission = yield* missionOf(missionId)
+            if (mission?.stage === 'review') {
+              const round = yield* roundAsked(missionId)
+              if (round === null) return false
+              return yield* Sessions.use((sessions) =>
+                sessions.deliverOrStart(
+                  {
+                    id: id ?? crypto.randomUUID(),
+                    owner: round.owner,
+                    target: { role: round.role },
+                    kind,
+                    body,
+                  },
+                  round,
+                ),
+              ).pipe(
+                Effect.as(true),
+                Effect.catchTags({
+                  SessionRefused: (refused) =>
+                    Effect.as(
+                      said(`no Planner in round mode for ${missionId}: ${refused.message}`),
+                      false,
+                    ),
+                  DeliveryKindRefused: (refused) =>
+                    Effect.as(said(`a delivery was refused: ${refused.message}`), false),
+                }),
+              )
+            }
             if (mission?.stage !== 'planning') return false
             const asked = yield* openAsked(missionId, mission.projectId)
             if (asked === null) return false

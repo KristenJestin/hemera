@@ -17,6 +17,7 @@ import {
 import { and, asc, eq, inArray, notInArray } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
 
+import { refusedIfCancelled } from '../cancelled.ts'
 import { dropSessionLines } from '../memory/index.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
@@ -134,9 +135,12 @@ export interface SessionAsked {
   readonly modelLevel?: SettingLevel | null
 }
 
-/** The row a new session is written as, inside a transaction. */
+/** The row a new session is written as, inside a transaction; never for a cancelled mission. */
 export const insertSession = (transaction: EngineTransaction, asked: SessionAsked) =>
   Effect.gen(function* () {
+    if (asked.owner.kind === 'mission') {
+      yield* refusedIfCancelled(transaction, asked.owner.missionId)
+    }
     // A UUID: the session's trace file is named after it, so it must be safe as a file name.
     const id = asked.id ?? crypto.randomUUID()
     const at = now()

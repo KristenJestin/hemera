@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import { BALL_LEGENDS, BallMark } from './ball-mark.tsx'
+import { BallMark } from './ball-mark.tsx'
+import { BALL_LEGENDS } from './ball-legends.ts'
 
 /**
  * Who has the ball, as one status mark: the running arc for the agent at work, the mark of what

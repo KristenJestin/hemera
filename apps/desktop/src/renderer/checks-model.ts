@@ -3,10 +3,12 @@
  * (#152), and what their dialogs write back: a check's catalogue command with its line and its
  * "ask before running" mark, a minimum written as text, a recipe's words or none, the proposals
  * given ids the lists can move, a refusal said under the field it concerns, and the one move a
- * reorder is. Plain values and functions: no React, no link.
+ * reorder is; and how long a proof may run, as its field holds it. Plain values and functions: no
+ * React, no link.
  */
 
-import { CheckRefused, DocRecipeRefused } from '@hemera/ipc'
+import { proofLimitRefusal } from '@hemera/core/domain'
+import { CheckRefused, DocRecipeRefused, InvalidProofLimit } from '@hemera/ipc'
 import type {
   CheckDraft as EngineCheckDraft,
   Command,
@@ -162,4 +164,22 @@ export function docRecipeRefusalsOf(failure: Error): Said<DocRecipeRefusals> {
     return { fields: { [failure.field]: failure.message }, foot: undefined }
   }
   return { fields: {}, foot: failure.message }
+}
+
+/**
+ * Why the time limit typed cannot be written, in the engine's words; an empty field is the
+ * default. A number that is not whole minutes, or no number, is refused as such.
+ */
+export function proofLimitRefusalOf(value: string | null): string | undefined {
+  if (value === null) return undefined
+  const typed = value.trim()
+  const minutes = /^-?\d+(\.\d+)?$/.test(typed) ? Number(typed) : Number.NaN
+  return proofLimitRefusal(minutes) ?? undefined
+}
+
+/** Why the time limit was not kept, in words: the engine's own for a value it refuses. */
+export function proofLimitWordsOf(failure: Error): string {
+  return failure instanceof InvalidProofLimit
+    ? failure.message
+    : `The time limit could not be kept: ${failure.message}`
 }
