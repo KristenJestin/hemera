@@ -358,6 +358,16 @@ describe('A change made outside Hemera is redone at Ship, never a refusal', () =
       )
       expect(world.asked.count).toBe(1)
       expect(seen.shippedEvents).toHaveLength(1)
+      // The event holds the trees, the versions of the rules copied, and what the user confirmed.
+      const shippedPayload = JSON.parse(seen.shippedEvents[0]?.payload ?? '{}')
+      expect(shippedPayload).toMatchObject({
+        repositories: ['api', 'web'],
+        trees: seen.trees.map((one) => one.tree),
+        wavesVersion: 1,
+        endVersion: 1,
+        deliveredAt: null,
+      })
+      expect(JSON.parse(shippedPayload.confirmation)).toEqual(seen.seen)
       // The waves and the End are copied as Ship freezes the mission (CT-47).
       expect(seen.copied).toEqual(expect.arrayContaining(['preparation', 'waves', 'end']))
       expect(seen.reruns).toHaveLength(1)

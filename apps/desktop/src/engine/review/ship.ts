@@ -788,6 +788,7 @@ export const shipLayer = (settings: ShipSettings) =>
                 }
               }
               const deliveredAt = allLocal(waves.copy) ? shippedAt : null
+              const confirmation = secrets.mask(JSON.stringify(seen.preview))
               yield* transaction
                 .insert(missionShips)
                 .values({
@@ -795,7 +796,7 @@ export const shipLayer = (settings: ShipSettings) =>
                   checkpointId,
                   trees: writeTrees(candidate),
                   versions: JSON.stringify({ waves: waves.copy.version, end: end.copy.version }),
-                  confirmation: secrets.mask(JSON.stringify(seen.preview)),
+                  confirmation,
                   shippedAt,
                   deliveredAt,
                 })
@@ -817,6 +818,9 @@ export const shipLayer = (settings: ShipSettings) =>
                   shipEvent('mission.shipped', missionId, {
                     repositories: candidate.map((one) => one.repository),
                     trees: candidate.map((one) => one.tree),
+                    wavesVersion: waves.copy.version,
+                    endVersion: end.copy.version,
+                    confirmation,
                     deliveredAt,
                   }),
                 ],
