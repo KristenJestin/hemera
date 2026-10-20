@@ -186,6 +186,12 @@ export const TABLE_CLASSES = {
   round_scenarios: 'permanent',
   round_tasks: 'permanent',
   round_decisions: 'permanent',
+  // The team's comments from the forge (R8), their versions, the pushes they are anchored on and
+  // the drafting runs: the mission's history, kept with it like its feedback.
+  team_comments: 'permanent',
+  team_comment_versions: 'permanent',
+  team_comment_pushes: 'permanent',
+  team_comment_runs: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**
