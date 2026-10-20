@@ -65,6 +65,7 @@ import {
   type ShapeChange,
   type ShapeHome,
   type Shapes,
+  asCloned,
   checkoutOf,
   commonOf,
   onlyWorktreeFormat,
@@ -428,17 +429,14 @@ export const engineGitGuard = (
     /**
      * A configuration that changed only by what a user's everyday Git writes on its own and that
      * runs nothing (a submodule's address, a branch's upstream): its steady digest is the same, and
-     * what it has now is taken into the baseline, whoever wrote it. Nothing is asked.
+     * what it has now is taken into the baseline, whoever wrote it. So is a submodule's Git folder
+     * as `git submodule` clones it (#470). Nothing is asked.
      */
     const everyday = (scope: Scope, now: Shapes): void => {
       const taken = [...now].filter(([path, shape]) => {
         const was = scope.baseline.get(path)
-        return (
-          was !== undefined &&
-          was.digest !== shape.digest &&
-          shape.steady !== null &&
-          was.steady === shape.steady
-        )
+        if (was === undefined) return !scope.home && asCloned(scope.key, path, shape)
+        return was.digest !== shape.digest && shape.steady !== null && was.steady === shape.steady
       })
       if (taken.length === 0) return
       scope.baseline = new Map([...scope.baseline, ...taken])
@@ -860,18 +858,22 @@ export const engineGitGuard = (
         .pipe(Effect.mapError(refusedWhile('reading the holds of the Git guard')))
       const unread = (what: string) => Effect.fail(new Error(`a record does not read: ${what}`))
       const readScopes: Scope[] = []
+      /** The baselines kept before their files had a steady digest (before #458's round 5). */
+      const unsteady: Scope[] = []
       for (const row of baselines) {
         const shapes = Option.getOrNull(readShapes(row.shapes))
         const checkouts = Option.getOrNull(readFolders(row.checkouts))
         if (shapes === null || checkouts === null) return yield* unread(`baseline ${row.id}`)
         const everywhere = row.id === HOME
-        readScopes.push({
+        const scope: Scope = {
           key: row.id,
           home: everywhere,
           checkouts: new Set(checkouts),
           projectId: row.projectId,
           baseline: new Map(shapes.map(({ path, ...shape }) => [path, unkept(shape, everywhere)])),
-        })
+        }
+        readScopes.push(scope)
+        if (shapes.some((shape) => shape.steady === undefined)) unsteady.push(scope)
       }
       const readHolds: Hold[] = []
       for (const row of rows) {
@@ -900,7 +902,7 @@ export const engineGitGuard = (
           answer,
         })
       }
-      return { readScopes, readHolds }
+      return { readScopes, readHolds, unsteady }
     })
 
     /**
@@ -928,8 +930,21 @@ export const engineGitGuard = (
         ask(hold)
         return
       }
-      const { readScopes, readHolds } = outcome.success
+      const { readScopes, readHolds, unsteady } = outcome.success
       for (const scope of readScopes) scopes.set(scope.key, scope)
+      // A baseline kept without steady digests takes them from its files still as it has them: an
+      // everyday change made from now on is taken as one. A file changed meanwhile keeps none, and
+      // asks.
+      for (const scope of unsteady) {
+        const now = fingerprintOf(scope)
+        scope.baseline = new Map(
+          [...scope.baseline].map(([path, was]) => {
+            const shape = now.get(path)
+            return [path, shape?.digest === was.digest ? { ...was, steady: shape.steady } : was]
+          }),
+        )
+        keep(scope)
+      }
       for (const hold of readHolds) {
         holds.set(hold.key, hold)
         if (hold.answer !== 'none') continue

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { shardsOf, timesFromLog } from './test-shards.ts'
+import { longestFirst, shardsOf, timesFromLog } from './test-shards.ts'
 
 const repository = resolve(import.meta.dirname, '..')
 const MEASURED: Readonly<Record<string, number>> = JSON.parse(
@@ -48,6 +48,19 @@ describe('The repository suites split into shards by their measured time, with n
 
   test('every runner computes the same split, whatever order it lists the files in', () => {
     expect(shardsOf(FILES.toReversed(), TIMES, 3)).toEqual(shardsOf(FILES, TIMES, 3))
+  })
+})
+
+describe('A shard starts its slowest files first, so its last file to start is a short one', () => {
+  test('the files run in the order of their measured time, the slowest first', () => {
+    expect(longestFirst(FILES.toReversed(), TIMES)).toEqual(FILES)
+  })
+
+  test('a file with no measured time takes the median of the others, and every file still runs once', () => {
+    const added = 'apps/desktop/tests/new-suite.test.ts'
+    const ordered = longestFirst([added, ...FILES], TIMES)
+    expect(ordered.toSorted()).toEqual([added, ...FILES].toSorted())
+    expect(ordered.indexOf(added)).toBe(3)
   })
 })
 
