@@ -3,7 +3,7 @@
  * its working tree, its base and merge base, and the files from the merge base to the tree with
  * their contents, copied into the database so that they read back without the Workspace.
  *
- * On the engine as it starts, over a data folder of the suite's own, with the machine's `git` on
+ * On the engine as it starts, over a data folder and a home of the suite's own, with the machine's `git` on
  * repositories made under the temporary directory: two main checkouts with a remote each, and a
  * linked worktree of each standing for the Workspace's repositories.
  */
@@ -26,12 +26,20 @@ import { removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
 let work: string
+let home: string
 
 beforeEach(() => {
   data = realpathSync.native(temporaryFolder('checkpoints'))
   work = realpathSync.native(temporaryFolder('checkpoints-work'))
+  home = realpathSync.native(temporaryFolder('checkpoints-home'))
 })
 afterEach(removeFolders)
+
+/**
+ * The engine over the suite's data folder, on a home of the suite's own: the Git guard keeps its
+ * baseline of that home, so what the machine's home does while the suite runs stops nothing (#517).
+ */
+const engine = () => commandsEngine(data, { tools: { home } })
 
 /** A main checkout with its remote, on `main`, and a worktree of it on the mission's branch. */
 function repositoryOf(name: string) {
@@ -75,7 +83,7 @@ describe('A checkpoint of two repositories tells them apart', () => {
       { name: 'front', folder: front.worktree, baseRef: 'origin/main', baseCommit: front.base },
     ]
 
-    const seen = await commandsEngine(data)(({ profile }) =>
+    const seen = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const missionId = yield* missionOf(work)
@@ -154,7 +162,7 @@ describe('A checkpoint of a repository with no commit has no HEAD', () => {
     git(fresh, 'init', '-q', '-b', 'main')
     writeFileSync(join(fresh, 'first.txt'), 'first\n')
 
-    const seen = await commandsEngine(data)(({ profile }) =>
+    const seen = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const missionId = yield* missionOf(fresh)
@@ -182,7 +190,7 @@ describe('A checkpoint of a repository with no commit has no HEAD', () => {
 
 describe('A Workspace with no repository is checkpointed with none', () => {
   test('the checkpoint is written, with no repository and no file', async () => {
-    const seen = await commandsEngine(data)(({ profile }) =>
+    const seen = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const missionId = yield* missionOf(work)
@@ -201,12 +209,48 @@ describe('A Workspace with no repository is checkpointed with none', () => {
   })
 })
 
+describe('A checkpoint is taken whatever the machine’s home does meanwhile (#517)', () => {
+  test('a `.gitconfig` created in the machine’s home after the engine started stops nothing', async () => {
+    const api = repositoryOf('api')
+    writeFileSync(join(api.worktree, 'README.md'), '# API\n')
+    // The machine's home as the engine would find it, as the Windows runner's is: no `.gitconfig`
+    // when the engine starts, one created while the suite runs.
+    const machine = realpathSync.native(temporaryFolder('checkpoints-machine-home'))
+    const kept = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'] }
+    process.env['HOME'] = machine
+    process.env['USERPROFILE'] = machine
+    try {
+      const files = await engine()(({ profile }) =>
+        profile.use(
+          Effect.gen(function* () {
+            const missionId = yield* missionOf(work)
+            writeFileSync(join(machine, '.gitconfig'), '[user]\n\tname = t\n')
+            const checkpointsService = yield* Checkpoints
+            const id = yield* checkpointsService.take(missionId, 'review', [
+              { name: 'api', folder: api.worktree, baseRef: 'origin/main', baseCommit: api.base },
+            ])
+            return yield* checkpointsService.files(id)
+          }),
+        ),
+      )
+      expect(files.map(({ path, status }) => ({ path, status }))).toEqual([
+        { path: 'README.md', status: 'A' },
+      ])
+    } finally {
+      for (const [key, value] of Object.entries(kept)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+})
+
 describe('A checkpoint reads the same without its Workspace', () => {
   test('its files, diffs and contents are read from the database after the repositories are removed', async () => {
     const api = repositoryOf('api')
     writeFileSync(join(api.worktree, 'README.md'), '# API\n')
 
-    const seen = await commandsEngine(data)(({ profile }) =>
+    const seen = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const missionId = yield* missionOf(work)
