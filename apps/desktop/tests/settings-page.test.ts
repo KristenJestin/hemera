@@ -17,6 +17,7 @@ import {
   isTicketSection,
   type TicketSectionProps,
 } from '../src/renderer/ticket-sections.tsx'
+import { TestsPart } from '../src/renderer/tests-section.tsx'
 import { SILENT_LINK } from './fake-link.ts'
 
 const repository = (id: string, path: string, lastFetchedAt: string | null = null) => ({
@@ -27,6 +28,7 @@ const repository = (id: string, path: string, lastFetchedAt: string | null = nul
   remote: 'origin',
   baseBranch: 'develop',
   lastFetchedAt,
+  testReporting: null,
 })
 
 const ACME: Project = {
@@ -140,6 +142,17 @@ describe('The ticket and resource entries of a Project’s settings', () => {
     expect(drawn(ready, { section: 'nowhere' })).toContain('data-repository="api"')
   })
 
+  test('the list gains Tests, after Repositories (#421)', () => {
+    expect(drawn(ready)).toMatch(/>Repositories<.*>Tests<.*>Workspaces</s)
+    expect(sectionChosen('tests')).toBe('tests')
+    expect(isTicketSection('tests')).toBe(true)
+  })
+
+  test('a repository with no runner found marks Tests in the list (#421)', () => {
+    const markup = drawn(ready, { problems: new Map([['tests', 'no runner found for web']]) })
+    expect(markup).toContain('aria-label="Tests, no runner found for web"')
+  })
+
   test('the list gains Delivery rules, after Documentation', () => {
     expect(drawn(ready)).toMatch(/>Documentation<.*>Delivery rules</s)
     expect(sectionChosen('delivery')).toBe('delivery')
@@ -175,7 +188,14 @@ describe('The ticket sections, composed', () => {
   })
 
   test('Tickets and Specs holds the providers, then the Spec settings; resources hold theirs', () => {
-    expect(TICKET_SECTIONS).toEqual(['tickets', 'resources', 'checks', 'documentation', 'delivery'])
+    expect(TICKET_SECTIONS).toEqual([
+      'tests',
+      'tickets',
+      'resources',
+      'checks',
+      'documentation',
+      'delivery',
+    ])
     expect(isTicketSection('tickets')).toBe(true)
     expect(isTicketSection('resources')).toBe(true)
     expect(isTicketSection('models')).toBe(false)
@@ -204,5 +224,32 @@ describe('The ticket sections, composed', () => {
     const documentation = renderToStaticMarkup(createElement(TicketSection, props('documentation')))
     expect(documentation).toContain('<section aria-label="Documentation"')
     expect(documentation).toContain('aria-busy="true"')
+  })
+})
+
+describe('the guess is shown with its rule', () => {
+  const part = (rows: ComponentProps<typeof TestsPart>['tests']['rows']) =>
+    renderToStaticMarkup(
+      createElement(TestsPart, {
+        link: SILENT_LINK,
+        project: ACME,
+        tests: { rows, error: undefined },
+        show: () => undefined,
+      }),
+    )
+
+  test('Tests shows its lines in their shape while the guesses are on their way', () => {
+    const markup = part(null)
+    expect(markup).toContain('<section aria-label="Tests"')
+    expect(markup).toContain('data-row-skeleton')
+  })
+
+  test('each line says the runner, the file whose rule guessed it, and its report', () => {
+    const markup = part([
+      { repository: 'api', guess: { runner: 'pytest', from: 'pyproject.toml' }, custom: null },
+    ])
+    expect(markup).toContain(
+      'aria-label="api, pytest, guessed from pyproject.toml, JUnit XML report asked by Hemera"',
+    )
   })
 })

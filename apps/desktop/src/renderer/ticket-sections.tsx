@@ -1,7 +1,7 @@
 /**
  * The ticket sections of a Project's settings, and the others drawn by their own hooks: Tickets
  * and Specs (the providers, then the Spec settings), Exclusive resources, Checks and
- * Documentation. This file only composes them; each part has its own file.
+ * Documentation, Delivery rules; Tests is drawn by the route (`TestsPart`). This file only composes them; each part has its own file.
  */
 
 import type { Command, Project } from '@hemera/ipc'
@@ -16,6 +16,7 @@ import { SpecSettingsPart } from './spec-settings.tsx'
 import { ProvidersPart } from './ticket-providers.tsx'
 
 export const TICKET_SECTIONS = [
+  'tests',
   'tickets',
   'resources',
   'checks',

@@ -266,6 +266,19 @@ export {
   type SettingsRepository,
 } from './blocks/project-settings/repositories-model.ts'
 export { WorkspacesSection } from './blocks/project-settings/workspaces.tsx'
+export { TestsForm, TestsSection } from './blocks/project-settings/tests.tsx'
+export {
+  RUNNERS,
+  draftOfTests,
+  testsProblem,
+  unchosen,
+  type Custom as TestsCustom,
+  type Guess as TestsGuess,
+  type RepositoryTests,
+  type Runner as TestsRunner,
+  type TestsDraft,
+  type TestsRefusal,
+} from './blocks/project-settings/tests-model.ts'
 export { CommandForm, CommandsSection } from './blocks/project-settings/commands.tsx'
 export {
   COMMAND_TYPES,

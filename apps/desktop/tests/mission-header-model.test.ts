@@ -162,6 +162,7 @@ describe('The names of the repositories on a mark', () => {
       remote: null,
       baseBranch: 'main',
       lastFetchedAt: null,
+      testReporting: null,
     })),
   }
 

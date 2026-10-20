@@ -6,9 +6,9 @@
  * The copy is made of **sections**, each registered here by the ticket that owns it with the
  * function that reads the Project's current value and the Schema it is encoded with. This version
  * registers the catalogue lines the Spec's proofs name (#7), the exclusive resources (#88), the
- * check model with the exact catalogue lines its checks use (#143), and the "who commits" rule,
- * which reads "Hemera does not commit during Building" until its owner registers the rule itself,
- * and the doc recipes the documenter reads (#146).
+ * check model with the exact catalogue lines its checks use (#143), and the doc recipes the
+ * documenter reads (#146). Who commits during Building is not one of them: it is the After each
+ * task section of the delivery rules, which the mission copies at its first task done (#477).
  * The safety rules (the "never" list, the sensitive places, "ask before running") are never copied:
  * they always apply in their current version (#36, #37).
  */
@@ -167,43 +167,12 @@ const RESOURCES: ValidationSection = {
   read: ({ projectId }) => Effect.map(listResources(projectId), encodeResources),
 }
 
-/** Who commits during Building, until the rule's owner registers it. */
-export const HEMERA_DOES_NOT_COMMIT = 'Hemera does not commit during Building'
-
-const COMMITS: ValidationSection = {
-  id: 'commits',
-  read: () => Effect.succeed(HEMERA_DOES_NOT_COMMIT),
-}
-
-/**
- * The value of the "who commits" section that asks for one commit per task (#142, open question
- * 26), with the commit message's template (`{key}`, `{task}`, `{title}`). Its owner (R5) writes it
- * into the copy; until then no copy holds it, which reads as "at push": no commit in Building.
- */
-export const CommitPerTask = Schema.Struct({
-  perTask: Schema.Literal(true),
-  template: Schema.String,
-})
-export type CommitPerTask = typeof CommitPerTask.Type
-
-export const ONE_COMMIT_PER_TASK: CommitPerTask = {
-  perTask: true,
-  template: '{key} {task}: {title}',
-}
-
-const readCommitPerTask = Schema.decodeUnknownOption(CommitPerTask)
-
-/** The reader of the "who commits" section: one commit per task and its template, or null. */
-export const commitRuleOf = (sections: Sections): CommitPerTask | null =>
-  Option.getOrNull(readCommitPerTask(sections[COMMITS.id]))
-
 /** The sections this version copies, in their order. */
 export const VALIDATION_SECTIONS: ReadonlyArray<ValidationSection> = [
   CATALOGUE,
   RESOURCES,
   CHECKS,
   DOC_RECIPES,
-  COMMITS,
 ]
 
 /** Each section's value in the Project now. */

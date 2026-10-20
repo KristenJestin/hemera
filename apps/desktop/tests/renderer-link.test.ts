@@ -196,6 +196,8 @@ const noProjects = {
   'repositories.remotes': unused,
   'repositories.setRemote': unused,
   'repositories.setBaseBranch': unused,
+  'repositories.testGuess': unused,
+  'repositories.setTestReporting': unused,
   'repositories.upToDateBase': unused,
   'repositories.changes': () => Stream.die('the window’s link is not asked for Projects here'),
   'workspaces.create': unused,

@@ -12,6 +12,9 @@ import {
   InvalidProjectName,
   InvalidRepositoryPath,
   MaskedText,
+  TestGuess,
+  TestReporting,
+  TestReportingRefused,
 } from '@hemera/core/domain'
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
@@ -19,7 +22,7 @@ import { Rpc, RpcGroup } from 'effect/rpc'
 import { EngineGone } from './gone.ts'
 import { StaleVersion, StorageFailed } from './profile.ts'
 
-export { InvalidBranchName, InvalidProjectName, InvalidRepositoryPath }
+export { InvalidBranchName, InvalidProjectName, InvalidRepositoryPath, TestReportingRefused }
 
 /** A repository of a Project, and what it was told to start from and deliver to. */
 export const Repository = Schema.Struct({
@@ -34,6 +37,8 @@ export const Repository = Schema.Struct({
   baseBranch: Schema.String,
   /** When its base was last fetched, or null when it never was. */
   lastFetchedAt: Schema.NullOr(Schema.String),
+  /** Its test runner and report written by hand (#421), or null while the guess holds. */
+  testReporting: Schema.NullOr(TestReporting),
 })
 export type Repository = typeof Repository.Type
 
@@ -116,6 +121,10 @@ export type RemoteEdit = typeof RemoteEdit.Type
 
 export const BaseBranchEdit = Schema.Struct({ ...edit, branch: Schema.String })
 export type BaseBranchEdit = typeof BaseBranchEdit.Type
+
+/** A repository's test runner and report written by hand; null goes back to the guess. */
+export const TestReportingEdit = Schema.Struct({ ...edit, reporting: Schema.NullOr(TestReporting) })
+export type TestReportingEdit = typeof TestReportingEdit.Type
 
 /** A remote of a repository, as `git remote -v` lists it. */
 export const Remote = Schema.Struct({
@@ -368,6 +377,18 @@ export const RepositoriesRpcs = RpcGroup.make(
     payload: BaseBranchEdit,
     success: Project,
     error: failing(...edited, UnknownRepository, InvalidBranchName),
+  }),
+  /** The runner its files point to, with the file whose rule named it; null when none does. */
+  Rpc.make('repositories.testGuess', {
+    payload: projectId,
+    success: Schema.NullOr(TestGuess),
+    error: failing(...always, UnknownRepository),
+  }),
+  /** Checked on save: a format the reader reads from the runner, a path inside the repository. */
+  Rpc.make('repositories.setTestReporting', {
+    payload: TestReportingEdit,
+    success: Project,
+    error: failing(...edited, UnknownRepository, TestReportingRefused),
   }),
   /** The commit a piece of work starts from; the caller records it. */
   Rpc.make('repositories.upToDateBase', {
