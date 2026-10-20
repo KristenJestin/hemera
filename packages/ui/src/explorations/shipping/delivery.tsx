@@ -2,7 +2,8 @@ import { type ReactNode, useState } from 'react'
 
 import { Button, IconButton } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {

@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import { StageCard } from '../../blocks/mission/stage-card.tsx'
 import { Button } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconBook2,

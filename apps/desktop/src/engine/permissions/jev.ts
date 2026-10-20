@@ -8,7 +8,7 @@
  * still loses the race. No raw answer of the provider and no exception ever becomes a reason.
  */
 
-import { maskAction, maskText } from '@hemera/core/domain'
+import { maskAction, maskPrinted } from '@hemera/core/domain'
 import { Clock, Context, Duration, Effect, Option, Schema } from 'effect'
 
 /** Where Jev is asked: no redirect is ever followed. */
@@ -145,7 +145,7 @@ export const askJev = (
       model: JEV_MODEL,
       state: {
         action,
-        user_context: input.humanContext.map((item) => maskText(item, values)),
+        user_context: input.humanContext.map((item) => maskPrinted(item, values)),
       },
       questions: QUESTIONS,
     })

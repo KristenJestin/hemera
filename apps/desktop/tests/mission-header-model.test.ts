@@ -16,6 +16,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   cancelOffered,
   differenceOf,
+  followKept,
   freezeShown,
   frozenOf,
   headerOf,
@@ -275,5 +276,28 @@ describe('Freeze at the version the user was shown', () => {
     expect(calls).toBe(2)
     finish()
     await third
+  })
+})
+
+describe('The earlier agents a start could not stop (#320)', () => {
+  test('are followed as the engine says them, and dropped when the follow ends or fails', () => {
+    const shown: Array<ReadonlyArray<{ program: string; pid: number }>> = []
+    let heard: (agents: ReadonlyArray<{ program: string; pid: number }>) => void = () => undefined
+    let ended: (error: Error) => void = () => undefined
+    const stop = followKept(
+      {
+        onKeptAgents: (_missionId, listener, onEnd) => {
+          heard = listener
+          ended = onEnd
+          return () => undefined
+        },
+      },
+      'm14',
+      (agents) => shown.push(agents),
+    )
+    heard([{ program: 'claude', pid: 48213 }])
+    ended(new Error('The engine stopped.'))
+    stop()
+    expect(shown).toEqual([[{ program: 'claude', pid: 48213 }], []])
   })
 })

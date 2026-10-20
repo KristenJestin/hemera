@@ -1,5 +1,5 @@
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
-import type { MarkState } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
 import type {
   CancelledMoment,
   CiCheck,

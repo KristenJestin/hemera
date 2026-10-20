@@ -12,13 +12,14 @@ import { fileURLToPath } from 'node:url'
 
 import { maskShapes } from '@hemera/core/domain'
 import { closedAs, EngineGone, type WindowNotice } from '@hemera/ipc'
-import { Effect, PubSub, Stream } from 'effect'
+import { Effect, PubSub, Result, Stream } from 'effect'
 import { shell } from 'electron/common'
 import { BrowserWindow, Menu, app, dialog, nativeTheme, safeStorage, screen } from 'electron/main'
 
 import { DIAGNOSTIC_FILE, openDiagnosticLog, type Log } from './diagnostic.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { startEngine } from './engine-process.ts'
+import { fixtureOpenedBy, fixturesRoot, profilesIn } from './fixture-profile.ts'
 import { identityOf } from './identity.ts'
 import { type JevKeyEngine, jevKeyHandling } from './jev-key.ts'
 import { type JiraTokenEngine, jiraTokenHandling, tokenOpener } from './jira-token.ts'
@@ -109,9 +110,13 @@ const run = Effect.gen(function* () {
   nativeTheme.themeSource = readSidecar(dataFolder)?.theme ?? 'system'
 
   const underSuite = suiteRuns(process.env, app.isPackaged)
+  if (fixture !== null)
+    log(
+      `opened on the fixture's profile ${dataFolder}: every agent is the fake, gh and bkt the fixture's`,
+    )
   const engine = yield* startEngine(
     main,
-    { dataFolder, migrations: MIGRATIONS, ...identity },
+    { dataFolder, migrations: MIGRATIONS, ...identity, fixture: fixture !== null },
     log,
     underSuite,
     // A Jira token the engine holds sealed is opened here, at call time (#96).
@@ -264,6 +269,29 @@ const passwordStore = passwordStoreSwitch({
   busNames,
 })
 if (passwordStore !== null) app.commandLine.appendSwitch('password-store', passwordStore)
+
+/**
+ * A fixture's profile (#420), asked for by its own flag in a development build: checked, then
+ * made the data folder before anything reads it, the single-instance lock included, so a fixture
+ * runs beside the Hemera of every day without touching its profile. Refused, nothing starts.
+ */
+const fixture = fixtureOpenedBy({
+  argv: process.argv,
+  packaged: app.isPackaged,
+  root: fixturesRoot(),
+  normalProfiles: [app.getPath('userData'), ...profilesIn(app.getPath('appData'))],
+  env: process.env,
+})
+if (fixture !== null && Result.isFailure(fixture)) {
+  process.stderr.write(`${fixture.failure}\n`)
+  process.exit(1)
+}
+if (fixture !== null && Result.isSuccess(fixture)) {
+  // The fake gh and bkt the fixture carries, never the real ones: the engine and every process
+  // it starts inherit this environment.
+  Object.assign(process.env, fixture.success.env)
+  app.setPath('userData', fixture.success.profile)
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

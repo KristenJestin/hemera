@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
 
-import { type Proposal, SETUP_KINDS, type SetupKind } from '../../blocks/setup/proposal.tsx'
+import { type Proposal } from '../../blocks/setup/proposal.tsx'
+import { SETUP_KINDS, type SetupKind } from '../../blocks/setup/setup-kinds.tsx'
 import type { CardStatus } from '../../blocks/setup/setup-card.tsx'
 import {
   ACME_FOLDER,

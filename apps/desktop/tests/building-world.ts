@@ -125,7 +125,7 @@ export const PACKAGE = '{ "name": "api", "dependencies": {} }\n'
  * Acme: its main checkout holding `api` on the default base branch, with `invoices.ts`,
  * `package.json` and a bare repository as its remote, and `web`, without a remote.
  */
-export const acmeAt = (work: string, name = 'acme') =>
+export const acmeAt = (work: string, name = 'acme', prepare: (api: string) => void = () => {}) =>
   Effect.gen(function* () {
     const main = join(work, name)
     const api = repository(join(main, 'api'), DEFAULT_BASE_BRANCH)
@@ -136,6 +136,7 @@ export const acmeAt = (work: string, name = 'acme') =>
     git(api, 'commit', '-q', '-m', 'invoices')
     const bare = remote(api, join(work, 'remotes', `${basename(main)}-api.git`))
     const web = repository(join(main, 'web'), DEFAULT_BASE_BRANCH)
+    prepare(api)
     const project = yield* createProject({
       name: basename(main),
       mainCheckout: main,

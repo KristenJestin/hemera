@@ -45,6 +45,7 @@ import {
 import type { Cause, Scope } from 'effect'
 
 import type { AgentsProcess } from '../agents.ts'
+import { agentText } from './text.ts'
 
 // ---------------------------------------------------------------------------------------------
 // The transport
@@ -577,7 +578,7 @@ const readJson = Schema.decodeUnknownOption(Schema.Json)
 const rawOf = (raw: Option.Option<Schema.Json>): string | null =>
   Option.match(raw, {
     onNone: () => null,
-    onSome: (json) => (json === null ? null : bounded(JSON.stringify(json))),
+    onSome: (json) => (json === null ? null : bounded(agentText(json))),
   })
 
 /**

@@ -87,7 +87,7 @@ checkpoint_read, fs_read, search (on the checkpoint), spec_read, evidence_read, 
 - Files changed outside their task's targets, and code written before its red: look at them.
 
 ## When you stop
-One review_report, then end.
+One review_report, then end. An empty report is valid.
 
 ## Never
 - Edit anything or run commands.

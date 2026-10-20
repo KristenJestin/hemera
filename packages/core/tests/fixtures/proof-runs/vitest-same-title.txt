@@ -1,0 +1,95 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ export.test.ts (6 tests | 5 failed) 12ms
+   ❯ export (3)
+     × saves 1ms
+     × rejects 6ms
+     × rejects async 1ms
+   ❯ import (1)
+     × saves 2ms
+   ❯ restore (1)
+     × keeps 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  export.test.ts > export > saves
+{ code: 42, stacks: [] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  export.test.ts > export > rejects
+AssertionError: expected [Function] to throw error including 'not found' but got 'Error: x is not a function'
+
+Expected: "not found"
+Received: "Error: x is not a function"
+
+ ❯ export.test.ts:4:95
+      2| describe('export', () => {
+      3|   test('saves', () => { throw { code: 42 } })
+      4|   test('rejects', () => { expect(() => { throw new TypeError('Error: x…
+       |                                                                                               ^
+      5|   test('rejects async', async () => { await expect(Promise.reject(new …
+      6| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  export.test.ts > export > rejects async
+AssertionError: expected [Function] to throw error including 'nope' but got 'TypeError: boom'
+
+Expected: "nope"
+Received: "TypeError: boom"
+
+ ❯ export.test.ts:5:97
+      3|   test('saves', () => { throw { code: 42 } })
+      4|   test('rejects', () => { expect(() => { throw new TypeError('Error: x…
+      5|   test('rejects async', async () => { await expect(Promise.reject(new …
+       |                                                                                                 ^
+      6| })
+      7| describe('import', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  export.test.ts > import > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ export.test.ts:8:35
+      6| })
+      7| describe('import', () => {
+      8|   test('saves', () => { expect(1).toBe(2) })
+       |                                   ^
+      9| })
+     10| describe('archive', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  export.test.ts > restore > keeps
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ export.test.ts:14:35
+     12| })
+     13| describe('restore', () => {
+     14|   test('keeps', () => { expect(1).toBe(2) })
+       |                                   ^
+     15| })
+     16|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed (6)
+   Start at  12:23:40
+   Duration  141ms (transform 47%, tests 27%, import 19%, worker 7%)
+

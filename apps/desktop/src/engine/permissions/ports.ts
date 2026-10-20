@@ -8,13 +8,13 @@
  * that commits, and only the mission's own folder.
  */
 
-import { missionKey } from '@hemera/core/domain'
+import { evidenceExtension, missionKey } from '@hemera/core/domain'
 import { eq } from 'drizzle-orm'
 import type { JudgeScores } from '@hemera/core/domain'
 import { Context, Effect, Layer } from 'effect'
 
 import { Database } from '../storage/database.ts'
-import { missions } from '../storage/schema.ts'
+import { memoryEvidence, missions } from '../storage/schema.ts'
 import type { JudgedCall } from '../tools/ports.ts'
 
 /** How a judge rated a call, as its decision records it. */
@@ -92,7 +92,14 @@ export interface MissionFolders {
 
 export class MissionPlaces extends Context.Service<
   MissionPlaces,
-  { readonly foldersOf: (missionId: string) => Effect.Effect<MissionFolders> }
+  {
+    readonly foldersOf: (missionId: string) => Effect.Effect<MissionFolders>
+    /**
+     * The name a file of `missions/<key>/evidence/` was kept under (`H1/.env`), or null when
+     * Hemera recorded no such evidence: the file itself is named by its fingerprint only.
+     */
+    readonly evidenceNamed: (key: string, file: string) => Effect.Effect<string | null>
+  }
 >()('MissionPlaces') {}
 
 /** The mission's own key from the database; no dependency is accepted yet. */
@@ -112,6 +119,29 @@ export const missionPlacesLayer = Layer.effect(
               dependencies: [],
             })),
             Effect.orElseSucceed(() => ({ own: null, dependencies: [] })),
+          ),
+      evidenceNamed: (key, file) =>
+        database
+          .select({
+            name: memoryEvidence.name,
+            sha256: memoryEvidence.sha256,
+            mediaType: memoryEvidence.mediaType,
+            prefix: missions.keyPrefix,
+            number: missions.keyNumber,
+          })
+          .from(memoryEvidence)
+          .innerJoin(missions, eq(missions.id, memoryEvidence.missionId))
+          .where(eq(memoryEvidence.sha256, file.split('.')[0] ?? ''))
+          .pipe(
+            Effect.map(
+              (rows) =>
+                rows.find(
+                  (row) =>
+                    missionKey(row.prefix, row.number) === key &&
+                    `${row.sha256}.${evidenceExtension(row.mediaType)}` === file,
+                )?.name ?? null,
+            ),
+            Effect.orElseSucceed(() => null),
           ),
     }
   }),

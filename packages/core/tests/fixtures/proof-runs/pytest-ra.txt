@@ -1,0 +1,46 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 4 items
+
+tests/test_export.py F.FF                                                [100%]
+
+=================================== FAILURES ===================================
+____________________________ TestExport.test_saves _____________________________
+
+self = <test_export.TestExport object at 0x7fbf7e701bd0>
+
+    def test_saves(self):
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:3: AssertionError
+____________________________ TestExport.test_throws ____________________________
+
+self = <test_export.TestExport object at 0x7fbf7e692780>
+
+    def test_throws(self):
+        missing = None
+>       missing.run()
+        ^^^^^^^^^^^
+E       AttributeError: 'NoneType' object has no attribute 'run'
+
+tests/test_export.py:10: AttributeError
+__________________________________ test_alone __________________________________
+
+    def test_alone():
+>       assert "csv" == "md"
+E       AssertionError: assert 'csv' == 'md'
+E         
+E         - md
+E         + csv
+
+tests/test_export.py:14: AssertionError
+==================================== PASSES ====================================
+------------ generated xml file: /tmp/hemera-report/report.xml ------------
+=========================== short test summary info ============================
+PASSED tests/test_export.py::TestExport::test_keeps
+FAILED tests/test_export.py::TestExport::test_saves - assert 1 == 2
+FAILED tests/test_export.py::TestExport::test_throws - AttributeError: 'NoneT...
+FAILED tests/test_export.py::test_alone - AssertionError: assert 'csv' == 'md'
+========================= 3 failed, 1 passed in 0.01s ==========================

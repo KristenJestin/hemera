@@ -148,6 +148,9 @@ export const LoadingToFilled: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const list = canvas.getByRole('list', { name: 'Repositories of Acme' })
+    // The widths below are those of the theme's face: one that arrives in the middle of the play
+    // changes every text's width, so the page's setup loads it before the story starts.
+    expect(document.fonts.check('1em "Inter Variable"')).toBe(true)
     const before = layoutOf(list)
     expect(before.length).toBeGreaterThan(REPOSITORIES.length)
     await userEvent.click(canvas.getByRole('button', { name: 'Show the rows' }))

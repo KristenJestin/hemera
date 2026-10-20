@@ -50,6 +50,7 @@ import {
   type HelperChip,
   type HelperDetail,
   type ProbeChip,
+  type KeptAgent,
   type ProbeDetail,
   type ResourceDraft,
   type ResourceHolding,
@@ -69,6 +70,12 @@ import {
   type CheckDraft,
   type DocRecipe,
   type DocRecipeDraft,
+  type DeliveryDependency,
+  type DeliveryProblem,
+  type DeliveryRulesDraft,
+  type DeliveryRulesView,
+  type ForcedForge,
+  type ForgeRepositoryStatus,
   type ProjectCheck,
   type EngineStatus,
   type EnvironmentReport,
@@ -220,6 +227,10 @@ export interface Link {
     id: string,
     rank: number,
   ) => Promise<ReadonlyArray<ProjectCheck>>
+  /** How long a proof may run, in minutes; null while the Project keeps the default. */
+  readonly proofLimit: (projectId: string) => Promise<number | null>
+  /** Rejects with `InvalidProofLimit` with its reason; null empties it back to the default. */
+  readonly setProofLimit: (projectId: string, minutes: number | null) => Promise<number | null>
   /** The Project's doc recipes, in their order. */
   readonly docRecipes: (projectId: string) => Promise<ReadonlyArray<DocRecipe>>
   /** The recipes proposed from the main checkout, never saved: none once the Project has some. */
@@ -240,6 +251,42 @@ export interface Link {
     id: string,
     rank: number,
   ) => Promise<ReadonlyArray<DocRecipe>>
+  /** The Project's delivery rules, each repository resolved, the dependencies proposed. */
+  readonly deliveryRules: (projectId: string) => Promise<DeliveryRulesView>
+  /** Every reason the engine would refuse a draft of the rules; none when it can be saved. */
+  readonly validateDeliveryRules: (
+    projectId: string,
+    draft: DeliveryRulesDraft,
+  ) => Promise<ReadonlyArray<DeliveryProblem>>
+  /** Saves a draft edited from `version`; rejects with `DeliveryRulesRefused` and its reasons. */
+  readonly saveDeliveryRules: (
+    projectId: string,
+    draft: DeliveryRulesDraft,
+    version: number,
+  ) => Promise<DeliveryRulesView>
+  readonly acceptDependencies: (
+    projectId: string,
+    edges: ReadonlyArray<DeliveryDependency>,
+  ) => Promise<DeliveryRulesView>
+  /** Each repository's forge, forced or detected, and the state of its CLI. */
+  readonly forgeStatus: (projectId: string) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
+  /** Checks one repository's CLI again, or every one with null; answers the Project's states. */
+  readonly checkForgeAgain: (
+    projectId: string,
+    repositoryId: string | null,
+  ) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
+  readonly setForcedForge: (
+    projectId: string,
+    repositoryId: string,
+    forge: ForcedForge | null,
+    host: string | null,
+  ) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
+  /** The Project's forge states after each change. */
+  readonly onForgeChanges: (
+    projectId: string,
+    listener: (statuses: ReadonlyArray<ForgeRepositoryStatus>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The runs of the Project's main checkout, the newest first. */
   readonly runs: (projectId: string) => Promise<ReadonlyArray<Run>>
   readonly startRun: (start: RunStart) => Promise<Run>
@@ -365,6 +412,12 @@ export interface Link {
     onEnd: (error: Error) => void,
   ) => () => void
   readonly probe: (probeId: string) => Promise<ProbeDetail>
+  /** The mission's agents a start could not stop, now, then again at each change (#320). */
+  readonly onKeptAgents: (
+    missionId: string,
+    listener: (agents: ReadonlyArray<KeptAgent>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The mission's Prototypers now, then again at each change of one of them (#222). */
   readonly onPrototypes: (
     missionId: string,
@@ -718,6 +771,9 @@ export function linkOver(port: Port): Link {
     removeCheck: (projectId, id) => call((ready) => ready['checks.remove']({ projectId, id })),
     moveCheck: (projectId, id, rank) =>
       call((ready) => ready['checks.move']({ projectId, id, rank })),
+    proofLimit: (projectId) => call((ready) => ready['checks.proofLimit']({ projectId })),
+    setProofLimit: (projectId, minutes) =>
+      call((ready) => ready['checks.setProofLimit']({ projectId, minutes })),
     docRecipes: (projectId) => call((ready) => ready['docRecipes.list']({ projectId })),
     proposeDocRecipes: (projectId) =>
       call((ready) => ready['docRecipes.propose']({ projectId, asked: false })),
@@ -729,6 +785,25 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['docRecipes.remove']({ projectId, id })),
     moveDocRecipe: (projectId, id, rank) =>
       call((ready) => ready['docRecipes.move']({ projectId, id, rank })),
+    deliveryRules: (projectId) => call((ready) => ready['deliveryRules.read']({ projectId })),
+    validateDeliveryRules: (projectId, draft) =>
+      call((ready) => ready['deliveryRules.validate']({ projectId, draft })),
+    saveDeliveryRules: (projectId, draft, version) =>
+      call((ready) => ready['deliveryRules.save']({ projectId, draft, version })),
+    acceptDependencies: (projectId, edges) =>
+      call((ready) => ready['deliveryRules.acceptDependencies']({ projectId, edges })),
+    forgeStatus: (projectId) => call((ready) => ready['forge.status']({ projectId })),
+    checkForgeAgain: (projectId, repositoryId) =>
+      call((ready) => ready['forge.checkAgain']({ projectId, repositoryId })),
+    setForcedForge: (projectId, repositoryId, forge, host) =>
+      call((ready) => ready['forge.setForced']({ projectId, repositoryId, forge, host })),
+    onForgeChanges: (projectId, listener, onEnd) =>
+      follow(
+        (ready) => ready['forge.changes']({ projectId }),
+        listener,
+        (error) => error instanceof StorageFailed || error instanceof EngineGone,
+        onEnd,
+      ),
     runs: (projectId) => call((ready) => ready['runs.list']({ projectId, workspaceId: null })),
     startRun: (start) => call((ready) => ready['runs.start'](start)),
     stopRun: (id) => call((ready) => ready['runs.stop']({ id })),
@@ -830,6 +905,8 @@ export function linkOver(port: Port): Link {
     onProbes: (missionId, listener, onEnd) =>
       follow((ready) => ready['probes.changed']({ missionId }), listener, anError, onEnd),
     probe: (probeId) => call((ready) => ready['probes.read']({ probeId })),
+    onKeptAgents: (missionId, listener, onEnd) =>
+      follow((ready) => ready['mission.keptAgents']({ missionId }), listener, anError, onEnd),
     onPrototypes: (missionId, listener, onEnd) =>
       follow(
         (ready) => ready['helpers.prototypesChanged']({ missionId }),

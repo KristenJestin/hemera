@@ -50,6 +50,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import {
   Context,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -64,14 +65,16 @@ import {
 
 import type { Log } from '../main/diagnostic.ts'
 import { AskBeforeRunning } from './ask-before-running.ts'
+import { refusedIfCancelled } from './cancelled.ts'
 import { getCommand } from './catalogue.ts'
 import { findOnPath, hostLookup, invocationOf } from './command-line.ts'
 import type { DomainEvents } from './domain-events.ts'
 import { RecipeRunner, RecipeRunRefused } from './recipe-runner.ts'
 import { Secrets } from './secrets.ts'
 import { Database, type DatabaseError, refusedWhile } from './storage/database.ts'
-import { commandRuns } from './storage/schema.ts'
+import { agentSessions, commandRuns } from './storage/schema.ts'
 import { ProcessSupervisor, type Supervised } from './supervisor.ts'
+import { type CallOf, ExecutingFor } from './tools/access.ts'
 import { defended } from './permissions/defence.ts'
 import { mutate } from './transaction.ts'
 import { environmentAt } from './variables.ts'
@@ -121,10 +124,11 @@ export interface RunsSettings {
   /** The empty folder the forge CLIs of an agent's commands read their configuration from. */
   readonly agentConfigFolder: string
   /**
-   * Runs at a point a suite needs to reach: `launched`, once a run's process is started and
+   * Runs at a point a suite needs to reach: `recording`, before a run is written; `recorded`, once
+   * it is written and before the stops know it; `launched`, once a run's process is started and
    * before the run says it is running. Never held otherwise.
    */
-  readonly hold?: ((at: 'launched') => Effect.Effect<void>) | undefined
+  readonly hold?: ((at: 'recording' | 'recorded' | 'launched') => Effect.Effect<void>) | undefined
 }
 
 /** One run going in this engine, and everything known of it. */
@@ -143,6 +147,8 @@ interface Live {
   readonly published: Deferred.Deferred<string | null>
   /** Whether it runs through Portless, whose address is the proxy's and holds no port of its own. */
   readonly portless: boolean
+  /** The call it was started for, or null: the exit of its Building stops it. */
+  readonly call: CallOf | null
 }
 
 /**
@@ -174,6 +180,8 @@ export class LaunchWithdrawn extends Schema.TaggedError<LaunchWithdrawn>()('Laun
 
 /** What a run of a declared command waits for: its mission's reservations, left at its end. */
 export interface RunReservation {
+  /** The names of the resources it waits for. */
+  readonly names: ReadonlyArray<string>
   /**
    * Waits until its mission holds every resource its command is declared on, each ready. Each one
    * taken is left once `ended` is done, promised in the very step that takes it, so no stop can
@@ -547,6 +555,11 @@ export interface RunAsked {
   /** The reset of a reservation its mission has just taken: it does not wait for it (#88). */
   readonly reserved?: boolean
   /**
+   * How long it may wait for its reservation before it is given up, failed and never started: a
+   * proof's, so the end of a Building never waits for good on a resource held elsewhere (#306).
+   */
+  readonly waitLimit?: Duration.Duration
+  /**
    * The intent of the action the run is (CT-09), written as its process launches, in the same
    * step: a run that waited and never launched leaves none, so nothing is "maybe done" for it.
    */
@@ -695,6 +708,7 @@ export const startRun = (asked: RunAsked) =>
       ended: yield* Deferred.make<void>(),
       published: yield* Deferred.make<string | null>(),
       portless: portless !== null,
+      call: yield* ExecutingFor,
     }
     // An agent's command in a mission gets the defence in depth: no forge login, no push.
     const environment =
@@ -703,38 +717,79 @@ export const startRun = (asked: RunAsked) =>
         : yield* environmentAt(place)
     const reservation =
       asked.reserved === true ? null : yield* runs.reservations.current.enter(live.run)
-    yield* mutate('recording a run', (transaction) =>
-      transaction
-        .insert(commandRuns)
-        .values({
-          id: live.run.id,
-          projectId: live.run.projectId,
-          workspaceId,
-          commandId: live.run.commandId,
-          name: live.run.name,
-          type: live.run.type,
-          line: live.run.line,
-          folder,
-          askedLine: command === null ? line : null,
-          askedFolder: command === null ? relativeFolder : null,
-          startedBy: asked.startedBy,
-          sessionId: asked.sessionId,
-          missionId: live.run.missionId,
-          state: live.run.state,
-          exitCode: null,
-          url: null,
-          portConflict: null,
-          output: runs.mask(''),
-          dropped: 0,
-          startedAt: live.run.startedAt,
-          endedAt: null,
-        })
-        .pipe(
-          Effect.mapError(refusedWhile('recording a run')),
-          Effect.as({ result: undefined, events: [] }),
+    if (runs.settings.hold !== undefined) yield* runs.settings.hold('recording')
+    const call = live.call
+    const asker = yield* mutate('recording a run', (transaction) =>
+      Effect.gen(function* () {
+        // A cancelled mission records no run: the cancel stopped its runs, and none starts after.
+        if (live.run.missionId !== null) {
+          yield* refusedIfCancelled(transaction, live.run.missionId).pipe(
+            Effect.catchTag(
+              'MissionCancelled',
+              () => new InvalidCommand({ reason: 'its mission was cancelled' }),
+            ),
+          )
+        }
+        // Nor does a call of a session the exit of its Building stopped, already or as it waited
+        // for its turn: the exit stopped its runs, and waits for its calls (#309).
+        if (call === null) return null
+        const [asking] =
+          call.sessionId === null
+            ? []
+            : yield* transaction
+                .select({ lineage: agentSessions.lineage })
+                .from(agentSessions)
+                .where(eq(agentSessions.id, call.sessionId))
+                .pipe(Effect.mapError(refusedWhile('reading the session that asked')))
+        const lineage = call.lineage ?? asking?.lineage ?? null
+        if (call.stopped(lineage)) {
+          return yield* new InvalidCommand({ reason: 'its mission’s Building is exiting' })
+        }
+        return lineage
+      }).pipe(
+        Effect.andThen((lineage) =>
+          transaction
+            .insert(commandRuns)
+            .values({
+              id: live.run.id,
+              projectId: live.run.projectId,
+              workspaceId,
+              commandId: live.run.commandId,
+              name: live.run.name,
+              type: live.run.type,
+              line: live.run.line,
+              folder,
+              askedLine: command === null ? line : null,
+              askedFolder: command === null ? relativeFolder : null,
+              startedBy: asked.startedBy,
+              sessionId: asked.sessionId,
+              missionId: live.run.missionId,
+              state: live.run.state,
+              exitCode: null,
+              url: null,
+              portConflict: null,
+              output: runs.mask(''),
+              dropped: 0,
+              startedAt: live.run.startedAt,
+              endedAt: null,
+            })
+            .pipe(Effect.mapError(refusedWhile('recording a run')), Effect.as(lineage)),
         ),
+        Effect.map((lineage) => ({ result: lineage, events: [] })),
+      ),
     )
-    runs.live.set(live.run.id, live)
+    if (runs.settings.hold !== undefined) yield* runs.settings.hold('recorded')
+    // Known to the stops and judged against the exit at once: an exit that began since the record
+    // either finds it live, or is found here and it never launches.
+    const stoppedMeanwhile = yield* Effect.sync(() => {
+      runs.live.set(live.run.id, live)
+      return call !== null && call.stopped(asker)
+    })
+    if (stoppedMeanwhile) {
+      live.stopping = true
+      yield* endRun(live, 'stopped', null, null)
+      return live.run
+    }
     const launched = launch(live, { words, folder, environment, portless })
     const launching =
       asked.intent === undefined
@@ -770,10 +825,26 @@ export const startRun = (asked: RunAsked) =>
           ),
       }),
     )
+    /** The wait for the reservation, given up past the run's limit when it has one (#306). */
+    const reserving = (held: RunReservation) => {
+      const waiting = held.wait(Deferred.await(live.ended))
+      const limit = asked.waitLimit
+      return limit === undefined
+        ? waiting
+        : Effect.timeoutOrElse(waiting, {
+            duration: limit,
+            orElse: () =>
+              Effect.fail(
+                new ReservationLost({
+                  reason: `it waited ${Duration.format(limit)} for ${held.names.join(', ')}, held elsewhere`,
+                }),
+              ),
+          })
+    }
     const proceed =
       reservation === null
         ? started
-        : reservation.wait(Deferred.await(live.ended)).pipe(
+        : reserving(reservation).pipe(
             Effect.matchEffect({
               onFailure: (lost) =>
                 Effect.andThen(
@@ -924,14 +995,17 @@ export const stopMissionRuns = (missionId: string) =>
   })
 
 /**
- * Stops every run a mission's agents started: what the end of its Building asks. A run the user or
- * Hemera started keeps going.
+ * Stops every run a mission's agents started, and every run Hemera started for one of their calls
+ * (a proof, a check): what the end of its Building asks. Any other run of the user or Hemera keeps
+ * going.
  */
 export const stopAgentRuns = (missionId: string) =>
   Effect.gen(function* () {
     const runs = yield* Runs
     const going = [...runs.live.values()].filter(
-      (live) => live.run.missionId === missionId && live.run.startedBy === 'agent',
+      (live) =>
+        live.run.missionId === missionId &&
+        (live.run.startedBy === 'agent' || live.call?.missionId === missionId),
     )
     yield* Effect.forEach(going, (live) => stopRun(live.run.id), {
       concurrency: 'unbounded',

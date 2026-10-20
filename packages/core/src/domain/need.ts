@@ -10,6 +10,32 @@
 
 import { Match, Predicate, Result, Schema } from 'effect'
 
+import type { FixedFields } from './masking.ts'
+
+/**
+ * The settings sections a need the engine writes may open: the application's, and the Project's
+ * `checks`. Each is Hemera's own name, never a secret.
+ */
+export const SETTINGS_SECTIONS = [
+  'appearance',
+  'agents',
+  'models',
+  'hemera-auto',
+  'notifications',
+  'profile',
+  'developer',
+  'checks',
+  'delivery',
+] as const
+export const SettingsSection = Schema.Literals(SETTINGS_SECTIONS)
+
+/**
+ * What the engine fixes in the fields of a need it writes itself (never one an agent asked for):
+ * the settings section, kept as it is when it is one of `SETTINGS_SECTIONS` (#416). Every other
+ * field is masked.
+ */
+export const NEED_FIXED: FixedFields = new Map([['settingsSection', SettingsSection.literals]])
+
 /** What is missing, the action to take, and the settings section that takes it, if one does. */
 export const EnvironmentFields = Schema.TaggedStruct('Environment', {
   missing: Schema.String,

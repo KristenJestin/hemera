@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
-import { type Ball, BallMark } from '../../blocks/ball/ball-mark.tsx'
+import type { Ball } from '../../blocks/ball/ball-legends.ts'
+import { BallMark } from '../../blocks/ball/ball-mark.tsx'
 import type { MissionStage } from '../../blocks/mission/vocabulary.ts'
 import { Button } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'

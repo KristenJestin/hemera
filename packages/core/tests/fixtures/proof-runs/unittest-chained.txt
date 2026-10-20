@@ -1,0 +1,57 @@
+EFEFF
+======================================================================
+ERROR: test_chained (test_ut.Export.test_chained)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut.py", line 9, in test_chained
+    self.assertEqual(1, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^
+AssertionError: 1 != 2
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut.py", line 11, in test_chained
+    raise RuntimeError("cleanup failed")
+RuntimeError: cleanup failed
+
+======================================================================
+ERROR: test_saves (test_ut.Export.test_saves)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut.py", line 6, in test_saves
+    to_markdown([])
+    ^^^^^^^^^^^
+NameError: name 'to_markdown' is not defined
+
+======================================================================
+FAIL: test_one_is_one (test_ut.Export.test_one_is_one)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut.py", line 4, in test_one_is_one
+    self.assertEqual(1, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^
+AssertionError: 1 != 2
+
+======================================================================
+FAIL: test_sub (test_ut.Export.test_sub) (i=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut.py", line 15, in test_sub
+    self.assertEqual(i, 5)
+    ~~~~~~~~~~~~~~~~^^^^^^
+AssertionError: 0 != 5
+
+======================================================================
+FAIL: test_sub (test_ut.Export.test_sub) (i=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/acme/api/test_ut.py", line 15, in test_sub
+    self.assertEqual(i, 5)
+    ~~~~~~~~~~~~~~~~^^^^^^
+AssertionError: 1 != 5
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.003s
+
+FAILED (failures=3, errors=2)

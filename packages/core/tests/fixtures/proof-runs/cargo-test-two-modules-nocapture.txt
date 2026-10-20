@@ -1,0 +1,88 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/acme-d5b7551ab0e24432)
+
+running 2 tests
+saving from a
+
+thread 'a::tests::saves' (469357) panicked at src/a.rs:6:9:
+assertion `left == right` failed
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+saving from b
+test b::tests::saves ... ok
+test a::tests::saves ... FAILED
+
+failures:
+
+failures:
+    a::tests::saves
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+     Running tests/c.rs (target/debug/deps/c-0e8fa604be354400)
+
+running 1 test
+
+thread 'saves' (469360) panicked at tests/c.rs:3:5:
+assertion `left == right` failed
+  left: 4
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test saves ... FAILED
+
+failures:
+
+failures:
+    saves
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test c`
+     Running tests/d.rs (target/debug/deps/d-53b860629dae7d46)
+
+running 1 test
+test saves ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests acme
+
+running 2 tests
+Test executable failed (exit status: 101).
+
+stderr:
+
+thread 'main' (469477) panicked at src/lib.rs:5:1:
+assertion `left == right` failed
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+Test executable failed (exit status: 101).
+
+stderr:
+
+thread 'main' (469478) panicked at src/lib.rs:5:1:
+assertion `left == right` failed
+  left: 4
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+test src/lib.rs - (line 1) ... FAILED
+test src/lib.rs - double (line 7) ... FAILED
+
+failures:
+
+failures:
+    src/lib.rs - (line 1)
+    src/lib.rs - double (line 7)
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: doctest failed, to rerun pass `--doc`
+error: 3 targets failed:
+    `--lib`
+    `--test c`
+    `--doc`

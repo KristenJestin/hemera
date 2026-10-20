@@ -114,6 +114,8 @@ export const projects = sqliteTable(
     ticketSyncMinutes: integer('ticket_sync_minutes').notNull().default(60),
     /** When the last check of its tickets succeeded with every provider (#97); null before. */
     ticketsCheckedAt: text('tickets_checked_at'),
+    /** How long a proof may run, in minutes (#321), 1 to 1440; null keeps the default, 10. */
+    proofLimitMinutes: integer('proof_limit_minutes'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     version: integer('version').notNull(),
@@ -144,6 +146,65 @@ export const projectRepositories = sqliteTable(
     lastFetchedAt: text('last_fetched_at'),
   },
   (table) => [unique('repository_once_in_project').on(table.projectId, table.path)],
+)
+
+/**
+ * The forge a repository is forced to (#253), with its host where the forge has no fixed one: a
+ * repository without a row has its forge detected from its remote.
+ */
+export const repositoryForges = sqliteTable('repository_forges', {
+  repositoryId: text('repository_id')
+    .primaryKey()
+    .references(() => projectRepositories.id, { onDelete: 'cascade' }),
+  forge: text('forge').notNull(),
+  host: text('host'),
+})
+
+/**
+ * What each pending need of the forge port waits for (#253): the CLI and host whose check, once
+ * passed, withdraws it. Kept beside the need so that an engine restarted while an operation waited
+ * finds it, rather than making a second one.
+ */
+export const forgeNeeds = sqliteTable('forge_needs', {
+  needId: text('need_id')
+    .primaryKey()
+    .references(() => needs.id, { onDelete: 'cascade' }),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  cli: text('cli').notNull(),
+  host: text('host').notNull(),
+})
+
+/**
+ * A Project's delivery rules (#340): one Schema-encoded document with its version, incremented at
+ * each save. A Project without a row has the defaults, at version 0.
+ */
+export const deliveryRules = sqliteTable('delivery_rules', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  savedAt: text('saved_at').notNull(),
+  document: text('document').notNull(),
+})
+
+/**
+ * The sections of the delivery rules a mission copied when they started acting (#340, CT-47): each
+ * once, resolved, with the version it was copied at, never rewritten.
+ */
+export const deliveryRuleCopies = sqliteTable(
+  'delivery_rule_copies',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    section: text('section').notNull(),
+    version: integer('version').notNull(),
+    copiedAt: text('copied_at').notNull(),
+    document: text('document').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.section] })],
 )
 
 /**
@@ -1502,6 +1563,14 @@ export const questions = sqliteTable(
     mootDecision: text('moot_decision').$type<Masked<string>>(),
     askedAt: text('asked_at').notNull(),
     changedAt: text('changed_at').notNull(),
+    /** The Review round whose grilling asked it (#468); null for a question of Planning. */
+    round: integer('round'),
+    /**
+     * What Hemera does with its answer (#468): `conflict` (a feedback against the frozen Spec) or
+     * `new_mission` ("Start a mission from this"), about `feedback_id`; null for any other.
+     */
+    kind: text('kind'),
+    feedbackId: text('feedback_id'),
   },
   (table) => [
     primaryKey({ columns: [table.missionId, table.id] }),
@@ -2414,8 +2483,11 @@ export const buildings = sqliteTable(
     /** When `BuildingEnd` returned: a start finds a Building whose tasks are done without it. */
     endCalledAt: text('end_called_at'),
     summary: text('summary').$type<Masked<string>>(),
-    /** The checkpoint the automatic review read (#147); null before its end took it. */
-    reviewCheckpointId: text('review_checkpoint_id'),
+    /**
+     * The checkpoint the automatic review read (#147); null before its end took it. Never dropped
+     * while a Building points to it.
+     */
+    reviewCheckpointId: text('review_checkpoint_id').references(() => checkpoints.id),
     /**
      * When the Builder last ended a turn during the end (#147): a red of the final checks waits
      * for a turn ended after the attempt it opened, across a restart.
@@ -3007,7 +3079,9 @@ export const reviewPasses = sqliteTable(
     buildingId: text('building_id')
       .notNull()
       .references(() => buildings.id, { onDelete: 'cascade' }),
-    checkpointId: text('checkpoint_id').notNull(),
+    checkpointId: text('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id),
     reviewer: text('reviewer').notNull(),
     lineage: text('lineage').notNull(),
     state: text('state').notNull(),
@@ -3080,4 +3154,298 @@ export const reviewChangedAfter = sqliteTable(
     writtenBy: text('written_by'),
   },
   (table) => [primaryKey({ columns: [table.buildingId, table.repository, table.path] })],
+)
+
+/**
+ * A round of Review (#341): a batch of the user's feedback, numbered from 1 per mission, and where
+ * it stands (`collecting`, `grilling`, `building`, `answered`, `closed`), forward only.
+ */
+export const reviewRounds = sqliteTable(
+  'review_rounds',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    state: text('state').notNull(),
+    createdAt: text('created_at').notNull(),
+    movedAt: text('moved_at').notNull(),
+    /** Why the Planner said the round was ready to build (#468); null before. */
+    readyWhy: text('ready_why').$type<Masked<string>>(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.number] })],
+)
+
+/**
+ * A Review checkpoint (#341, CT-44): the one taken on entering Review (round 0) and the one at the
+ * end of each round, the archive of what the user reviewed. One per mission and round.
+ */
+export const reviewCheckpoints = sqliteTable(
+  'review_checkpoints',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    checkpointId: text('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.round] })],
+)
+
+/**
+ * A feedback of Review (#341): its round, its author (`user`, or a forge login, R8), its kind, its
+ * current body (masked) and version, its state, and its anchor: a place in the diff (the repository,
+ * the path, the side, the lines or none for the whole file, the tree it was written on, the
+ * fingerprint of its lines, and the anchored side's content in `file_contents` or why it was
+ * withheld) or a Spec item. `follows_up` names the feedback it follows up; `source` what wrote it
+ * on its own (a refused manual proof), once.
+ */
+export const reviewFeedback = sqliteTable(
+  'review_feedback',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    authorKind: text('author_kind').notNull(),
+    authorLogin: text('author_login'),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    version: integer('version').notNull(),
+    anchorKind: text('anchor_kind'),
+    anchorRepository: text('anchor_repository'),
+    anchorPath: text('anchor_path'),
+    anchorSide: text('anchor_side'),
+    anchorStart: integer('anchor_start'),
+    anchorEnd: integer('anchor_end'),
+    anchorTree: text('anchor_tree'),
+    anchorFingerprint: text('anchor_fingerprint'),
+    anchorSha256: text('anchor_sha256'),
+    anchorSize: integer('anchor_size'),
+    anchorWithheld: text('anchor_withheld'),
+    anchorItem: text('anchor_item'),
+    followsUp: text('follows_up'),
+    source: text('source'),
+    answer: text('answer').$type<Masked<string>>(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    /**
+     * The feedback as the round's agents read it, its images by their path (#468): written when a
+     * Fix takes it, read-only from then on, as the feedback is.
+     */
+    said: text('said').$type<Masked<string>>(),
+    /** The mission started from it (#468), which closed it in its round. */
+    movedTo: text('moved_to'),
+  },
+  (table) => [
+    index('review_feedback_of_mission').on(table.missionId, table.round),
+    uniqueIndex('review_feedback_source').on(table.source),
+  ],
+)
+
+/** Every version of a feedback's body (#341), the first included: an edit keeps the old one. */
+export const reviewFeedbackVersions = sqliteTable(
+  'review_feedback_versions',
+  {
+    feedbackId: text('feedback_id')
+      .notNull()
+      .references(() => reviewFeedback.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.feedbackId, table.version] })],
+)
+
+/** The images of a feedback (#341), in their order: evidence of its mission (A8). */
+export const reviewFeedbackImages = sqliteTable(
+  'review_feedback_images',
+  {
+    feedbackId: text('feedback_id')
+      .notNull()
+      .references(() => reviewFeedback.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    evidenceId: text('evidence_id')
+      .notNull()
+      .references(() => memoryEvidence.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.feedbackId, table.position] })],
+)
+
+/**
+ * A point of a Review round (#468, R2): a feedback grilled into a requirement, `R2.1`, numbered
+ * per round and never reused. Its kind (`corrective` or `behaviour`), the delta of a behaviour
+ * change on a requirement with the living version it was written against (CT-57), the feedback it
+ * comes from (JSON ids) and its decisions (JSON: choice, alternatives, why). A point removed
+ * before the round is ready keeps its row and its reason.
+ */
+export const roundPoints = sqliteTable(
+  'round_points',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    text: text('text').$type<Masked<string>>().notNull(),
+    kind: text('kind').notNull(),
+    deltaRequirement: text('delta_requirement'),
+    deltaChange: text('delta_change'),
+    deltaLivingVersion: integer('delta_living_version'),
+    sources: text('sources').notNull(),
+    decisions: text('decisions').$type<Masked<string>>().notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull(),
+    removedReason: text('removed_reason').$type<Masked<string>>(),
+    sessionId: text('session_id').notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A scenario of a round's point (#468): `R2.1.S1`, its WHEN and THEN, and its Proof block (JSON,
+ * #90's shape) that "Building · round N" proves red then green as any scenario of the Spec.
+ */
+export const roundScenarios = sqliteTable(
+  'round_scenarios',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    point: text('point').notNull(),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    rank: integer('rank').notNull(),
+    when: text('when').$type<Masked<string>>().notNull(),
+    then: text('then').$type<Masked<string>>().notNull(),
+    block: text('block').$type<Masked<string>>().notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A task of a round (#468): `R2.T1`, #90's shape with the points it builds in place of
+ * requirements (JSON lists, the targets masked). The round's Building copies the live ones.
+ */
+export const roundTasks = sqliteTable(
+  'round_tasks',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    id: text('id').notNull(),
+    number: integer('number').notNull(),
+    rank: integer('rank').notNull(),
+    title: text('title').$type<Masked<string>>().notNull(),
+    result: text('result').$type<Masked<string>>().notNull(),
+    points: text('points').notNull(),
+    scenarios: text('scenarios').notNull(),
+    targets: text('targets').$type<Masked<string>>().notNull(),
+    dependsOn: text('depends_on').notNull(),
+    removed: integer('removed', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.id] })],
+)
+
+/**
+ * A decision taken in a Review round (#468), joining the decisions since Freeze: a behaviour
+ * point's (`behaviour`), one a point carries (`point`), or the note that clarifies a feedback in
+ * conflict with the frozen Spec (`clarify`, with that feedback). The frozen Spec itself is never
+ * written.
+ */
+export const roundDecisions = sqliteTable(
+  'round_decisions',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    point: text('point'),
+    feedbackId: text('feedback_id'),
+    kind: text('kind').notNull(),
+    choice: text('choice').$type<Masked<string>>().notNull(),
+    alternatives: text('alternatives').$type<Masked<string>>().notNull(),
+    why: text('why').$type<Masked<string>>().notNull(),
+    at: text('at').notNull(),
+  },
+  (table) => [index('round_decisions_of_mission').on(table.missionId, table.round)],
+)
+
+/**
+ * The holds of the guard on the engine's own Git (#457): a repository (or every one) whose Git
+ * the engine runs no more until the user answers, kept across restarts. What it holds of each
+ * changed file is its kind and digest, before the change and as the question showed it.
+ */
+export const gitHolds = sqliteTable('git_holds', {
+  /** Its scope: the real common Git folder of its repository, or `~` for the home. */
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  /** Its question, once written; null while it waits for one. */
+  needId: text('need_id').references(() => needs.id, { onDelete: 'set null' }),
+  everywhere: integer('everywhere', { mode: 'boolean' }).notNull(),
+  /** JSON: the checkouts it holds. */
+  checkouts: text('checkouts').notNull(),
+  /** JSON: each changed file, its path, as it was and as shown (its kind and digest). */
+  changes: text('changes').notNull(),
+  /** `none`, `allowed` or `denied`. */
+  answer: text('answer').notNull(),
+})
+
+/**
+ * What shapes the engine's Git in one scope, as the guard last accepted it (#457): a repository,
+ * by its real common Git folder, or the home (`~`). Compared at every Git call of the engine there.
+ */
+export const gitBaselines = sqliteTable('git_baselines', {
+  id: text('id').primaryKey(),
+  /** The Project whose agents first worked there: its questions belong to it. */
+  projectId: text('project_id').notNull(),
+  /** JSON: the checkouts of the repository the agents worked in. */
+  checkouts: text('checkouts').notNull(),
+  /** JSON: each file of the fingerprint, its path, its kind and digest. */
+  shapes: text('shapes').notNull(),
+})
+
+/**
+ * Where one repository of a mission stands in its push and pull request (R6), one row per mission
+ * and repository: the Review round it was last considered for, its state (`waiting` on a need,
+ * `running`, `done`, `failed`, `indeterminate`, `declined`), the action of the preparation stack it
+ * stands at, what failed (masked), the need it waits on, the checkpoint it pushes and the tree its
+ * commit must have, the untracked sensitive files the user answered for and how (`push`, `keep`),
+ * the last commit pushed with when, the remote and branch it was pushed to (its upstream, kept
+ * here rather than in the repository's configuration), and its pull request as last read (JSON).
+ */
+export const deliveryPushes = sqliteTable(
+  'delivery_pushes',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    repository: text('repository').notNull(),
+    round: integer('round').notNull(),
+    state: text('state').notNull(),
+    step: text('step'),
+    message: text('message').$type<Masked<string>>(),
+    needId: text('need_id'),
+    checkpointId: text('checkpoint_id'),
+    tree: text('tree'),
+    sensitive: text('sensitive'),
+    sensitiveAnswer: text('sensitive_answer'),
+    commit: text('commit'),
+    pushedAt: text('pushed_at'),
+    remote: text('remote'),
+    branch: text('branch'),
+    pullRequest: text('pull_request'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repositoryId] })],
 )

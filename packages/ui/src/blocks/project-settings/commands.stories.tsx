@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { type CommandDraft, CommandForm, CommandsSection, NEW_COMMAND } from './commands.tsx'
+import { CommandForm, CommandsSection } from './commands.tsx'
+import { type CommandDraft, NEW_COMMAND } from './commands-model.ts'
 import { COMMANDS, DENSE_COMMANDS, LONG_LINE, shellRefusal } from './project-settings-fixtures.ts'
 
 /**

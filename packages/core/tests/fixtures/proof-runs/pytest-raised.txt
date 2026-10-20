@@ -1,0 +1,30 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 2 items
+
+tests/test_raised.py FF                                                  [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_saves __________________________________
+
+    def test_saves():
+>       raise "AssertionError: assert 1 == 2"
+E       TypeError: exceptions must derive from BaseException
+
+tests/test_raised.py:2: TypeError
+__________________________________ test_keeps __________________________________
+
+    def test_keeps():
+        class AssertionError(Exception):
+            pass
+    
+>       raise AssertionError("assert 1 == 2")
+E       test_raised.test_keeps.<locals>.AssertionError: assert 1 == 2
+
+tests/test_raised.py:9: AssertionError
+------------------- generated xml file: /tmp/hemera-report/report --------------------
+=========================== short test summary info ============================
+FAILED tests/test_raised.py::test_saves - TypeError: exceptions must derive f...
+FAILED tests/test_raised.py::test_keeps - test_raised.test_keeps.<locals>.Ass...
+============================== 2 failed in 0.02s ===============================

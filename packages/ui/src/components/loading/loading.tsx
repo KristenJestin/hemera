@@ -1,7 +1,8 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Face, type FaceSize } from '../face/face.tsx'
+import { Face } from '../face/face.tsx'
+import { type FaceSize } from '../face/face-sizes.ts'
 
 /**
  * What stands in for something on its way, in two forms, chosen by what is known of its shape.

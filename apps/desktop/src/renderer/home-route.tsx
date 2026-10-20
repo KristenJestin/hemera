@@ -1,5 +1,5 @@
 import type { JournalTail, Mission, MissionsChange, OpenQuestion, SincePage } from '@hemera/ipc'
-import { HomePage, type AppSection, type HomePageProps, type HomeSinceGroup } from '@hemera/ui'
+import { HomePage, type HomePageProps, type HomeSinceGroup } from '@hemera/ui'
 import { Predicate } from 'effect'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -15,6 +15,7 @@ import {
   sinceGroupsOf,
 } from './home-model.ts'
 import type { Link } from './link.ts'
+import type { SettingsPlace } from './navigation.ts'
 import { handlersFor, needRowsOf, type NeedsState } from './needs.ts'
 import type { ProjectsState } from './projects.ts'
 import type { ShellActions } from './shell.tsx'
@@ -35,7 +36,7 @@ export interface HomeRouteProps {
   actions: {
     answer: ShellActions['answer']
     recheck: ShellActions['recheck']
-    openSettings: (section: AppSection) => void
+    openSettings: (place: SettingsPlace) => void
     addProject: () => void
     retry: () => void
     openMission: (projectId: string, key: string) => void

@@ -1,8 +1,8 @@
-import type { Ball } from '../../blocks/ball/ball-mark.tsx'
+import type { Ball } from '../../blocks/ball/ball-legends.ts'
 import type { MissionMarkView } from '../../blocks/mission/vocabulary.ts'
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import type { FaceState } from '../../components/face/states.ts'
-import type { MarkState } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
 
 /**
  * What the Shipping, Done and Cancelled pages draw, as #265 proposes them: plain values, in the

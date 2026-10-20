@@ -382,6 +382,19 @@ export const MissionLongCauses: Story = {
   },
 }
 
+/**
+ * Building, with an agent Hemera started before its last restart still running: its chip in the
+ * stage card, under the progress line, and nothing about it in the header.
+ */
+export const MissionKeptAgent: Story = {
+  render: () => <MissionStageFixture missionKey="ACME-22" />,
+  play: async ({ canvasElement }) => {
+    const card = within(within(canvasElement).getByRole('region', { name: 'Building' }))
+    expect(card.getByRole('button', { name: /^claude · pid 48213,/ })).toBeVisible()
+    expect(canvasElement.querySelector('[data-mark="kept"]')).toBeNull()
+  },
+}
+
 /** Over a stage's page, a view stands and goes: the page under it is the one that was there. */
 export const MissionStageViewsOverBase: Story = {
   render: () => <MissionStageFixture missionKey="ACME-19" />,

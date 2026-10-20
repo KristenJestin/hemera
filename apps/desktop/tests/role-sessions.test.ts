@@ -10,7 +10,8 @@ import { realpathSync } from 'node:fs'
 
 import { deliveryBlock } from '@hemera/core/domain'
 
-import { Deferred, Effect, Fiber, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
+import { TestClock } from 'effect/testing'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { HemeraEndpoint } from '../src/engine/agents/endpoint.ts'
@@ -20,6 +21,7 @@ import { createMission } from '../src/engine/missions.ts'
 import { Delivery } from '../src/engine/permissions/delivery.ts'
 import { startRun, stopRun } from '../src/engine/runs.ts'
 import { assignWork, holdsWork, leaseOf } from '../src/engine/sessions/leases.ts'
+import { keptAgents } from '../src/engine/sessions/kept.ts'
 import { SpecLanguage } from '../src/engine/sessions/ports.ts'
 import type { RoleEntry } from '../src/engine/sessions/roles.ts'
 import { TEST_ROLE } from './test-role.ts'
@@ -37,6 +39,7 @@ import {
   HostProcesses,
   ORPHAN_EXIT_MS,
   TASKKILL_MS,
+  WINDOWS_COMMAND_LINE_MS,
   hostProcessesLayer,
 } from '../src/engine/supervisor.ts'
 import { betweenMutations } from '../src/engine/transaction.ts'
@@ -51,11 +54,13 @@ import {
 } from '../src/engine/storage/schema.ts'
 import { ToolAccess } from '../src/engine/tools/index.ts'
 import { STAYS_UP, nodeLine, script } from './commands-engine.ts'
+import { endOf } from './observed-processes.ts'
 import { Secrets, secretsRegistry } from '../src/engine/secrets.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 import { callTool } from './tools-world.ts'
 import {
   BUILDER,
+  FAST,
   HELPER,
   REVIEWER,
   SILENCE,
@@ -63,6 +68,7 @@ import {
   acmeIn,
   agentsFound,
   held,
+  heldSweeps,
   sessionsEngine,
   text,
   until,
@@ -358,14 +364,18 @@ describe('Deliveries between turns (channel 1)', () => {
 describe('An urgent delivery is a note in the next Hemera tool result (channel 2)', () => {
   test('the note is appended once, to the next call’s result', async () => {
     const hold = held()
-    const { world, run } = engine((index) =>
-      index === 0
-        ? holding(hold, 1, [
-            { does: 'says', text: 'listing' },
-            { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
-            { does: 'uses', id: 'call-2', tool: 'fs_list', arguments: { path: '.' } },
-          ])
-        : {},
+    const { world, run } = engine(
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'says', text: 'listing' },
+              { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
+              { does: 'uses', id: 'call-2', tool: 'fs_list', arguments: { path: '.' } },
+            ])
+          : {},
+      // The pickup is on a clock only the test moves: under load, the call can reach the gate
+      // after the real 300 ms, and the note then travels as the next message instead.
+      { testClock: true },
     )
     const [id, row] = await run(({ profile }) =>
       within(
@@ -373,7 +383,9 @@ describe('An urgent delivery is a note in the next Hemera tool result (channel 2
         Effect.gen(function* () {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
-          yield* until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1))
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1)),
+          )
           const delivered = yield* Sessions.use((sessions) =>
             sessions.deliver({
               owner,
@@ -397,6 +409,59 @@ describe('An urgent delivery is a note in the next Hemera tool result (channel 2
     expect(row?.state).toBe('sent')
     // Handed once: no later message carries it again.
     expect(world.agents[0]?.answers.prompts).toHaveLength(1)
+  })
+
+  test('a note whose pickup falls due before the call is sent once, as the next message', async () => {
+    const hold = held()
+    const { world, run } = engine(
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'says', text: 'listing' },
+              { does: 'uses', id: 'call-1', tool: 'fs_list', arguments: { path: '.' } },
+            ])
+          : {},
+      { testClock: true },
+    )
+    const row = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const session = yield* opened(owner, main)
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 1)),
+          )
+          const delivered = yield* Sessions.use((sessions) =>
+            sessions.deliver({
+              owner,
+              target: { lineage: session.lineage },
+              kind: 'answers',
+              body: 'Stop: the export moved to the web app.',
+              urgency: 'urgent',
+            }),
+          )
+          // The pickup falls due while the agent is held before its call.
+          yield* TestClock.adjust(FAST.notePickup)
+          yield* TestClock.withLive(
+            until(Effect.sync(() => world.agents[0]?.answers.cancels === 1)),
+          )
+          hold.release()
+          yield* TestClock.withLive(
+            until(Effect.sync(() => (world.agents[0]?.answers.prompts.length ?? 0) === 2)),
+          )
+          yield* settled(session.id)
+          return yield* deliveryRow(delivered)
+        }),
+      ),
+    )
+    const answers = world.agents[0]?.answers.toolAnswers ?? []
+    expect(answers.filter((one) => one.text.includes('hemera-note'))).toHaveLength(0)
+    const prompts = (world.agents[0]?.answers.prompts ?? []).map(text)
+    expect(prompts.filter((one) => one.includes('Stop: the export moved'))).toEqual([
+      '[hemera:answers]\nStop: the export moved to the web app.',
+    ])
+    expect(row?.state).toBe('sent')
   })
 
   test('with no Hemera tool call within the pickup, the turn is cancelled and the delivery sent', async () => {
@@ -578,10 +643,11 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a session whose own command runs, silent, is not stuck', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     const { world, run } = engine(
       (index) =>
         index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
-      { timings: SILENCE },
+      sweeps,
     )
     const state = await run(({ profile }) =>
       within(
@@ -600,7 +666,9 @@ describe('Silence, waiting and stuck (CT-12)', () => {
             sessionId: session.id,
             missionId: mission.id,
           })
-          yield* Effect.sleep('1 second')
+          // Silent past the bound, then looked at.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           const now = (yield* getSession(session.id)).state
           yield* stopRun(started.id)
           hold.release()
@@ -613,12 +681,14 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a session whose silent command ran past the bound is not stuck as the command ends', async () => {
     const hold = held()
+    const sweeps = heldSweeps()
     const { world, run } = engine(
       (index) =>
         index === 0 ? holding(hold, 0, [{ does: 'says', text: 'waiting on the tests' }]) : {},
-      { timings: SILENCE },
+      // Its agent starts slower than the bound, as under load: the start is part of the turn.
+      { ...sweeps, starting: () => Effect.sleep(SILENCE.stuckAfter) },
     )
-    const state = await run(({ profile }) =>
+    const states = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -635,23 +705,29 @@ describe('Silence, waiting and stuck (CT-12)', () => {
             sessionId: session.id,
             missionId: mission.id,
           })
-          yield* Effect.sleep('700 millis')
+          // Silent past the bound, its command running.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
+          const running = (yield* getSession(session.id)).state
           yield* stopRun(started.id)
           // Swept more than once before the agent reports the command's end.
-          yield* Effect.sleep('250 millis')
-          const now = (yield* getSession(session.id)).state
+          yield* sweeps.swept
+          yield* sweeps.swept
+          const ended = (yield* getSession(session.id)).state
           hold.release()
-          return now
+          return [running, ended]
         }),
       ),
     )
-    expect(state).toBe('working')
+    expect(states).toEqual(['working', 'working'])
   })
 
   test('a session idle between turns, waiting for an answer, is not stuck', async () => {
-    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }), {
-      timings: SILENCE,
-    })
+    const sweeps = heldSweeps()
+    const { run } = engine(
+      () => ({ steps: [{ does: 'says', text: 'I wait for request #1.' }] }),
+      sweeps,
+    )
     const state = await run(({ profile }) =>
       within(
         profile,
@@ -659,7 +735,9 @@ describe('Silence, waiting and stuck (CT-12)', () => {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
           yield* settled(session.id)
-          yield* Effect.sleep('1 second')
+          // Idle past the bound, then looked at.
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
           return (yield* getSession(session.id)).state
         }),
       ),
@@ -669,33 +747,38 @@ describe('Silence, waiting and stuck (CT-12)', () => {
 
   test('a provider’s wait keeps a long turn alive', async () => {
     // One wait longer than the stuck bound: the provider's retry outlasts it, then the turn ends.
-    let seen = 0
-    const pause = () => {
-      seen += 1
-      return new Promise<void>((resolve) => setTimeout(resolve, seen === 2 ? 1000 : 0))
-    }
+    const hold = held()
+    const sweeps = heldSweeps()
     const { world, run } = engine(
-      () => ({
-        between: pause,
-        steps: [
-          { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
-          { does: 'says', text: 'done' },
-        ],
-      }),
-      { timings: SILENCE },
+      (index) =>
+        index === 0
+          ? holding(hold, 1, [
+              { does: 'waits', title: 'Retrying Claude, attempt 1 of 10.' },
+              { does: 'says', text: 'done' },
+            ])
+          : {},
+      sweeps,
     )
-    const state = await run(({ profile }) =>
+    const states = await run(({ profile, lines }) =>
       within(
         profile,
         Effect.gen(function* () {
           const { owner, main } = yield* acme
           const session = yield* opened(owner, main)
+          // Its wait is heard, then lasts past the bound.
+          yield* until(
+            Effect.sync(() => lines.some((line) => line.includes(`${session.id} waits on`))),
+          )
+          yield* Effect.sleep(SILENCE.stuckAfter)
+          yield* sweeps.swept
+          const waiting = (yield* getSession(session.id)).state
+          hold.release()
           yield* settled(session.id)
-          return (yield* getSession(session.id)).state
+          return [waiting, (yield* getSession(session.id)).state]
         }),
       ),
     )
-    expect(state).toBe('idle')
+    expect(states).toEqual(['working', 'idle'])
     expect(world.agents).toHaveLength(1)
   })
 })
@@ -894,6 +977,7 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
       { detached: true, stdio: 'ignore' },
     )
     orphan.unref()
+    const orphanEnd = endOf(orphan)
     // What the orphan runs is answered here as the system says it, the rest asked of the machine.
     // On Windows the engine asks PowerShell, which a loaded runner was seen to answer only past
     // `WINDOWS_COMMAND_LINE_MS`: the orphan then stays unknown and is never ended. That query is
@@ -905,8 +989,12 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
         const machine = yield* HostProcesses
         return {
           ...machine,
-          commandLineOf: (pid: number) =>
-            pid === orphan.pid ? Effect.succeed(orphanLine) : machine.commandLineOf(pid),
+          commandLinesOf: (pids: ReadonlyArray<number>) =>
+            Effect.map(machine.commandLinesOf(pids.filter((pid) => pid !== orphan.pid)), (said) =>
+              pids.includes(orphan.pid ?? 0)
+                ? new Map([...said, [orphan.pid ?? 0, orphanLine]])
+                : said,
+            ),
         }
       }),
     ).pipe(Layer.provide(hostProcessesLayer))
@@ -973,11 +1061,155 @@ describe('A restart rebuilds the tree top-down, after the orphans are ended (CT-
     expect(lease?.sessionId).toBe(builder?.id)
     const orphanSaid = lines.findIndex((line) => line.includes('orphan agent process'))
     expect(orphanSaid).toBeGreaterThanOrEqual(0)
-    expect(() => process.kill(orphan.pid ?? 0, 0)).toThrow()
+    // Never `process.kill(pid, 0)` once the orphan ended: Windows hands its pid to the next process.
+    expect(await orphanEnd.ends()).toBe(true)
     expect(after.world.agents.map((agent) => text(agent.answers.prompts[0] ?? []))).toEqual([
       expect.stringContaining('[hemera:resume]'),
       expect.stringContaining('[hemera:resume]'),
     ])
+  })
+})
+
+describe('An agent a start could not stop is shown on its mission (#320)', () => {
+  /** The machine, but for the orphan's command line: unknown, or answered as the system says it. */
+  const answering = (pid: number, line: string | null) =>
+    Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const machine = yield* HostProcesses
+        return {
+          ...machine,
+          commandLinesOf: (asked: ReadonlyArray<number>) =>
+            Effect.map(machine.commandLinesOf(asked.filter((one) => one !== pid)), (said) =>
+              line !== null && asked.includes(pid) ? new Map([...said, [pid, line]]) : said,
+            ),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+
+  test('a start that keeps an orphan of a mission’s session raises the notice; the next start that ends it clears it', async () => {
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
+    const orphan = (await import('node:child_process')).spawn(
+      process.execPath,
+      [script(STAYS_UP)],
+      { detached: true, stdio: 'ignore' },
+    )
+    orphan.unref()
+    const orphanEnd = endOf(orphan)
+    const pid = orphan.pid ?? 0
+    const orphanLine = [process.execPath, ...orphan.spawnargs.slice(1)].join(' ')
+    const before = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const builder = yield* opened(owner, main)
+          yield* settled(builder.id)
+          const database = yield* Database
+          yield* database.insert(supervisedProcesses).values({
+            id: 'left-1',
+            pid,
+            program: process.execPath,
+            args: JSON.stringify(orphan.spawnargs.slice(1)),
+            ownerKind: 'session',
+            ownerId: builder.id,
+            engine: 'a previous engine',
+            startedAt: new Date().toISOString(),
+          })
+          return { owner, builder }
+        }),
+      ),
+    )
+    const missionId = before.owner.missionId
+    const restarted = (line: string | null) =>
+      engine(() => ({ steps: [{ does: 'says', text: 'resumed' }] }), {
+        hostProcesses: answering(pid, line),
+      }).run(({ profile, lines }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            // The sweep has run once it said what it did with the orphan: kept, or ended.
+            yield* until(
+              Effect.sync(() => lines.some((said) => /kept node|orphan agent process/.test(said))),
+              UNTIL_MS + TASKKILL_MS + ORPHAN_EXIT_MS,
+            )
+            return yield* keptAgents(missionId)
+          }),
+        ),
+      )
+
+    // What the orphan runs cannot be said: it is kept, and its mission says so.
+    const kept = await restarted(null)
+    expect(kept).toEqual([{ program: 'node', pid }])
+    expect(orphanEnd.stillRuns()).toBe(true)
+
+    // The next start can say it: the orphan is ended, and the notice goes with it.
+    const after = await restarted(orphanLine)
+    expect(after).toEqual([])
+    expect(await orphanEnd.ends()).toBe(true)
+  })
+
+  test('three orphans whose lookups each take the worst case hold the rebuild back for one worst case, not three', async () => {
+    const { run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }))
+    const pids = [90_001, 90_002, 90_003]
+    const before = await run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { owner, main } = yield* acme
+          const builder = yield* opened(owner, main)
+          yield* settled(builder.id)
+          const database = yield* Database
+          for (const pid of pids) {
+            yield* database.insert(supervisedProcesses).values({
+              id: `left-${String(pid)}`,
+              pid,
+              program: process.execPath,
+              args: JSON.stringify(['agent.mjs']),
+              ownerKind: 'session',
+              ownerId: builder.id,
+              engine: 'a previous engine',
+              startedAt: new Date().toISOString(),
+            })
+          }
+          return { owner, builder }
+        }),
+      ),
+    )
+    // Alive, and what they run is never said: on Windows, a PowerShell past its bound each time.
+    const host = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const machine = yield* HostProcesses
+        return {
+          ...machine,
+          alive: (pid: number) => pids.includes(pid) || machine.alive(pid),
+          commandLinesOf: (asked: ReadonlyArray<number>) =>
+            asked.some((pid) => pids.includes(pid)) ? Effect.never : machine.commandLinesOf(asked),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const after = engine(() => ({ steps: [{ does: 'says', text: 'resumed' }] }), {
+      hostProcesses: host,
+      testClock: true,
+    })
+    const [heldBack, replaced] = await after.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const replacedNow = Effect.map(getSession(before.builder.id), (one) => one.state)
+          // The sweep holds the rebuild while the lookups wait on the clock.
+          yield* TestClock.withLive(Effect.sleep('300 millis'))
+          const waiting = yield* replacedNow
+          // One worst case of a lookup passes: every orphan's bound passes with it.
+          yield* TestClock.adjust(WINDOWS_COMMAND_LINE_MS)
+          yield* TestClock.withLive(until(Effect.map(replacedNow, (state) => state === 'replaced')))
+          return [waiting, yield* replacedNow] as const
+        }),
+      ),
+    )
+    expect(heldBack).not.toBe('replaced')
+    expect(replaced).toBe('replaced')
   })
 })
 
@@ -1016,7 +1248,7 @@ describe('stopTree', () => {
     const { world, run } = engine(() => ({ steps: [{ does: 'says', text: 'done' }] }), {
       children: true,
     })
-    const [stopped, order] = await run(({ profile }) =>
+    const [stopped, order, gone] = await run(({ profile }) =>
       within(
         profile,
         Effect.gen(function* () {
@@ -1028,6 +1260,10 @@ describe('stopTree', () => {
           const deeper = yield* opened(owner, main, 'helper', 'claude', helper)
           yield* settled(deeper.id)
           yield* Sessions.use((sessions) => sessions.stopTree(owner, 'the mission was cancelled'))
+          // Each child's end, as the supervisor saw it by the time the stop returned.
+          const exits = yield* Effect.forEach(world.children, (child) =>
+            Effect.map(Effect.timeoutOption(child.exited, Duration.zero), Option.isSome),
+          )
           const database = yield* Database
           const events = yield* database
             .select()
@@ -1037,14 +1273,15 @@ describe('stopTree', () => {
           return [
             yield* Effect.forEach([builder, helper, deeper], (one) => getSession(one.id)),
             [events.map((event) => event.entityId), [deeper.id, helper.id, builder.id]],
+            exits,
           ] as const
         }),
       ),
     )
     expect(stopped.map((one) => one.state)).toEqual(['ended', 'ended', 'ended'])
     expect(order[0]).toEqual(order[1])
-    expect(world.pids).toHaveLength(3)
-    for (const pid of world.pids) expect(() => process.kill(pid, 0)).toThrow()
+    // Never `process.kill(pid, 0)` once a child ended: Windows hands its pid to the next process.
+    expect(gone).toEqual([true, true, true])
   })
 })
 
@@ -1276,15 +1513,12 @@ describe('A session stopped while its agent starts leaves nothing', () => {
           yield* Effect.promise(() => reached.promise)
           yield* Sessions.use((sessions) => sessions.stopTree(owner, 'the mission was cancelled'))
           hold.release()
+          // Its child's end, as the supervisor sees it: a freed pid may already be another's.
           yield* until(
-            Effect.sync(() => {
-              try {
-                process.kill(world.pids[0] ?? 0, 0)
-                return false
-              } catch {
-                return true
-              }
-            }),
+            Effect.map(
+              Effect.timeoutOption(world.children[0]?.exited ?? Effect.never, Duration.zero),
+              Option.isSome,
+            ),
           )
         }),
       ),

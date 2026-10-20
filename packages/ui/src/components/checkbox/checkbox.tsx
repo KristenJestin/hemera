@@ -1,5 +1,6 @@
 import { Checkbox as BaseCheckbox } from '@base-ui/react/checkbox'
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 

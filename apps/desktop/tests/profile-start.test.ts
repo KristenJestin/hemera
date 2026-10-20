@@ -12,6 +12,7 @@ import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { carriedMigrations } from '../src/engine/migrate.ts'
 import { startProfile } from '../src/engine/profile.ts'
+import { NO_AGENTS } from './commands-engine.ts'
 import { SHIPPED, migrationsWith, removeFolders, temporaryFolder } from './storage.ts'
 
 afterEach(removeFolders)
@@ -23,7 +24,7 @@ const started = (dataFolder: string, migrations: string, version = '1.0.0') => {
       Effect.gen(function* () {
         const profile = yield* startProfile(
           { dataFolder, version, migrations },
-          { backupFolders: [], reconciliationSteps: [] },
+          { backupFolders: [], reconciliationSteps: [], sessions: { discovery: NO_AGENTS } },
           (line) => lines.push(line),
         )
         const database = yield* SubscriptionRef.get(profile.database)

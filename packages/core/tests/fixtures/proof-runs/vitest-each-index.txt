@@ -1,0 +1,47 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ index.test.ts (3 tests | 2 failed) 6ms
+   × exports 1 5ms
+   × exports 2 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  index.test.ts > exports 1
+AssertionError: expected 'csv' to be 'txt' // Object.is equality
+
+Expected: "txt"
+Received: "csv"
+
+ ❯ index.test.ts:3:65
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| test.each(['csv', 'md'])('exports %$', (kind) => { expect(kind).toBe('…
+       |                                                                 ^
+      4| test('exports 1', () => { expect(1).toBe(1) })
+      5|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  index.test.ts > exports 2
+AssertionError: expected 'md' to be 'txt' // Object.is equality
+
+Expected: "txt"
+Received: "md"
+
+ ❯ index.test.ts:3:65
+      1| import { expect, test } from 'vite-plus/test'
+      2|
+      3| test.each(['csv', 'md'])('exports %$', (kind) => { expect(kind).toBe('…
+       |                                                                 ^
+      4| test('exports 1', () => { expect(1).toBe(1) })
+      5|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  15:35:45
+   Duration  107ms (transform 44%, import 26%, tests 21%, worker 9%)
+

@@ -45,6 +45,10 @@ export const TABLE_CLASSES = {
   domain_events: 'permanent',
   projects: 'state',
   project_repositories: 'state',
+  repository_forges: 'state',
+  forge_needs: 'state',
+  delivery_rules: 'state',
+  delivery_rule_copies: 'permanent',
   workspaces: 'state',
   workspace_repositories: 'state',
   project_preparation_steps: 'state',
@@ -94,6 +98,10 @@ export const TABLE_CLASSES = {
   discussion_messages: 'permanent',
   freezes: 'permanent',
   freeze_files: 'permanent',
+  // A hold lasts as long as its repository's Git stays stopped, and is gone once released.
+  git_holds: 'state',
+  // What the guard last accepted of a repository's Git, kept as long as the repository is known.
+  git_baselines: 'state',
   mission_dependencies: 'permanent',
   spec_relies_on: 'permanent',
   effectful_actions: 'permanent',
@@ -164,6 +172,17 @@ export const TABLE_CLASSES = {
   review_passes: 'permanent',
   review_findings: 'permanent',
   review_changed_after: 'permanent',
+  review_rounds: 'permanent',
+  review_checkpoints: 'permanent',
+  review_feedback: 'permanent',
+  review_feedback_versions: 'permanent',
+  review_feedback_images: 'permanent',
+  delivery_pushes: 'permanent',
+  // A round of Review (#468): its points, scenarios, tasks and decisions, kept like its feedback.
+  round_points: 'permanent',
+  round_scenarios: 'permanent',
+  round_tasks: 'permanent',
+  round_decisions: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

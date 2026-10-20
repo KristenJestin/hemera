@@ -23,7 +23,7 @@ import {
 } from '@hemera/core/domain'
 import { type CommandDraft, InvalidResources, type Mission, type ResourceDraft } from '@hemera/ipc'
 import { eq, sql } from 'drizzle-orm'
-import { Deferred, Effect, Fiber, Layer, Option, Predicate, Result, Stream } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option, Predicate, Result, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { AskBeforeRunning } from '../src/engine/ask-before-running.ts'
@@ -41,7 +41,7 @@ import { Judge } from '../src/engine/permissions/ports.ts'
 import { createProject } from '../src/engine/projects.ts'
 import { listResources, saveResources } from '../src/engine/resources/declarations.ts'
 import { ExclusiveResources } from '../src/engine/resources/reservations.ts'
-import { Runs, type RunAsked, getRun, startRun, stopRun } from '../src/engine/runs.ts'
+import { Runs, type RunAsked, getRun, runOutput, startRun, stopRun } from '../src/engine/runs.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { missions } from '../src/engine/storage/schema.ts'
 import {
@@ -876,6 +876,38 @@ describe('Two at once: the reservation under concurrency', () => {
     expect(history()).toEqual(['migrate', 'test'])
   })
 
+  test('a run that may wait only so long for a resource another mission holds fails at that limit, never started, and leaves the queue', async () => {
+    const seen = await engine()(({ profile }) =>
+      profile.use(
+        Effect.gen(function* () {
+          const { project: acmeProject, test: testCommand } = yield* acme()
+          const first = yield* building(acmeProject.id, 'Export the invoices as CSV')
+          const second = yield* building(acmeProject.id, 'Import the invoices from CSV')
+          yield* ended((yield* run(acmeProject.id, first.id, testCommand.id)).id)
+          const waiting = yield* run(acmeProject.id, second.id, testCommand.id, {
+            waitLimit: Duration.seconds(1),
+          })
+          const given = yield* ended(waiting.id)
+          return {
+            given,
+            output: (yield* runOutput(waiting.id)).output,
+            queue: yield* queueOf,
+            marks: yield* marksOf(second.id),
+            holder: yield* holderOf,
+            first,
+          }
+        }),
+      ),
+    )
+    expect(seen.given.state).toBe('failed')
+    expect(seen.given.exitCode).toBeNull()
+    expect(seen.output).toContain('It was not started: it waited 1s for shared database')
+    expect(seen.queue).toEqual([])
+    expect(seen.marks).toEqual([])
+    expect(seen.holder).toBe(seen.first.id)
+    expect(history()).toEqual(['migrate', 'test'])
+  })
+
   test('a waiter that leaves the queue takes its mark with it, or neither goes when the data folder refuses', async () => {
     const seen = await engine()(({ profile }) =>
       profile.use(
@@ -954,6 +986,7 @@ describe('Two at once: the reservation under concurrency', () => {
           runs.reservations.current = {
             enter: () =>
               Effect.succeed({
+                names: ['shared database'],
                 wait: (runEnded) =>
                   Effect.withFiber((fiber) =>
                     Effect.andThen(
