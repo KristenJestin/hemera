@@ -40,7 +40,7 @@ import {
 } from './snapshots.ts'
 
 /** The moment a checkpoint is taken at. */
-export type CheckpointKind = 'review' | 'review_entry' | 'round_end' | 'push'
+export type CheckpointKind = 'review' | 'review_entry' | 'round_end' | 'push' | 'ship'
 
 /**
  * A repository of the Workspace as a checkpoint takes it: its name there, its working tree, and

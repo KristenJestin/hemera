@@ -324,11 +324,24 @@ describe('An index that cannot be read for its submodules is said, never read as
     expect(said?.text).toContain('larger than')
   })
 
-  test('a linked index is said: it is never followed', () => {
+  test('a linked index is said, and the index it leads to is read for its submodules, as Git follows it (#500)', () => {
     const { main, index } = indexed()
     renameSync(index, join(work, 'index'))
     symlinkSync(join(work, 'index'), index)
-    expect(saidOf(main)?.text).toContain('a link, never followed')
+    expect(saidOf(main)?.text).toContain('a link')
+    expect(paths([main])).toContain(join(main, 'vendor', '.git', 'config'))
+  })
+
+  test('a linked index leading to one it cannot read is said apart from one it reads (#500)', () => {
+    const { main, index } = indexed()
+    renameSync(index, join(work, 'index'))
+    symlinkSync(join(work, 'index'), index)
+    const read = saidOf(main)
+    writeFileSync(join(work, 'index'), 'not an index\n')
+    const unread = saidOf(main)
+    expect(unread?.text).toContain('does not know')
+    expect(unread?.digest).not.toBe(read?.digest)
+    expect(paths([main])).not.toContain(join(main, 'vendor', '.git', 'config'))
   })
 
   test.each([
@@ -380,6 +393,25 @@ describe('An index that cannot be read for its submodules is said, never read as
     }
     expect(saidOf(main, locked)?.text).toContain('EBUSY')
   })
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a read of the index that failed once (its access refused, as a lock would) is tried again at the next fingerprint, its stat unchanged (#500)',
+    () => {
+      const { main, index } = indexed()
+      // The index's stat as it stood seconds ago, the same at every fingerprint: settled.
+      const real = lstatSync(index, { bigint: true })
+      const frozen = statsWith(index, () => ({
+        mode: real.mode,
+        mtimeNs: real.mtimeNs - 10_000_000_000n,
+        ctimeNs: real.ctimeNs - 10_000_000_000n,
+      }))
+      chmodSync(index, 0o000)
+      const locked = saidOf(main, frozen)
+      chmodSync(index, 0o644)
+      expect(locked?.text).toContain('EACCES')
+      expect(saidOf(main, frozen)).toBeUndefined()
+    },
+  )
 
   test('an unreadable index is said the same way each time, so it asks once', () => {
     const { main, index } = indexed()
