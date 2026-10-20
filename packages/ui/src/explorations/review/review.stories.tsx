@@ -417,7 +417,9 @@ export const ShipConfirmation: Story = {
     )
     await userEvent.click(canvas.getByRole('button', { name: 'Ship' }))
     const dialog = within(await waitFor(() => within(document.body).getByRole('dialog')))
-    await expect(dialog.getByRole('heading', { name: 'Ship ACME-12?' })).toBeVisible()
+    await waitFor(() =>
+      expect(dialog.getByRole('heading', { name: 'Ship ACME-12?' })).toBeVisible(),
+    )
     await expect(
       dialog.getAllByRole('listitem', { name: /^(api|web|shared|ui-kit|billing)$/ }),
     ).toHaveLength(5)
