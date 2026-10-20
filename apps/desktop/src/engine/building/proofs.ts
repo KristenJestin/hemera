@@ -43,6 +43,7 @@ import {
   PROOF_CLASSES,
   type ProofClass,
   type ProofPhase,
+  type ProofTest,
   PROOF_PHASES,
   ROLE_PLACES,
   type ScenarioProofState,
@@ -50,6 +51,9 @@ import {
   addedTestNames,
   addedTests,
   insertedFiles,
+  runnerChange,
+  runnerFileOf,
+  runnerReads,
   validRed,
 } from '@hemera/core/domain'
 import { HemeraAuthor, ProofRefused } from '@hemera/ipc'
@@ -252,6 +256,60 @@ const notARed = (run: ProofRun): string => {
       return 'it passed'
   }
 }
+
+/**
+ * The file of a red's patch, in its test's repository, that changes how its runner judges (#479):
+ * the patch is what the tree the red ran on changed against the Building's base. Null when no file
+ * does, or when the red holds no tree of that repository.
+ */
+const runnerChangeIn = (building: BuildingRow, test: ProofTest, run: ProofRun) =>
+  Effect.gen(function* () {
+    const base = basesOf(building).find((one) => one.repository === test.repository)
+    const ran = run.trees.find((one) => one.repository === test.repository)
+    if (base === undefined || ran === undefined) return null
+    const snapshots = yield* Snapshots
+    const place = { name: base.repository, folder: base.folder }
+    const textOf = (tree: string, path: string | null) =>
+      path === null
+        ? Effect.succeed(null)
+        : Effect.map(snapshots.read(building.missionId, place, tree, path), (side) =>
+            side === null
+              ? null
+              : side.content === null
+                ? `withheld:${side.sha256}`
+                : new TextDecoder().decode(side.content),
+          )
+    const files = yield* snapshots.changed(building.missionId, place, base.tree, ran.tree)
+    // A rename is its old path removed and its new one added: both names are judged.
+    const sides = files.flatMap((file) =>
+      file.status === 'R' && file.oldPath !== null
+        ? [
+            { path: file.oldPath, before: file.oldPath, after: null },
+            { path: file.path, before: null, after: file.path },
+          ]
+        : [
+            {
+              path: file.path,
+              before: file.status === 'A' ? null : file.path,
+              after: file.status === 'D' ? null : file.path,
+            },
+          ],
+    )
+    const changed = yield* Effect.forEach(sides, (side) =>
+      runnerFileOf(side.path) === null
+        ? Effect.succeed({ path: side.path, before: null, after: null })
+        : Effect.all({
+            path: Effect.succeed(side.path),
+            before: textOf(base.tree, side.before),
+            after: textOf(ran.tree, side.after),
+          }),
+    )
+    const tree = yield* snapshots.listing(building.missionId, place, ran.tree)
+    const reads = runnerReads(tree, test.path, run.line)
+    const read = new Map<string, string>()
+    for (const one of reads) read.set(one.path, (yield* textOf(ran.tree, one.real)) ?? '')
+    return runnerChange({ tree, changed, read, testPath: test.path, command: run.line })
+  })
 
 /** A classification in words, for a green run that is not one. */
 const CLASS_SAID: Readonly<Record<ProofClass, string>> = {
@@ -1254,7 +1312,20 @@ export const buildingProofs = (parts: ProofParts) => {
               code: test.code,
               patch: test.patch ?? null,
             })
-      if (validRed(run, test?.path ?? null, names, run.keyLineMatched, run.goModule)) {
+      const valid = validRed(run, test?.path ?? null, names, run.keyLineMatched, run.goModule)
+      // A red the runner itself could have made (#479): judged as today when its patch is not read.
+      const moved =
+        !valid || test === undefined
+          ? null
+          : yield* runnerChangeIn(building, test, run).pipe(
+              Effect.catch((failure) =>
+                Effect.as(
+                  parts.said(`${scenario}'s red is judged without its patch: ${failure.message}`),
+                  null,
+                ),
+              ),
+            )
+      if (valid && moved === null) {
         if (run.keyLineMatched === false) {
           const question = [
             `${scenario}'s red is not the one Planning saw.`,
@@ -1301,8 +1372,18 @@ export const buildingProofs = (parts: ProofParts) => {
       yield* loop.proofRed(
         building,
         scenario,
-        { name: 'proof', detail: notARed(run), outputTail: run.outputTail, runId: run.runId },
-        `Fix the setup, never the expected result, then call proof_run(${scenario}).`,
+        {
+          name: 'proof',
+          detail:
+            moved === null || test === undefined
+              ? notARed(run)
+              : `this red is not one: ${test.repository}/${moved.path} changed since the Building began (${moved.why}), and that changes how the runner judges the test`,
+          outputTail: run.outputTail,
+          runId: run.runId,
+        },
+        moved === null
+          ? `Fix the setup, never the expected result, then call proof_run(${scenario}).`
+          : `Move that change out until the red is recorded (it can come back once it is), then call proof_run(${scenario}).`,
       )
     })
 

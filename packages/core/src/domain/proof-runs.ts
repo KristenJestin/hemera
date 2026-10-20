@@ -14,7 +14,8 @@
  *   colours removed, paths, durations, addresses and numbers masked.
  */
 
-import { Predicate, Schema } from 'effect'
+import { Option, Predicate, Result, Schema } from 'effect'
+import { parse as parseToml } from 'smol-toml'
 
 import {
   type ReportFound,
@@ -2344,4 +2345,260 @@ export const keyLineFound = (output: string, keyLine: string): boolean => {
   if (key === '') return false
   const normal = normalisedOutput(output)
   return normal.split('\n').some((line) => line.includes(key)) || normal.includes(key)
+}
+
+// ---- The runner's own files (#479).
+
+/**
+ * A file of a red's repository that can change the runner's own verdict, by its name, in any case
+ * (Windows finds `Conftest.py` as `conftest.py`): a red whose patch changed one is refused, since
+ * the runner itself could then list and report the added test as failed. Each is read as its
+ * runner reads it (`runnerPart`).
+ */
+export type RunnerFile =
+  | 'conftest'
+  | 'pytest'
+  | 'pyproject'
+  | 'setup.cfg'
+  | 'tox.ini'
+  | 'vitest'
+  | 'package.json'
+  | 'npmrc'
+
+const RUNNER_NAMES: ReadonlyMap<string, RunnerFile> = new Map([
+  ['conftest.py', 'conftest'],
+  ['pytest.ini', 'pytest'],
+  ['.pytest.ini', 'pytest'],
+  ['pytest.toml', 'pytest'],
+  ['.pytest.toml', 'pytest'],
+  ['pyproject.toml', 'pyproject'],
+  ['setup.cfg', 'setup.cfg'],
+  ['tox.ini', 'tox.ini'],
+  ['package.json', 'package.json'],
+  ['.npmrc', 'npmrc'],
+])
+
+const VITEST_CONFIG =
+  /^(?:vitest|vite)\.config\.[cm]?[jt]s$|^vitest\.workspace\.(?:[cm]?[jt]s|json)$/
+
+/** What a runner file is, said to the Builder. */
+const RUNNER_SAID: Readonly<Record<RunnerFile, string>> = {
+  conftest: 'a conftest.py',
+  pytest: 'pytest’s configuration',
+  pyproject: 'its [tool.pytest] table',
+  'setup.cfg': 'its [tool:pytest] section',
+  'tox.ini': 'its [pytest] section',
+  vitest: 'vitest’s configuration',
+  'package.json': 'its scripts',
+  npmrc: 'npm’s configuration',
+}
+
+const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
+const folderOf = (path: string): string => path.slice(0, Math.max(path.lastIndexOf('/'), 0))
+
+/** What a file is to the runner, by its name: null for any other file. */
+export const runnerFileOf = (path: string): RunnerFile | null => {
+  const name = baseName(posix(path)).toLowerCase()
+  return RUNNER_NAMES.get(name) ?? (VITEST_CONFIG.test(name) ? 'vitest' : null)
+}
+
+const whole = (text: string): string => text.replace(/^﻿/, '').replace(/\r\n?/g, '\n')
+
+/** An ini file's section as iniconfig reads it: from its header at the start of a line to the next. */
+const iniSection = (text: string, name: string): string | null => {
+  const lines = whole(text).split('\n')
+  const header = (line: string) => /^\[(?<name>[^\]]*)\]/.exec(line)?.groups?.name?.trim() ?? null
+  const start = lines.findIndex((line) => header(line) === name)
+  if (start < 0) return null
+  const end = lines.findIndex((line, at) => at > start && header(line) !== null)
+  return lines.slice(start, end < 0 ? undefined : end).join('\n')
+}
+
+const PyprojectPytest = Schema.Struct({
+  tool: Schema.Struct({ pytest: Schema.Unknown }),
+})
+const PackageScripts = Schema.fromJsonString(
+  Schema.Struct({ scripts: Schema.optional(Schema.Unknown) }),
+)
+
+/**
+ * The part of a runner file its runner reads, line endings and a byte-order mark aside: a
+ * pyproject's `tool.pytest` table read as TOML, an ini file's pytest section, a package.json's
+ * scripts, any other whole; null when there is no such file or part. A file that does not read
+ * is judged whole.
+ */
+export const runnerPart = (kind: RunnerFile, text: string | null): string | null => {
+  if (text === null) return null
+  switch (kind) {
+    case 'pyproject': {
+      const table = Result.try(() => parseToml(whole(text)))
+      if (Result.isFailure(table)) return `text:${whole(text)}`
+      const found = Schema.decodeUnknownOption(PyprojectPytest)(table.success)
+      return Option.isNone(found) ? null : `toml:${JSON.stringify(found.value.tool.pytest)}`
+    }
+    case 'setup.cfg':
+      return iniSection(text, 'tool:pytest')
+    case 'tox.ini':
+      return iniSection(text, 'pytest')
+    case 'package.json': {
+      const found = Schema.decodeUnknownOption(PackageScripts)(whole(text))
+      if (Option.isNone(found)) return `text:${whole(text)}`
+      return found.value.scripts === undefined
+        ? null
+        : `json:${JSON.stringify(found.value.scripts)}`
+    }
+    default:
+      return whole(text)
+  }
+}
+
+/** A tree of a red's repository: its files, and the target of each of its links. */
+export interface RunnerTree {
+  readonly files: ReadonlyArray<string>
+  readonly links: ReadonlyMap<string, string>
+}
+
+/** A path made plain: `/` between its parts, no `.`, each `..` taken back; null past the root. */
+const plain = (path: string): string | null => {
+  const parts: Array<string> = []
+  for (const part of posix(path).split('/')) {
+    if (part === '' || part === '.') continue
+    if (part !== '..') parts.push(part)
+    else if (parts.pop() === undefined) return null
+  }
+  return parts.join('/')
+}
+
+/** Where a path of the tree leads once each link on its way is followed; null out of the tree. */
+const resolved = (path: string, links: ReadonlyMap<string, string>): string | null => {
+  let at: string | null = plain(path)
+  for (let hops = 0; at !== null && hops < 40; hops += 1) {
+    const parts: ReadonlyArray<string> = at.split('/')
+    const through = parts.findIndex((_, index) => links.has(parts.slice(0, index + 1).join('/')))
+    if (through < 0) return at
+    const link = parts.slice(0, through + 1).join('/')
+    const target = links.get(link) ?? ''
+    if (target.startsWith('/') || /^[A-Za-z]:/.test(target)) return null
+    at = plain([folderOf(link), target, ...parts.slice(through + 1)].join('/'))
+  }
+  return null
+}
+
+/** The extensions a name may leave out, a setup file or a module named without its own. */
+const LEFT_OUT = ['', '.ts', '.mts', '.cts', '.tsx', '.js', '.mjs', '.cjs', '.jsx', '.py']
+
+/**
+ * The files a text may name, as paths of the tree: each word that holds a `/` or a `.`, from the
+ * text's folder and from the root, with each extension it may leave out, and a dotted Python
+ * module's file or package.
+ */
+const namedIn = (text: string, folder: string): ReadonlyArray<string> => {
+  const found = new Set<string>()
+  for (const word of text.match(/[^\s"'`=,;:()[\]{}<>|&]+/g) ?? []) {
+    if (word.startsWith('-') || !/[./\\]/.test(word) || word.length > 512) continue
+    const paths = [word, `${folder}/${word}`]
+    if (/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$/.test(word)) {
+      const module = word.replaceAll('.', '/')
+      paths.push(`${module}.py`, `${module}/__init__.py`)
+    }
+    for (const path of paths) {
+      for (const extension of LEFT_OUT) {
+        const one = plain(`${path}${extension}`)
+        if (one !== null && one !== '') found.add(one)
+      }
+    }
+  }
+  return [...found]
+}
+
+const within = (folder: string, path: string): boolean =>
+  folder === '' || path.toLowerCase().startsWith(`${folder.toLowerCase()}/`)
+
+/**
+ * The files the rule reads whole in the tree a red ran on, each where its links lead: the runner
+ * files in the test's folder and each folder above it, then the files its command names.
+ */
+export const runnerReads = (
+  tree: RunnerTree,
+  testPath: string,
+  command: string,
+): ReadonlyArray<{ readonly path: string; readonly real: string }> => {
+  const test = plain(testPath) ?? ''
+  const files = new Set(tree.files.map((one) => one.toLowerCase()))
+  const reads = new Map<string, string>()
+  const add = (path: string) => {
+    const real = resolved(path, tree.links)
+    if (real !== null && !reads.has(path)) reads.set(path, real)
+  }
+  for (const path of tree.files) {
+    if (runnerFileOf(path) !== null && within(folderOf(path), test)) add(path)
+  }
+  for (const path of namedIn(command, '')) {
+    if (path.toLowerCase() !== test.toLowerCase() && files.has(path.toLowerCase())) add(path)
+  }
+  return [...reads].map(([path, real]) => ({ path, real }))
+}
+
+/** A file a red's patch changed, and the text of each side of a runner file (null otherwise). */
+export interface PatchSide {
+  readonly path: string
+  readonly before: string | null
+  readonly after: string | null
+}
+
+/**
+ * A red's patch, against its Building's base, in the proof's repository: the tree it ran on, the
+ * files changed (a rename as its old path removed and its new one added), the texts of the files
+ * `runnerReads` names (by the path it names), the test file and the line run.
+ */
+export interface RunnerPatch {
+  readonly tree: RunnerTree
+  readonly changed: ReadonlyArray<PatchSide>
+  readonly read: ReadonlyMap<string, string>
+  readonly testPath: string
+  readonly command: string
+}
+
+/** The file of a red's patch that changes how the runner judges, and why it does. */
+export interface RunnerChange {
+  readonly path: string
+  readonly why: string
+}
+
+/**
+ * The first file of a red's patch that changes how its runner judges (#479), or null: a runner
+ * file whose part changed, a file a runner file on the test's path leads to through a link, or a
+ * file named by one of them or by the command (a setup file, a plugin, a `--require`), the test
+ * file the proof adds aside. A file named by a named file is not followed.
+ */
+export const runnerChange = (patch: RunnerPatch): RunnerChange | null => {
+  for (const side of patch.changed) {
+    const kind = runnerFileOf(side.path)
+    if (kind !== null && runnerPart(kind, side.before) !== runnerPart(kind, side.after)) {
+      return { path: side.path, why: RUNNER_SAID[kind] }
+    }
+  }
+  const test = (plain(patch.testPath) ?? '').toLowerCase()
+  const changed = new Map(patch.changed.map((side) => [side.path.toLowerCase(), side.path]))
+  const changedOf = (path: string | null) =>
+    path === null || path.toLowerCase() === test ? undefined : changed.get(path.toLowerCase())
+  const reads = runnerReads(patch.tree, patch.testPath, patch.command)
+  for (const read of reads) {
+    const through = read.real === read.path ? undefined : changedOf(read.real)
+    if (through !== undefined) return { path: through, why: `through the link ${read.path}` }
+  }
+  const namedBy = (text: string, folder: string, by: string) => {
+    for (const path of namedIn(text, folder)) {
+      const found = changedOf(resolved(path, patch.tree.links))
+      if (found !== undefined) return { path: found, why: `named by ${by}` }
+    }
+    return null
+  }
+  for (const read of reads) {
+    const kind = runnerFileOf(read.path)
+    const part = kind === null ? null : runnerPart(kind, patch.read.get(read.path) ?? null)
+    const found = part === null ? null : namedBy(part, folderOf(read.path), read.path)
+    if (found !== null) return found
+  }
+  return namedBy(patch.command, '', 'the proof’s command')
 }

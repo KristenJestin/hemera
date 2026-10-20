@@ -43,7 +43,7 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, dirname, join, relative } from 'node:path'
 
-import { sensitivePlace } from '@hemera/core/domain'
+import { type RunnerTree, sensitivePlace } from '@hemera/core/domain'
 import { and, asc, count, countDistinct, eq, or } from 'drizzle-orm'
 import { Context, Effect, Layer, Option, Predicate, Schema } from 'effect'
 
@@ -204,6 +204,15 @@ export interface SnapshotsService {
     repository: RepositoryPlace,
     owner: SnapshotOwner,
   ) => Effect.Effect<string, SnapshotFailed>
+  /**
+   * Every file of a tree of the mission's store, and the target of each of its links, as the link
+   * holds it (#479: what a red's runner reads).
+   */
+  readonly listing: (
+    missionId: string,
+    repository: RepositoryPlace,
+    tree: string,
+  ) => Effect.Effect<RunnerTree, SnapshotFailed>
   /** The files changed between two trees of the mission's store; null is the empty tree. */
   readonly changed: (
     missionId: string,
@@ -367,6 +376,7 @@ interface RawChange {
 
 const ABSENT_MODE = '000000'
 const SUBMODULE_MODE = '160000'
+const LINK_MODE = '120000'
 const STATUSES: ReadonlyArray<ChangeStatus> = ['A', 'M', 'D', 'R', 'T']
 
 /**
@@ -1186,6 +1196,34 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
           ),
         )
 
+      const listing = (missionId: string, repository: RepositoryPlace, tree: string) =>
+        Effect.gen(function* () {
+          const store = yield* storeOf(missionId)
+          const env = yield* borrowing(repository)
+          const printed = yield* run(
+            store,
+            ['ls-tree', '-r', '-z', '--end-of-options', tree],
+            'read',
+            { env },
+          )
+          const files: Array<string> = []
+          const links = new Map<string, string>()
+          for (const entry of fields(text(printed))) {
+            const tab = entry.indexOf('\t')
+            const [mode = '', type = '', blob = ''] = entry.slice(0, tab).split(' ')
+            if (type !== 'blob') continue
+            files.push(entry.slice(tab + 1))
+            if (mode === LINK_MODE) links.set(entry.slice(tab + 1), blob)
+          }
+          const targets = yield* contentsOf(store, env, [...new Set(links.values())], new Map())
+          return {
+            files,
+            links: new Map(
+              [...links].map(([path, blob]) => [path, text(targets.get(blob) ?? Buffer.alloc(0))]),
+            ),
+          }
+        }).pipe(Effect.mapError(failure(repository, `the files of ${tree}`)))
+
       const collect = (
         missionId: string,
         repository: RepositoryPlace,
@@ -1244,6 +1282,7 @@ export const snapshotsLayer = (run: GitBytesSpawn) =>
 
       const service: SnapshotsService = {
         take,
+        listing,
         changed,
         collect,
         materialize,
