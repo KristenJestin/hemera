@@ -166,6 +166,8 @@ export const sessionsEngine = (
     readonly forge?: ProfileParts['forge']
     /** The pushes' Git and where a suite holds them (R6). */
     readonly delivery?: ProfileParts['delivery']
+    /** Where a suite holds a Ship (R9). */
+    readonly ship?: ProfileParts['ship']
     /** Where a suite holds a run as it is written or launched. */
     readonly runs?: ProfileParts['runs']
     /** The engine on a test clock the suite moves (#85). */
@@ -211,6 +213,7 @@ export const sessionsEngine = (
     review: options.review,
     forge: options.forge,
     delivery: options.delivery,
+    ship: options.ship,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,
