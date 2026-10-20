@@ -1637,3 +1637,107 @@ function onAcme(rules: DeliveryRules): DeliveryRules {
     },
   }
 }
+
+describe('A placed step is moved to another place (#502)', () => {
+  const MERGED_BY_CLICK: DeliveryAction = {
+    id: 'merge',
+    kind: 'merge',
+    mode: 'click',
+    method: 'rebase',
+  }
+  /** web on Application, its merge moved before Ship, after its pull request, a click to start. */
+  const movedMerge = (): DeliveryRulesDraft =>
+    preparedWith(rulesWith([waves('web', 'application')]), 'web', {
+      steps: {
+        off: [],
+        changed: [],
+        added: [],
+        moved: [{ after: 'pull-request', step: MERGED_BY_CLICK }],
+      },
+    })
+
+  test('a step moved across moments keeps its settings and leaves its old place', () => {
+    const web = effectiveOf(movedMerge(), only(repository('web')), 'web')
+    expect(web.stacks.preparation).toEqual([
+      { id: 'commit', kind: 'commit-by-hemera', mode: 'auto' },
+      { id: 'push', kind: 'push', mode: 'click' },
+      { id: 'pull-request', kind: 'pull-request', mode: 'click' },
+      MERGED_BY_CLICK,
+    ])
+    expect(web.stacks.waves.map((step) => step.id)).toEqual(['ci'])
+    expect(web.changes).toBe(1)
+  })
+
+  test('a step moved inside its moment goes after the step named', () => {
+    const rules = rulesWith([
+      waves('shared', 'library', {
+        steps: {
+          off: [],
+          changed: [],
+          added: [],
+          moved: [
+            { after: 'ci', step: { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' } },
+          ],
+        },
+      }),
+    ])
+    const shared = effectiveOf(rules, only(repository('shared')), 'shared')
+    expect(shared.stacks.waves.map((step) => step.id)).toEqual(['ci', 'merge', 'published-version'])
+    expect(validateRules(rules, only(repository('shared')))).toEqual([])
+  })
+
+  test('a step moved first in a moment stands before every other', () => {
+    const rules = rulesWith([
+      waves('web', 'application', {
+        steps: {
+          off: [],
+          changed: [],
+          added: [],
+          moved: [{ after: null, step: { id: 'ci', kind: 'ci', mode: 'auto' } }],
+        },
+      }),
+    ])
+    expect(
+      effectiveOf(rules, only(repository('web')), 'web').stacks.waves.map((step) => step.id),
+    ).toEqual(['ci', 'merge'])
+  })
+
+  test('two steps moved after each other are refused, never thrown', () => {
+    const rules = rulesWith([
+      waves('web', 'application', {
+        steps: {
+          off: [],
+          changed: [],
+          added: [],
+          moved: [
+            { after: 'ci', step: { id: 'merge', kind: 'merge', mode: 'auto', method: 'squash' } },
+            { after: 'merge', step: { id: 'ci', kind: 'ci', mode: 'auto' } },
+          ],
+        },
+      }),
+    ])
+    expect(sentences(rules, only(repository('web')))).toEqual([
+      'web places its step “merge” after itself: merge → ci → merge.',
+    ])
+  })
+
+  test('rules with a moved step are stored and read back; rules saved before #502 still read', () => {
+    const rules = movedMerge()
+    const document = Schema.encodeSync(Schema.fromJsonString(DeliveryRules))({
+      version: 3,
+      savedAt: '2026-10-20T08:00:00.000Z',
+      ...rules,
+    })
+    const read = decodeDeliveryRules(document)
+    expect(
+      Result.isSuccess(read) ? read.success.preparation.repositories[0]?.steps.moved : null,
+    ).toEqual([{ after: 'pull-request', step: MERGED_BY_CLICK }])
+    const before = Schema.encodeSync(Schema.fromJsonString(DeliveryRules))({
+      version: 1,
+      savedAt: null,
+      ...ACME_CHAIN,
+    })
+    expect(before).not.toContain('moved')
+    expect(Result.isSuccess(decodeDeliveryRules(before))).toBe(true)
+  })
+})
