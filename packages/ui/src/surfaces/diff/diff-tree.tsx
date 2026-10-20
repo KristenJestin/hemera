@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useMemo, useRef } from 'react'
 import { Input } from '../../components/field/field.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
 import { IconSearch } from '../../icons.ts'
-import type { DiffRepository, GitLetter } from './types.ts'
+import type { DiffRepository, GitLetter } from './diff-types.ts'
 
 /**
  * The left of the diff view: what changed, one root per repository of the Workspace, drawn by

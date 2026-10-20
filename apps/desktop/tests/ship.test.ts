@@ -4,6 +4,7 @@
  * Review the way the end of a Building leaves it (`ship-world.ts`).
  */
 
+import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 
@@ -40,6 +41,7 @@ import {
 import { git } from './repositories.ts'
 import { within } from './sessions-world.ts'
 import {
+  HOST,
   type InReview,
   LONG,
   SCENARIO,
@@ -796,6 +798,45 @@ describe('The rules Ship copies must fit what the mission copied before', () => 
     },
     SLOW,
   )
+})
+
+describe('The fake forge keeps every pull request it opens, however their creates overlap (#522)', () => {
+  test('two pull requests opened at once, in api and web, are both kept', async () => {
+    const world = shipWorld()
+    /** `gh pr create` in a repository, through the fake forge's program, as a process of its own. */
+    const create = (name: string) =>
+      new Promise<void>((resolve, reject) => {
+        const args = ['pr', 'create', '--repo', `${HOST}/acme/${name}`, '--head', 'mission/export']
+        const child = spawn(
+          process.execPath,
+          [
+            '-e',
+            `require(${JSON.stringify(world.program)})('gh', ${JSON.stringify([...args, '--base', 'main'])})`,
+          ],
+          { stdio: ['pipe', 'ignore', 'inherit'] },
+        )
+        child.on('error', reject)
+        child.on('exit', (code) =>
+          code === 0
+            ? resolve()
+            : reject(new Error(`the create in ${name} exited ${String(code)}`)),
+        )
+        child.stdin.end('Export the invoices as CSV.')
+      })
+    // api's create has read what the forge holds and has not written yet when web's runs whole.
+    const hold = world.holdCreate()
+    const api = create('api')
+    await Effect.runPromise(until(Effect.sync(hold.held), LONG))
+    await create('web')
+    hold.go()
+    await api
+    expect(
+      world
+        .pullRequests()
+        .map((one) => one.repo)
+        .toSorted(),
+    ).toEqual(['acme/api', 'acme/web'])
+  })
 })
 
 describe('Only a human ships', () => {

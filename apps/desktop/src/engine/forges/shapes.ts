@@ -9,7 +9,8 @@
  * shapes; one that needs another flag adds it to its shape here.
  *
  * Every shape is closed. It is its leading words, each a word or a slot (`<number>`) for one value
- * that is not a flag, which a pattern may narrow; then only the flags it names, each at most once,
+ * that is not a flag, which a pattern may narrow; then only the flags it names, each at most once
+ * (gh's `--attach`, one file each, as many times as there are files),
  * written apart from its value (`--repo acme/shop`, never `--repo=acme/shop`): a switch, a flag
  * with a value (which a pattern may narrow), or a fixed word such as `--close-source=false`. A
  * required flag must be there, and of flags that are one of a kind exactly one. Nothing else may
@@ -33,6 +34,8 @@ export interface FlagRule {
   readonly required: boolean
   /** Of the flags in this group, exactly one must be there. */
   readonly oneOf?: string
+  /** It may be given more than once. */
+  readonly repeat?: boolean
 }
 
 export interface CommandShape {
@@ -55,6 +58,15 @@ const valueFlag = (required = false, pattern?: RegExp): FlagRule =>
 
 /** A body Hemera writes goes on the standard input, never in a file the CLI would read. */
 const FROM_INPUT = /^-$/
+
+/**
+ * A file gh uploads into a pull request's description (R7), `<path>#<alt>`, once per file: never a
+ * flag. The runner attaches only Hemera's own images (`ForgeSettings.attachable`).
+ */
+const ATTACH: readonly [string, FlagRule] = [
+  '--attach',
+  { value: true, pattern: /^(?!-)/, required: false, repeat: true },
+]
 
 const shape = (
   cli: CommandShape['cli'],
@@ -92,6 +104,8 @@ export const REPO_NAME = new RegExp(`^${NAME}$`)
 const REVIEWERS = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/(teams|collaborators)\?per_page=100$`,
 )
+/** A repository read through gh's API: its visibility and the account's permissions (R7). */
+const REPO_PATH = new RegExp(String.raw`^repos/${NAME}/${NAME}$`)
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
@@ -175,6 +189,15 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     [...BKT_PLACE, ['--json', switchFlag(true)]],
     [NUMBER],
   ),
+  // A repository's visibility and whether the account may push, which hosting an image needs (R7).
+  shape(
+    'gh',
+    'read',
+    'repo.view',
+    ['api', '--hostname', '<host>', '<path>'],
+    [],
+    [['<path>', REPO_PATH]],
+  ),
 
   // CT-50's network writes. The push is Git's own (R6).
   shape('git', 'network-write', 'push', ['push']),
@@ -193,15 +216,22 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
       ['--draft', switchFlag()],
       // The reviewers of the rules, joined by commas (R6).
       ['--reviewer', valueFlag()],
+      // The mission's images, uploaded into the description (R7).
+      ATTACH,
     ],
   ),
-  // Before `pr.edit`: an image attached is an edit of its own (R7).
+  // Before `pr.edit`: an image attached is an edit of its own (R7), with the description it is
+  // shown in when the file names it replaces are written there.
   shape(
     'gh',
     'network-write',
     'pr.attach',
     ['pr', 'edit', '<number>'],
-    [GH_REPO, ['--attach', valueFlag(true)]],
+    [
+      GH_REPO,
+      [ATTACH[0], { ...ATTACH[1], required: true }],
+      ['--body-file', valueFlag(false, FROM_INPUT)],
+    ],
     [NUMBER],
   ),
   shape(
@@ -328,8 +358,10 @@ const fitsWord = (owner: CommandShape, word: string, arg: string): boolean => {
 export interface ParsedCommand {
   readonly shape: CommandShape
   readonly slots: ReadonlyMap<string, string>
-  /** Each flag given, with its value; a switch with none. */
+  /** Each flag given, with its value (the last, for one given more than once); a switch with none. */
   readonly flags: ReadonlyMap<string, string | null>
+  /** Where each value of a flag stands among the arguments, in their order. */
+  readonly positions: ReadonlyMap<string, ReadonlyArray<number>>
 }
 
 /**
@@ -339,12 +371,13 @@ export interface ParsedCommand {
 const flagsOf = (
   owner: CommandShape,
   rest: ReadonlyArray<string>,
-): ReadonlyMap<string, string | null> | null => {
+): Pick<ParsedCommand, 'flags' | 'positions'> | null => {
   const seen = new Map<string, string | null>()
+  const positions = new Map<string, Array<number>>()
   for (let at = 0; at < rest.length; at += 1) {
     const name = rest[at] ?? ''
     const rule = owner.flags.get(name)
-    if (rule === undefined || seen.has(name)) return null
+    if (rule === undefined || (seen.has(name) && rule.repeat !== true)) return null
     if (!rule.value) {
       seen.set(name, null)
       continue
@@ -354,6 +387,7 @@ const flagsOf = (
     if (value === undefined) return null
     if (rule.pattern !== undefined && !rule.pattern.test(value)) return null
     seen.set(name, value)
+    positions.set(name, [...(positions.get(name) ?? []), at])
   }
   const flags = [...owner.flags]
   const groups = new Set(
@@ -365,7 +399,7 @@ const flagsOf = (
       (group) =>
         flags.filter(([name, rule]) => rule.oneOf === group && seen.has(name)).length === 1,
     )
-  return complete ? seen : null
+  return complete ? { flags: seen, positions } : null
 }
 
 /** These arguments of this CLI read against the first shape they match; null when none does. */
@@ -373,12 +407,16 @@ export const parseCommand = (cli: ForgeCli, args: ReadonlyArray<string>): Parsed
   for (const one of COMMAND_SHAPES) {
     if (one.cli !== cli || args.length < one.words.length) continue
     if (!one.words.every((word, at) => fitsWord(one, word, args[at] ?? ''))) continue
-    const flags = flagsOf(one, args.slice(one.words.length))
-    if (flags === null) continue
+    const given = flagsOf(one, args.slice(one.words.length))
+    if (given === null) continue
     const slots = new Map(
       one.words.flatMap((word, at) => (SLOT.test(word) ? [[word, args[at] ?? '']] : [])),
     )
-    return { shape: one, slots, flags }
+    // Where each value stands among all the arguments, the words before the flags counted.
+    const positions = new Map(
+      [...given.positions].map(([name, found]) => [name, found.map((at) => at + one.words.length)]),
+    )
+    return { shape: one, slots, flags: given.flags, positions }
   }
   return null
 }

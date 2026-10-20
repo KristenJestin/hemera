@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -12,13 +12,12 @@ import {
   IconArrowsVertical,
   IconBrandGithub,
   IconCheck,
+  IconChevronRight,
   IconHelpCircle,
   IconHistory,
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
-import { CODE, Chevron, ID, PROSE, QUIET, Unfolding } from '../review/parts.tsx'
-import type { RemarkState } from '../review/types.ts'
-import type { DiffComment, Place } from './types.ts'
+import type { CommentState, DiffComment, Place } from './diff-types.ts'
 
 /**
  * A comment as it is read under the lines it is about, in the manner of a pull request page.
@@ -31,9 +30,64 @@ import type { DiffComment, Place } from './types.ts'
  * resolved, withdrawn, resolved on the forge — folds to its line, so the diff reads through it.
  */
 
-export type CommentAction = 'edit' | 'withdraw' | 'resolve' | 'follow'
+/** What a comment's author does with it in one press; editing and following up are written. */
+export type CommentAction = 'withdraw' | 'resolve'
 
-const MARK: Record<RemarkState, MarkState> = {
+/** What a comment's author can do with it. */
+export interface CommentHandlers {
+  onAction: (id: string, action: CommentAction) => void
+  /** Its words written again, while it waits. */
+  onEdit: (id: string, text: string) => void
+  /** A follow-up written under it, once it is addressed. */
+  onFollowUp: (id: string, text: string) => void
+  onOpenVersion: (id: string) => void
+  onOpenForge: (url: string) => void
+}
+
+const QUIET = 'shrink-0 text-xs text-muted-foreground tabular-nums'
+
+const ID = 'shrink-0 font-mono text-xs text-muted-foreground'
+
+const CODE =
+  'rounded-md border border-border bg-muted px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
+
+/** Prose of the agent or the user, opened: at its reading measure, wrapping. */
+const PROSE = 'max-w-measure text-sm break-words whitespace-pre-line'
+
+/** A body that grows from its line and folds back into it, pushing what is under it. */
+function Unfolding({ open, children }: { open: boolean; children: ReactNode }): ReactNode {
+  const folding = useTransition(fold)
+  return (
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div
+          key="body"
+          className="overflow-hidden"
+          initial={collapse}
+          animate={expand}
+          exit={collapse}
+          transition={folding}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+/** The chevron of a folded comment, turning as it opens. */
+function Chevron({ open }: { open: boolean }): ReactNode {
+  return (
+    <span
+      className="flex shrink-0 text-muted-foreground chevron-motion data-open:rotate-90"
+      data-open={open ? '' : undefined}
+    >
+      <IconChevronRight size="sm" />
+    </span>
+  )
+}
+
+const MARK: Record<CommentState, MarkState> = {
   waiting: 'todo',
   inRound: 'running',
   addressed: 'waiting',
@@ -120,45 +174,45 @@ function Actions({
   comment,
   writable,
   onAction,
+  onWrite,
 }: {
   comment: DiffComment
   writable: boolean
   onAction: (id: string, action: CommentAction) => void
+  onWrite: (writing: 'edit' | 'follow') => void
 }): ReactNode {
   if (!writable || comment.team !== undefined || settled(comment)) return null
   const button = (
-    action: CommentAction,
     words: string,
     variant: 'primary' | 'secondary' | 'ghost',
+    onClick: () => void,
   ) => (
     <Button
-      key={action}
+      key={words}
       variant={variant}
       size="sm"
       aria-label={`${words} ${comment.id}`}
-      onClick={() => onAction(comment.id, action)}
+      onClick={onClick}
     >
       {words}
     </Button>
   )
   return (
     <div className="flex flex-wrap gap-2 px-3 pb-3">
-      {comment.state === 'addressed' && button('resolve', 'Resolve', 'primary')}
-      {comment.state === 'addressed' && button('follow', 'Follow up', 'secondary')}
-      {comment.state === 'waiting' && button('edit', 'Edit', 'secondary')}
-      {button('withdraw', 'Withdraw', 'ghost')}
+      {comment.state === 'addressed' &&
+        button('Resolve', 'primary', () => onAction(comment.id, 'resolve'))}
+      {comment.state === 'addressed' && button('Follow up', 'secondary', () => onWrite('follow'))}
+      {comment.state === 'waiting' && button('Edit', 'secondary', () => onWrite('edit'))}
+      {button('Withdraw', 'ghost', () => onAction(comment.id, 'withdraw'))}
     </div>
   )
 }
 
-export interface CommentCardProps {
+export interface CommentCardProps extends CommentHandlers {
   comment: DiffComment
   /** Sent here from the Review page, or from the tree: wears the focus ring while it is. */
   lit?: boolean | undefined
   writable: boolean
-  onAction: (id: string, action: CommentAction) => void
-  onOpenVersion: (id: string) => void
-  onOpenForge: (url: string) => void
 }
 
 export function CommentCard({
@@ -166,11 +220,15 @@ export function CommentCard({
   lit = false,
   writable,
   onAction,
+  onEdit,
+  onFollowUp,
   onOpenVersion,
   onOpenForge,
 }: CommentCardProps): ReactNode {
   const folds = settled(comment)
   const [open, setOpen] = useState(!folds || lit)
+  // Edit and Follow up are written in place, in the comment itself.
+  const [writing, setWriting] = useState<'edit' | 'follow' | null>(null)
   const quiet = folds ? 'text-muted-foreground' : undefined
   const struck = comment.state === 'withdrawn' && comment.team === undefined
   const name = `${comment.id}, ${commentLegend(comment).toLowerCase()}`
@@ -200,7 +258,10 @@ export function CommentCard({
         <div className={HEAD}>
           <Marks comment={comment} />
           <Author comment={comment} />
-          <span className={QUIET}>{linesOf(comment.place)}</span>
+          {/* An outdated comment's lines are gone: its excerpt says where it was written. */}
+          {comment.outdated === undefined && (
+            <span className={QUIET}>{linesOf(comment.place)}</span>
+          )}
           {comment.movedFrom !== undefined && (
             <Legend
               label={`Moved with its lines: written on line ${String(comment.movedFrom.start)}`}
@@ -224,13 +285,28 @@ export function CommentCard({
       <Unfolding open={!folds || open}>
         <div className="flex min-w-0 flex-col gap-3 px-3 pb-3">
           {folds && <span className={QUIET}>{linesOf(comment.place)}</span>}
-          <p className={cn(PROSE, quiet, struck && 'line-through')}>{comment.text}</p>
+          {writing === 'edit' ? (
+            <CommentBox
+              label={`Edit ${comment.id}`}
+              initial={comment.text}
+              submit="Save"
+              onAdd={(text) => {
+                onEdit(comment.id, text)
+                setWriting(null)
+              }}
+              onCancel={() => setWriting(null)}
+            />
+          ) : (
+            <p className={cn(PROSE, quiet, struck && 'line-through')}>{comment.text}</p>
+          )}
           {comment.outdated !== undefined && (
             <div className="flex max-w-measure min-w-0 flex-col gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {`Written on ${comment.outdated.version}`}
               </span>
-              <pre className={CODE}>{comment.outdated.excerpt.trimEnd()}</pre>
+              {comment.outdated.excerpt.trim() !== '' && (
+                <pre className={CODE}>{comment.outdated.excerpt.trimEnd()}</pre>
+              )}
               <Button
                 variant="link"
                 size="sm"
@@ -243,7 +319,7 @@ export function CommentCard({
           )}
           {(comment.thread ?? []).map((reply) => (
             <div
-              key={`${reply.who}-${reply.at}`}
+              key={`${reply.who}-${reply.text}`}
               className="flex max-w-measure flex-col gap-1 border-l-2 border-border pl-3"
             >
               <span className="text-xs font-medium text-muted-foreground">
@@ -252,12 +328,12 @@ export function CommentCard({
                   : comment.kind === 'question'
                     ? 'The answer'
                     : 'What the agent did'}
-                <span className="font-normal">{` · ${reply.at}`}</span>
+                {reply.at !== undefined && <span className="font-normal">{` · ${reply.at}`}</span>}
               </span>
               <p className={PROSE}>{reply.text}</p>
             </div>
           ))}
-          {comment.team !== undefined && (
+          {comment.team?.url !== undefined && (
             <Button
               variant="link"
               size="sm"
@@ -268,8 +344,20 @@ export function CommentCard({
               {`Open on ${comment.team.forge}`}
             </Button>
           )}
+          {writing === 'follow' && (
+            <CommentBox
+              label={`A follow-up on ${comment.id}`}
+              onAdd={(text) => {
+                onFollowUp(comment.id, text)
+                setWriting(null)
+              }}
+              onCancel={() => setWriting(null)}
+            />
+          )}
         </div>
-        <Actions comment={comment} writable={writable} onAction={onAction} />
+        {writing === null && (
+          <Actions comment={comment} writable={writable} onAction={onAction} onWrite={setWriting} />
+        )}
       </Unfolding>
     </article>
   )
@@ -303,7 +391,7 @@ export interface NewComment {
  * a remark or a question, then the words. Enter adds it (Shift+Enter breaks the line), Escape
  * lets it go; adding sends nothing: it waits for the next round, as on the Review page.
  */
-export function CommentBox({
+export function NewCommentBox({
   place,
   where,
   onAdd,
@@ -316,17 +404,6 @@ export function CommentBox({
   onCancel: () => void
 }): ReactNode {
   const [kind, setKind] = useState<DiffComment['kind']>('remark')
-  const [text, setText] = useState('')
-  const form = useRef<HTMLFormElement>(null)
-  useEffect(() => {
-    form.current?.querySelector('textarea')?.focus({ preventScroll: true })
-  }, [])
-  const add = (): void => {
-    const words = text.trim()
-    if (words === '') return
-    onAdd({ kind, text: words, place })
-  }
-  const label = `${kind === 'question' ? 'A question on' : 'A comment on'} ${where}`
   const growing = useTransition(fold)
   return (
     // It grows from the line it is about, pushing the lines under it rather than jumping them.
@@ -336,39 +413,86 @@ export function CommentBox({
       animate={expand}
       transition={growing}
     >
-      <form
-        ref={form}
-        aria-label={label}
-        className="flex max-w-measure flex-col gap-2 rounded-lg border border-border bg-card p-3 font-sans shadow-sm"
-        onSubmit={(event) => {
+      <CommentBox
+        label={`${kind === 'question' ? 'A question on' : 'A comment on'} ${where}`}
+        kind={kind}
+        onKind={setKind}
+        onAdd={(text) => onAdd({ kind, text, place })}
+        onCancel={onCancel}
+      />
+    </motion.div>
+  )
+}
+
+/**
+ * The words of a comment being written: a new one (with its kind), its words written again, or a
+ * follow-up. Enter adds them, Shift+Enter breaks the line, Escape lets them go.
+ */
+function CommentBox({
+  label,
+  initial = '',
+  submit = 'Add',
+  kind,
+  onKind,
+  onAdd,
+  onCancel,
+}: {
+  /** What is written, which names the field and the form. */
+  label: string
+  initial?: string | undefined
+  /** What the button that sends it says. */
+  submit?: string | undefined
+  /** A new comment's kind, chosen here; absent where the kind is already said. */
+  kind?: DiffComment['kind'] | undefined
+  onKind?: ((kind: DiffComment['kind']) => void) | undefined
+  onAdd: (text: string) => void
+  onCancel: () => void
+}): ReactNode {
+  const [text, setText] = useState(initial)
+  const form = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    form.current?.querySelector('textarea')?.focus({ preventScroll: true })
+  }, [])
+  const add = (): void => {
+    const words = text.trim()
+    if (words === '' || words === initial.trim()) return
+    onAdd(words)
+  }
+  return (
+    <form
+      ref={form}
+      aria-label={label}
+      className="flex max-w-measure flex-col gap-2 rounded-lg border border-border bg-card p-3 font-sans shadow-sm"
+      onSubmit={(event) => {
+        event.preventDefault()
+        add()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
           event.preventDefault()
-          add()
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault()
-            event.stopPropagation()
-            onCancel()
-            return
-          }
-          if (event.key !== 'Enter' || event.shiftKey) return
-          if (!(event.target instanceof HTMLTextAreaElement)) return
-          event.preventDefault()
-          add()
-        }}
-      >
-        <Textarea
-          label={label}
-          rows={2}
-          placeholder={
-            kind === 'question'
-              ? 'What you want to understand. It gets an answer, never a change.'
-              : 'What should change here.'
-          }
-          value={text}
-          onValueChange={setText}
-        />
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          event.stopPropagation()
+          onCancel()
+          return
+        }
+        if (event.key !== 'Enter' || event.shiftKey) return
+        if (!(event.target instanceof HTMLTextAreaElement)) return
+        event.preventDefault()
+        add()
+      }}
+    >
+      <Textarea
+        label={label}
+        rows={2}
+        placeholder={
+          kind === 'question'
+            ? 'What you want to understand. It gets an answer, never a change.'
+            : 'What should change here.'
+        }
+        value={text}
+        onValueChange={setText}
+      />
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {kind !== undefined && onKind !== undefined && (
           <div role="group" aria-label="Kind" className="flex gap-0.5">
             {(['remark', 'question'] as const).map((one) => (
               <Button
@@ -376,29 +500,35 @@ export function CommentBox({
                 variant={kind === one ? 'secondary' : 'ghost'}
                 size="sm"
                 aria-pressed={kind === one}
-                onClick={() => setKind(one)}
+                onClick={() => onKind(one)}
               >
                 {one === 'remark' ? 'Remark' : 'Question'}
               </Button>
             ))}
           </div>
-          <span className="ml-auto flex gap-2">
-            <Button variant="ghost" size="sm" onClick={onCancel}>
-              Cancel
+        )}
+        <span className="ml-auto flex gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          {text.trim() !== '' && text.trim() !== initial.trim() && (
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              aria-label={
+                kind === undefined
+                  ? undefined
+                  : kind === 'question'
+                    ? 'Add the question'
+                    : 'Add the comment'
+              }
+            >
+              {submit}
             </Button>
-            {text.trim() !== '' && (
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                aria-label={kind === 'question' ? 'Add the question' : 'Add the comment'}
-              >
-                Add
-              </Button>
-            )}
-          </span>
-        </div>
-      </form>
-    </motion.div>
+          )}
+        </span>
+      </div>
+    </form>
   )
 }

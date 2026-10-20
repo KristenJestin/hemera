@@ -961,6 +961,10 @@ const pushesHandlers = (profile: StartedProfile, log: Log) => {
       follow(Stream.unwrap(Pushes.useSync((pushes) => pushes.changes(missionId)))).pipe(
         observedStream('delivery.changes', log),
       ),
+    'evidence.setPublishable': ({ evidenceId, publishable }) =>
+      use(Pushes.use((pushes) => pushes.setPublishable(evidenceId, publishable))).pipe(
+        observed('evidence.setPublishable', log),
+      ),
   })
 }
 

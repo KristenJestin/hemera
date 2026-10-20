@@ -171,6 +171,7 @@ export const putEvidence = (asked: EvidencePut) =>
       about,
       ...authorColumnsOf(author),
       addedAt: new Date().toISOString(),
+      publishable: null,
     }
     const event: NewEvent = {
       type: 'memory.evidence_added',

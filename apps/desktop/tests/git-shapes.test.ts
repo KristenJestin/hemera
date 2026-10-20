@@ -479,6 +479,25 @@ describe('The includes of a Git configuration are read as Git reads them (#457)'
   })
 })
 
+/**
+ * Every file's times pinned long ago, as a tool that sets them back leaves them: Linux cannot set a
+ * ctime back, NTFS can set its ChangeTime.
+ */
+const restored: StatOf = (path) => {
+  const real = lstatSync(path, { bigint: true })
+  return {
+    isSymbolicLink: () => real.isSymbolicLink(),
+    isDirectory: () => real.isDirectory(),
+    isFile: () => real.isFile(),
+    size: real.size,
+    ino: real.ino,
+    dev: real.dev,
+    mode: real.mode,
+    mtimeNs: 1n,
+    ctimeNs: 1n,
+  }
+}
+
 describe('What a fingerprint costs (#457)', () => {
   test('it grows with the hooks and the config’s size, not faster: 10,000 hooks and a 1 MiB config', () => {
     const timed = (hooks: number, configBytes: number) => {
@@ -517,22 +536,6 @@ describe('What a fingerprint costs (#457)', () => {
     const config = join(main, '.git', 'config')
     const hook = join(main, '.git', 'hooks', 'pre-commit')
     writeFileSync(hook, '#!/bin/sh\nexit 0\n')
-    // Every file's times pinned long ago, as a tool that sets them back leaves them: Linux cannot
-    // set a ctime back, NTFS can set its ChangeTime.
-    const restored = (path: string) => {
-      const real = lstatSync(path, { bigint: true })
-      return {
-        isSymbolicLink: () => real.isSymbolicLink(),
-        isDirectory: () => real.isDirectory(),
-        isFile: () => real.isFile(),
-        size: real.size,
-        ino: real.ino,
-        dev: real.dev,
-        mode: real.mode,
-        mtimeNs: 1n,
-        ctimeNs: 1n,
-      }
-    }
     const before = shapesOf([main], home, [], restored)
     const text = readFileSync(config, 'utf8')
     // The same size, written in place.
@@ -559,20 +562,22 @@ describe('What a fingerprint costs (#457)', () => {
     expect(paths([main])).toContain(nested)
   }, 30_000)
 
-  test('files unchanged for seconds are trusted on their stat: a second fingerprint of 10,000 hooks is at least three times faster', async () => {
+  test('files unchanged for seconds are trusted on their stat: none of 300 hooks is hashed again', () => {
     const main = repository(join(work, 'acme'))
     const folder = join(main, '.git', 'hooks')
-    for (let at = 0; at < 10_000; at += 1) {
-      writeFileSync(join(folder, `hook-${String(at)}`), `#!/bin/sh\necho ${String(at)}\n`)
+    const hooks = Array.from({ length: 300 }, (_, at) => join(folder, `hook-${String(at)}`))
+    const write = (word: string) => {
+      for (const hook of hooks) writeFileSync(hook, `#!/bin/sh\necho ${word}\n`)
     }
-    await new Promise((resolved) => setTimeout(resolved, 2_500))
-    const timed = () => {
-      const began = performance.now()
-      shapesOf([main], home)
-      return performance.now() - began
-    }
-    const hashed = timed()
-    const trusted = Math.min(timed(), timed())
-    expect(hashed / trusted).toBeGreaterThanOrEqual(3)
-  }, 120_000)
+    write('first')
+    const before = shapesOf([main], home, [], restored)
+    // The same size, rewritten in place, behind a stat that says nothing changed: a hook the
+    // fingerprint reads again shows its new digest, one it trusts on its stat keeps the old.
+    write('other')
+    const after = shapesOf([main], home, [], restored)
+    const hashedAgain = hooks.filter((hook) => after.get(hook)?.digest !== before.get(hook)?.digest)
+    expect(hashedAgain).toEqual([])
+    // Not a fingerprint that saw nothing: the hooks are there, each hashed the first time.
+    expect(hooks.filter((hook) => before.get(hook)?.digest.startsWith('file:'))).toEqual(hooks)
+  })
 })

@@ -22,6 +22,7 @@ import { Rpc, RpcGroup } from 'effect/rpc'
 
 import { ForgeCli, ForgeName } from './forge.ts'
 import { EngineGone } from './gone.ts'
+import { UnknownEvidence } from './memory.ts'
 import { UnknownMission } from './missions.ts'
 import { StaleVersion, StorageFailed } from './profile.ts'
 import { UnknownProject } from './projects.ts'
@@ -208,6 +209,36 @@ export const PushState = Schema.Literals([
 ])
 export type PushState = typeof PushState.Type
 
+/**
+ * Where an image of the mission stands in a repository's pull request (R7): published (its copy's
+ * URL), listed by name (the forge cannot host it, or the user chose the list), not published (the
+ * CLI's message, masked; a Retry sends it), waiting to be sent, or not in the pull request (added
+ * after it opened, whose description is never rewritten for it).
+ */
+export const PushImageState = Schema.Literals([
+  'pending',
+  'published',
+  'listed',
+  'not-published',
+  'not-in-pull-request',
+])
+export type PushImageState = typeof PushImageState.Type
+
+/** An image of a mission and its copy in a repository's pull request (CT-54). */
+export const PushImage = Schema.Struct({
+  evidenceId: Schema.String,
+  /** Its evidence's name, as the list of file names shows it. */
+  name: Schema.String,
+  /** Its feedback's first line, or its name. */
+  alt: Schema.String,
+  state: PushImageState,
+  /** The published copy's address on the forge. */
+  url: Schema.NullOr(Schema.String),
+  /** Why it was not published, verbatim and masked. */
+  message: Schema.NullOr(Schema.String),
+})
+export type PushImage = typeof PushImage.Type
+
 /** One repository of a mission, as its pushes stand. */
 export const RepositoryPush = Schema.Struct({
   repositoryId: Schema.String,
@@ -224,6 +255,10 @@ export const RepositoryPush = Schema.Struct({
   commit: Schema.NullOr(Schema.String),
   pushedAt: Schema.NullOr(Schema.String),
   pullRequest: Schema.NullOr(PullRequestStatus),
+  /** The mission's images and their copies in the pull request, in the order they were added. */
+  images: Schema.Array(PushImage),
+  /** Why the images are listed by name rather than shown, in words; null when they are shown. */
+  imagesReason: Schema.NullOr(Schema.String),
 })
 export type RepositoryPush = typeof RepositoryPush.Type
 
@@ -241,6 +276,15 @@ export class NothingToRetry extends Schema.TaggedError<NothingToRetry>()('Nothin
 }) {
   override get message(): string {
     return `${this.repository} has nothing to retry.`
+  }
+}
+
+/** A mark of publishable on an evidence that is no image: only an image can be published. */
+export class NotPublishable extends Schema.TaggedError<NotPublishable>()('NotPublishable', {
+  evidenceId: Schema.String,
+}) {
+  override get message(): string {
+    return 'Only an image (PNG, JPEG or WebP) can be published.'
   }
 }
 
@@ -263,5 +307,14 @@ export const DeliveryRpcs = RpcGroup.make(
     success: MissionPushes,
     error: failing(...always, UnknownMission, DeliveryRulesUnreadable),
     stream: true,
+  }),
+  /**
+   * The user's mark on an image of a mission's evidence (R7): published in its pull requests, or
+   * not. A feedback image is publishable unless unmarked; any other only once marked.
+   */
+  Rpc.make('evidence.setPublishable', {
+    payload: { evidenceId: Schema.String, publishable: Schema.Boolean },
+    success: Schema.Void,
+    error: failing(...always, UnknownEvidence, NotPublishable),
   }),
 )

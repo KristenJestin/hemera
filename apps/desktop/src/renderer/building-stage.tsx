@@ -1,3 +1,4 @@
+import type { BuildingView, Spec } from '@hemera/ipc'
 import { BuildingPage, ErrorState, TaskView, type Building, type MissionView } from '@hemera/ui'
 import { IconListCheck } from '@hemera/ui/icons'
 import { useState, type ReactNode } from 'react'
@@ -29,6 +30,24 @@ const READING: Building.BuildingMoment = {
 
 /** The id of a task's view over the Building page. */
 export const taskViewId = (taskId: string): string => `task:${taskId}`
+
+/** A task opened over the Building page; its diff link opens the mission's diff (#497). */
+export function taskViewsOf(
+  building: BuildingView,
+  spec: Spec | null,
+  open: (view: string) => void,
+  now: Date,
+): MissionView[] {
+  return building.tasks.map((task) => ({
+    id: taskViewId(task.id),
+    title: `${task.id} · ${task.title}`,
+    icon: <IconListCheck size="sm" />,
+    width: 'narrow',
+    body: (
+      <TaskView detail={taskDetailOf(building, task, spec, now)} onOpenDiff={() => open('diff')} />
+    ),
+  }))
+}
 
 /**
  * The page of a Building mission (#151): the spine of requirements with their tasks and proofs in
@@ -62,16 +81,7 @@ export function BuildingStage({
     }
     void act.service(id, action)
   }
-  const views: MissionView[] =
-    building === null
-      ? []
-      : building.tasks.map((task) => ({
-          id: taskViewId(task.id),
-          title: `${task.id} · ${task.title}`,
-          icon: <IconListCheck size="sm" />,
-          width: 'narrow',
-          body: <TaskView detail={taskDetailOf(building, task, spec, new Date())} />,
-        }))
+  const views = building === null ? [] : taskViewsOf(building, spec, open, new Date())
   const base =
     moment === null && view.error !== undefined ? (
       <div className="px-8 py-6">
@@ -87,6 +97,7 @@ export function BuildingStage({
         loading={moment === null}
         chosenTask={chosen}
         kept={kept}
+        onOpenDiff={() => open('diff')}
         onOpenTask={(id) => {
           setChosen(id)
           open(taskViewId(id))

@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
@@ -10,10 +18,12 @@ import {
   adapterClosure,
   adapterProblems,
   carryAdapters,
+  carryLicence,
   channelAsked,
   channelProblems,
   identityOf,
   inspectPackage,
+  licenceProblems,
   localesProblems,
   packagingOptions,
   refusalFor,
@@ -319,5 +329,53 @@ describe('The bundled adapters are carried outside the asar', () => {
       ]),
     ).toEqual([])
     expect(refusedEntries(['resources/app/node_modules/zod/index.js'])).toHaveLength(1)
+  })
+})
+
+describe('The package carries the licence of Hemera', () => {
+  const licence = readFileSync(join(repository, 'LICENSE'), 'utf8')
+
+  test('the LICENSE of the repository is copied beside the application, where electron-builder reads it', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-licence-'))
+    try {
+      const application = join(folder, 'apps', 'desktop')
+      mkdirSync(application, { recursive: true })
+      writeFileSync(join(folder, 'LICENSE'), licence)
+      carryLicence(folder, application)
+      expect(readFileSync(join(application, 'LICENSE'), 'utf8')).toBe(licence)
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('electron-builder ships it at the root of the package, beside the licence of Electron', () => {
+    const configuration = readFileSync(
+      join(repository, 'apps', 'desktop', 'electron-builder.yml'),
+      'utf8',
+    )
+    expect(configuration).toMatch(/^extraFiles:\n {2}- from: LICENSE\n {4}to: LICENSE$/m)
+  })
+
+  test('a package with no LICENSE of Hemera is reported', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-unpacked-'))
+    try {
+      // Electron's own licence is beside it, under another name: it is not Hemera's.
+      writeFileSync(join(folder, 'LICENSE.electron.txt'), 'The MIT License (MIT)\n')
+      expect(licenceProblems(folder, licence).map((problem) => problem.entry)).toEqual(['LICENSE'])
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  test('a package whose LICENSE is not the one of the repository is reported', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-unpacked-'))
+    try {
+      writeFileSync(join(folder, 'LICENSE'), 'The MIT License (MIT)\n')
+      expect(licenceProblems(folder, licence)[0]?.problem).toContain('not the LICENSE')
+      writeFileSync(join(folder, 'LICENSE'), licence)
+      expect(licenceProblems(folder, licence)).toEqual([])
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
   })
 })
