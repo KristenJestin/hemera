@@ -25,7 +25,7 @@ function repositoryDraft(path: string): RepositoryDraft {
     icon: repository?.icon,
     includedByDefault: repository?.includedByDefault ?? true,
     remote: repository?.remote ?? null,
-    baseBranch: repository?.baseBranch ?? 'main',
+    baseBranch: repository?.baseBranch ?? 'develop',
   }
 }
 
