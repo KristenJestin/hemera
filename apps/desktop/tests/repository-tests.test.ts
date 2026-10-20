@@ -22,7 +22,7 @@ import { openProfile } from '../src/engine/migrate.ts'
 import { createProject, getProject } from '../src/engine/projects.ts'
 import { type ProjectServices, repositoryStatusesLayer } from '../src/engine/repositories.ts'
 import { setTestReporting, testGuessOf } from '../src/engine/repository-tests.ts'
-import { repository } from './repositories.ts'
+import { git, repository } from './repositories.ts'
 import { SHIPPED, on, removeFolders, temporaryFolder } from './storage.ts'
 
 let data: string
@@ -46,6 +46,9 @@ const acme = () => {
   writeFileSync(join(main, 'api', 'pyproject.toml'), '[project]\nname = "api"\n')
   writeFileSync(join(main, 'web', 'vite.config.ts'), 'export default {}\n')
   writeFileSync(join(main, 'shared', 'Makefile'), 'test:\n\t./run-tests\n')
+  // Where their runners write their reports: Git ignores it, so a run never changes the tree.
+  writeFileSync(join(main, 'api', '.gitignore'), 'build/\nreports/\n')
+  writeFileSync(join(main, 'web', '.gitignore'), 'reports/\n')
   return {
     main,
     project: createProject({
@@ -197,6 +200,41 @@ describe('a path outside the repository and an unknown format are refused', () =
       new TestReportingRefused({
         field: 'report',
         reason: 'Hemera reads no JSON report from pytest: choose JUnit XML.',
+      }),
+    )
+  })
+
+  test('a path Git does not ignore is refused: the run would change the repository', async () => {
+    const { refused, after } = await refusedFor('api', {
+      runner: 'pytest',
+      report: { format: 'junit', path: 'junit.xml' },
+    })
+    expect(refused).toEqual(
+      new TestReportingRefused({
+        field: 'path',
+        reason:
+          'Git does not ignore junit.xml in api: add it to .gitignore, or each run changes the repository.',
+      }),
+    )
+    expect(reportingOf(after, 'api')).toBeNull()
+  })
+
+  test('a file Git tracks is refused even when .gitignore names it', async () => {
+    const { refused } = await refusedFor(
+      'api',
+      { runner: 'pytest', report: { format: 'junit', path: 'reports/junit.xml' } },
+      (main) => {
+        mkdirSync(join(main, 'api', 'reports'))
+        writeFileSync(join(main, 'api', 'reports', 'junit.xml'), '<testsuites/>\n')
+        git(join(main, 'api'), 'add', '-f', 'reports/junit.xml')
+        git(join(main, 'api'), 'commit', '-q', '-m', 'a report kept by hand')
+      },
+    )
+    expect(refused).toEqual(
+      new TestReportingRefused({
+        field: 'path',
+        reason:
+          'Git does not ignore reports/junit.xml in api: add it to .gitignore, or each run changes the repository.',
       }),
     )
   })

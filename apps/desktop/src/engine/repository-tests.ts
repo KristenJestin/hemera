@@ -2,8 +2,9 @@
  * A repository's test runner and report in Project settings (#421). The guess is read from the
  * names at the repository's root in the main checkout (`guessedTests`); a value written by hand
  * replaces it, checked on save as the proof run checks it again before reading its report: a
- * format the reader reads from the runner, and a path that stays inside the repository, through
- * every link on its way. A report that does not exist yet is accepted: the run writes it.
+ * format the reader reads from the runner, a path that stays inside the repository, through every
+ * link on its way, and one Git ignores, or each run would change the repository's tree and its
+ * proof never hold. A report that does not exist yet is accepted: the run writes it.
  */
 
 import { lstatSync, readdirSync, realpathSync } from 'node:fs'
@@ -19,6 +20,7 @@ import {
 import type { TestReportingEdit } from '@hemera/ipc'
 import { Effect } from 'effect'
 
+import { Git } from './git.ts'
 import { changeRepository, getRepository, testReportingText } from './projects.ts'
 
 /** The runner the files at a folder's root point to; null when none does, or it does not read. */
@@ -85,6 +87,22 @@ export const setTestReporting = (edit: TestReportingEdit) =>
           return yield* new TestReportingRefused({
             field: 'path',
             reason: `${path} leads outside ${name} through a link: the report must be written inside it.`,
+          })
+        }
+        // A report Git does not ignore changes the tree at each run: the proof would never hold.
+        const ignored = yield* Git.use((git) => git.ignored(folder, path)).pipe(
+          Effect.mapError(
+            (failure) =>
+              new TestReportingRefused({
+                field: 'path',
+                reason: `Git cannot say whether it ignores ${path} in ${name}: ${failure.message}`,
+              }),
+          ),
+        )
+        if (!ignored) {
+          return yield* new TestReportingRefused({
+            field: 'path',
+            reason: `Git does not ignore ${path} in ${name}: add it to .gitignore, or each run changes the repository.`,
           })
         }
         kept = { runner: kept.runner, report: { format: kept.report.format, path } }

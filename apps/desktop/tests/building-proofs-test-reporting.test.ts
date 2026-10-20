@@ -9,9 +9,9 @@
  * in temporary folders as the Workspace, and real `node --test` files as the proofs.
  */
 
-import { mkdirSync, symlinkSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { TestReporting } from '@hemera/core/domain'
+import { DEFAULT_BASE_BRANCH, type TestReporting } from '@hemera/core/domain'
 import { Deferred, Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -19,7 +19,9 @@ import type { BuilderHold } from '../src/engine/building/builder.ts'
 import { readEvidence } from '../src/engine/memory/evidence.ts'
 import { getProject } from '../src/engine/projects.ts'
 import { setTestReporting } from '../src/engine/repository-tests.ts'
-import { PLAN, launched } from './builder-world.ts'
+import { PLAN, builderOf, launched } from './builder-world.ts'
+import { acmeAt } from './building-world.ts'
+import { git } from './repositories.ts'
 import { until, within } from './sessions-world.ts'
 import { removeFolders } from './storage.ts'
 import {
@@ -27,10 +29,12 @@ import {
   EXPORT_TEST,
   apiOf,
   automated,
+  builds,
   data,
   newFolders,
   outsideFolder,
   payloadsOf,
+  proofIn,
   proofOf,
   proofsEngine,
   work,
@@ -56,15 +60,26 @@ const exportBy = (command: string) => () => ({
   }),
 })
 
+/** Acme, its `api` committing a `.gitignore` with these lines on its base, pushed. */
+const acmeIgnoring = (ignored: string) => (at: string) =>
+  acmeAt(at, 'acme', (api) => {
+    writeFileSync(join(api, '.gitignore'), ignored)
+    git(api, 'add', '.gitignore')
+    git(api, 'commit', '-q', '-m', 'ignore the reports')
+    git(api, 'push', '-q', 'origin', DEFAULT_BASE_BRANCH)
+  })
+
 /**
  * The mission launched with `api`'s value set by hand to `reporting` and the export proof run by
- * `command`, `plant` run in the Workspace's `api` right before its red run: the proof once its red
- * is judged, and the evidence of that run.
+ * `command`, its reports ignored by Git, `plant` run in the Workspace's `api` right before its red
+ * run: the proof once its red is judged (or, `to` green, once T2 is built and it turned green), and
+ * the evidence of its first run.
  */
 const ranWith = (
   reporting: TestReporting,
   command: string,
   plant: (api: string) => void = () => {},
+  to: 'red' | 'green' = 'red',
 ) => {
   const reading = Deferred.makeUnsafe<void>()
   const planted = Deferred.makeUnsafe<void>()
@@ -86,7 +101,7 @@ const ranWith = (
             }).pipe(Effect.orDie),
           undefined,
           PLAN,
-          undefined,
+          acmeIgnoring('junit.xml\nreports/\n'),
           undefined,
           exportBy(command),
         )
@@ -99,6 +114,11 @@ const ranWith = (
           return recorded.length + invalid.length > 0
         })
         yield* until(judged, 20_000)
+        if (to === 'green') {
+          const { grantId } = yield* builderOf(mission.id)
+          yield* builds(grantId, 'T2', [['export.ts', 'export const toMarkdown = () => ""\n']])
+          yield* proofIn(mission.id, 'R1.S2', 'green')
+        }
         const proof = yield* proofOf(mission.id, 'R1.S2')
         const evidence = yield* readEvidence(mission.id, proof.runs[0]?.evidenceId ?? '')
         return { proof, evidence: new TextDecoder().decode(evidence.bytes) }
@@ -137,6 +157,21 @@ describe('the proof run uses the custom value', () => {
       ownReportLine('reports/junit.xml'),
       // A junction on Windows, which needs no privilege; a directory link elsewhere.
       (api) => symlinkSync(outside, join(api, 'reports'), 'junction'),
+    )
+    expect(seen.proof.state).toBe('waiting_red')
+    expect(seen.proof.runs.map((one) => one.classification)).toEqual(['assertion_failed'])
+  })
+
+  test('a report Git ignores lets the proof turn green once its tasks are built', async () => {
+    const seen = await ranWith(JUNIT_AT_ROOT, ownReportLine('junit.xml'), () => {}, 'green')
+    expect(seen.proof.state).toBe('green')
+    expect(seen.proof.green).toMatchObject({ phase: 'green', classification: 'passed' })
+  })
+
+  test('a report Git does not ignore in the Workspace is not read: the uncertain path', async () => {
+    // The Workspace's own rules no longer ignore the report: writing it would change the tree.
+    const seen = await ranWith(JUNIT_AT_ROOT, ownReportLine('junit.xml'), (api) =>
+      writeFileSync(join(api, '.gitignore'), ''),
     )
     expect(seen.proof.state).toBe('waiting_red')
     expect(seen.proof.runs.map((one) => one.classification)).toEqual(['assertion_failed'])

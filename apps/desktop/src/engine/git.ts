@@ -431,6 +431,11 @@ export interface GitService {
   readonly dirtyFiles: (folder: string) => Effect.Effect<ReadonlyArray<DirtyFile>, GitRefusal>
   /** Whether a file is modified, added or untracked in its repository; false outside one. */
   readonly fileChanged: (path: string) => Effect.Effect<boolean, GitRefusal>
+  /**
+   * Whether Git ignores a path of a checkout, there or not (#421): a file it tracks is not ignored,
+   * whatever `.gitignore` says, since writing it changes the tree.
+   */
+  readonly ignored: (folder: string, path: string) => Effect.Effect<boolean, GitRefusal>
   /** How many commits HEAD has that `base` has not, and the other way round. */
   readonly aheadBehind: (folder: string, base: string) => Effect.Effect<AheadBehind, GitRefusal>
   /** Whether a path is committed at a commit; the working tree is never read. */
@@ -897,6 +902,14 @@ export const gitLayer = (run: GitSpawn = spawnGit(SYSTEM_GIT)): Layer.Layer<Git>
       ).pipe(
         Effect.map((printed) => printed !== ''),
         Effect.catchTag('GitFailed', () => Effect.succeed(false)),
+      ),
+    ignored: (folder, path) =>
+      run(folder, ['check-ignore', '-q', '--', path], 'read').pipe(
+        Effect.as(true),
+        // Not ignored is its exit 1, said with nothing on stderr; a failure says why.
+        Effect.catchTag('GitFailed', (failure) =>
+          failure.stderr.trim() === '' ? Effect.succeed(false) : Effect.fail(failure),
+        ),
       ),
     aheadBehind: (folder, base) =>
       run(

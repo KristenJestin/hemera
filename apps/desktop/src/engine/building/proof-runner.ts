@@ -40,6 +40,7 @@ import { eq } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Layer, Option, Result } from 'effect'
 
 import { getCommand } from '../catalogue.ts'
+import { Git } from '../git.ts'
 import { putEvidence } from '../memory/evidence.ts'
 import { type RunAsked, awaitRun, runOutput, startRun, stopRun } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
@@ -118,6 +119,9 @@ export interface ProofRun extends ProofRunClass {
 
 /** A report beside an output whose start was dropped: not read. */
 const CUT: ReportFound = { kind: 'unreadable', reason: 'its output was cut' }
+
+/** A report set in Project settings that the Workspace's Git does not ignore (#421): not read. */
+const NOT_IGNORED: ReportFound = { kind: 'unreadable', reason: 'Git does not ignore it' }
 
 /** The proof's command: what runs its test, or the command with no test file. */
 export const proofCommand = (proof: Proof): string => proof.test?.command ?? proof.command ?? ''
@@ -299,7 +303,16 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
     }
     // The report names the run's tests only beside the runner's whole listing: an output whose
     // start was dropped could have lost the runner's own line of a test.
-    const found = dropped > 0 ? CUT : readReport()
+    // A report set in Project settings is read only while the Workspace's Git ignores it: one
+    // that is not would have changed the tree the run is recorded on (#421).
+    const inRepository = asking?.repository
+    const ignored =
+      inRepository === undefined || base === null
+        ? true
+        : yield* Git.use((git) => git.ignored(base.folder, inRepository.path)).pipe(
+            Effect.orElseSucceed(() => false),
+          )
+    const found = dropped > 0 ? CUT : ignored ? readReport() : NOT_IGNORED
     const report =
       asking === null || found === null
         ? null
