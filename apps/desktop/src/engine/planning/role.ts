@@ -26,6 +26,7 @@ import { specIn, visionsOf } from './store.ts'
 import { missionTicket } from '../tickets/link.ts'
 import { ticketText, unreadTicketText } from '../tickets/text.ts'
 import { ROUND_PARAGRAPH } from '../review/round-role.ts'
+import { TEAM_COMMENT_PARAGRAPH } from '../review/team-comment-role.ts'
 
 /** The Planner's layer of the instructions, as the ticket writes it. */
 export const PLANNER_TEMPLATE = `# Role: Planner
@@ -193,6 +194,8 @@ would be wrong or incomplete against it. Then end your turn.
   user's choice.
 
 ${ROUND_PARAGRAPH}
+
+${TEAM_COMMENT_PARAGRAPH}
 
 ## Returns / when you stop
 End your turn when nothing is left that does not wait on someone (say on what with \`now_set\`).

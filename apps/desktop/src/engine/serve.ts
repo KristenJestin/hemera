@@ -25,6 +25,7 @@ import {
   SetupEditRefused,
   SetupRefused,
   ShipRpcs,
+  TeamCommentsRpcs,
   TesterFolderUnreadable,
 } from '@hemera/ipc'
 import { Layer, Stream, SubscriptionRef } from 'effect'
@@ -45,6 +46,7 @@ import { Diffs } from './review/diffs.ts'
 import { Review, type ReviewService } from './review/feedback.ts'
 import { Pushes } from './delivery/pushes.ts'
 import { Ship } from './review/ship.ts'
+import { TeamComments } from './review/team-comments.ts'
 import { Rounds } from './review/rounds.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
@@ -900,6 +902,8 @@ export const engineHandlers = (
           ['diffs', use(Diffs.use((diffs) => diffs.focused))],
           // The forge CLIs not ready are checked again when the window regains the focus (#253).
           ['forge', use(ForgePort.use((forge) => forge.focused))],
+          // The team's comments are read again at the focus (R8).
+          ['team comments', use(TeamComments.use((team) => team.focused))],
         ],
         log,
       ).pipe(observed('mission.focused', log)),
@@ -923,7 +927,42 @@ export const engineHandlers = (
     reviewHandlers(profile, log),
     pushesHandlers(profile, log),
     shipHandlers(profile, log),
+    teamCommentsHandlers(profile, log),
   )
+}
+
+/**
+ * The team's comments from the forge (R8), a layer of their own (see `EngineServedRpcs`): asked by
+ * the window alone. No agent's tool reaches them, and none writes on the forge.
+ */
+const teamCommentsHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return TeamCommentsRpcs.toLayer({
+    'teamComments.list': ({ missionId }) =>
+      use(TeamComments.use((team) => team.list(missionId))).pipe(
+        observed('teamComments.list', log),
+      ),
+    'teamComments.take': ({ commentId, myTake }) =>
+      use(TeamComments.use((team) => team.take(commentId, myTake))).pipe(
+        observed('teamComments.take', log),
+      ),
+    'teamComments.addToRound': ({ commentId }) =>
+      use(TeamComments.use((team) => team.addToRound(commentId))).pipe(
+        observed('teamComments.addToRound', log),
+      ),
+    'teamComments.dismiss': ({ commentId }) =>
+      use(TeamComments.use((team) => team.dismiss(commentId))).pipe(
+        observed('teamComments.dismiss', log),
+      ),
+    'teamComments.startMissionFrom': ({ commentId }) =>
+      use(TeamComments.use((team) => team.startMissionFrom(commentId))).pipe(
+        observed('teamComments.startMissionFrom', log),
+      ),
+    'teamComments.changes': ({ missionId }) =>
+      follow(Stream.unwrap(TeamComments.useSync((team) => team.changes(missionId)))).pipe(
+        observedStream('teamComments.changes', log),
+      ),
+  })
 }
 
 /**

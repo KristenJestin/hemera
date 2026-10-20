@@ -203,6 +203,16 @@ const tellOf = (row: EventRow): Effect.Effect<Option.Option<Told>, DatabaseError
         }),
       )
     }
+    case 'team_comment.received':
+      return Effect.succeed(
+        payload['mine'] === false
+          ? Option.some<Told>({
+              subject: asMission(row),
+              tone: 'ticket',
+              text: `A team comment by ${textOf(payload, 'author') ?? 'someone'} on the pull request of ${textOf(payload, 'repository') ?? 'a repository'}`,
+            })
+          : Option.none(),
+      )
     case 'need.created':
       return failedNeed(row)
     default:
@@ -227,6 +237,7 @@ const TOLD_TYPES = [
   'tickets.provider_unreachable',
   'livingSpec.bootstrap_finished',
   'need.created',
+  'team_comment.received',
 ] as const
 
 const isTold = (type: string): boolean => TOLD_TYPES.some((one) => one === type)
@@ -253,6 +264,8 @@ const toldInStorage = or(
     eq(domainEvents.type, 'livingSpec.bootstrap_finished'),
     sql`${field('$.state')} in ('done', 'failed')`,
   ),
+  // Someone else's comment on a pull request (R8); mine is my own feedback, never told back.
+  and(eq(domainEvents.type, 'team_comment.received'), sql`${field('$.mine')} = 0`),
   and(
     eq(domainEvents.type, 'need.created'),
     sql`exists (select 1 from ${needs} where ${needs.id} = ${domainEvents.entityId} and ${needs.kind} = 'Error')`,

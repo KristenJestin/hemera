@@ -3514,3 +3514,130 @@ export const missionShips = sqliteTable('mission_ships', {
   shippedAt: text('shipped_at').notNull(),
   deliveredAt: text('delivered_at'),
 })
+
+/**
+ * A comment of a mission's pull request read from its forge (R8, CT-45), one row per comment: its
+ * identity (forge, host, the pull request's repository `owner/repo`, its number, the comment's
+ * id), the Workspace repository it is of, its kind (`inline`, `general`, `review` with the
+ * review's verdict), its thread, its author and whether that was the signed-in account at the
+ * fetch, its current body (masked) and version with what changes on an edit (`revision`), the
+ * forge's dates and link, where it points (path, side, lines, the commit it was made on and that
+ * commit's tree when Hemera pushed it, with the anchored side's content and the lines'
+ * fingerprint, as #341 keeps a comment's anchor), the forge's state (resolved, removed) apart from
+ * the internal one (`received`, `feedback`, `dismissed`), the stage it arrived in, the agent's
+ * reading and reply draft (internal, masked), the user's take, the feedback it became with the
+ * version taken in, and the drafting run it was given to.
+ */
+export const teamComments = sqliteTable(
+  'team_comments',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    repository: text('repository').notNull(),
+    forge: text('forge').notNull(),
+    host: text('host').notNull(),
+    slug: text('slug').notNull(),
+    number: integer('number').notNull(),
+    commentId: text('comment_id').notNull(),
+    kind: text('kind').notNull(),
+    review: text('review'),
+    thread: text('thread'),
+    author: text('author').notNull(),
+    mine: integer('mine', { mode: 'boolean' }).notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    version: integer('version').notNull(),
+    revision: text('revision').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    url: text('url'),
+    anchorPath: text('anchor_path'),
+    anchorSide: text('anchor_side'),
+    anchorStart: integer('anchor_start'),
+    anchorEnd: integer('anchor_end'),
+    anchorCommit: text('anchor_commit'),
+    anchorTree: text('anchor_tree'),
+    anchorFingerprint: text('anchor_fingerprint'),
+    anchorSha256: text('anchor_sha256'),
+    anchorSize: integer('anchor_size'),
+    anchorWithheld: text('anchor_withheld'),
+    forgeResolved: integer('forge_resolved', { mode: 'boolean' }).notNull(),
+    removedOnForge: integer('removed_on_forge', { mode: 'boolean' }).notNull(),
+    state: text('state').notNull(),
+    arrivedIn: text('arrived_in').notNull(),
+    reading: text('reading').$type<Masked<string>>(),
+    reply: text('reply').$type<Masked<string>>(),
+    myTake: text('my_take').$type<Masked<string>>(),
+    feedbackId: text('feedback_id'),
+    integratedVersion: integer('integrated_version'),
+    runId: text('run_id'),
+    receivedAt: text('received_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('team_comment_identity').on(
+      table.missionId,
+      table.forge,
+      table.host,
+      table.slug,
+      table.number,
+      table.commentId,
+    ),
+    index('team_comments_of_run').on(table.runId),
+  ],
+)
+
+/** Every version of a team comment's body (R8, CT-45), the first included: an edit keeps the old one. */
+export const teamCommentVersions = sqliteTable(
+  'team_comment_versions',
+  {
+    commentId: text('comment_id')
+      .notNull()
+      .references(() => teamComments.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    body: text('body').$type<Masked<string>>().notNull(),
+    writtenAt: text('written_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.commentId, table.version] })],
+)
+
+/**
+ * Each commit Hemera pushed for a mission's repository (R8), with the tree it was pushed with, from
+ * the pushes (R6): what a forge's inline comment made on that commit is anchored on.
+ */
+export const teamCommentPushes = sqliteTable(
+  'team_comment_pushes',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    commit: text('commit').notNull(),
+    tree: text('tree').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repository, table.commit] })],
+)
+
+/**
+ * A short session of the Planner in team-comment mode (R8), one per fetch that brought new comments
+ * from someone else: its lineage and where it stands (`waiting_for_slot`, `running`, `done`,
+ * `failed`), as a ticket-event run does.
+ */
+export const teamCommentRuns = sqliteTable(
+  'team_comment_runs',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    lineage: text('lineage').notNull(),
+    state: text('state').notNull(),
+    reminded: integer('reminded', { mode: 'boolean' }).notNull(),
+    failure: text('failure').$type<Masked<string>>(),
+    askedAt: text('asked_at').notNull(),
+    startedAt: text('started_at'),
+    endedAt: text('ended_at'),
+  },
+  (table) => [uniqueIndex('team_comment_run_of_lineage').on(table.lineage)],
+)

@@ -56,6 +56,12 @@ import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
 import { roundDeskLayer } from './review/round-desk.ts'
+import { teamCommentDeskLayer } from './review/team-comment-desk.ts'
+import {
+  type TeamComments,
+  type TeamCommentsParts,
+  teamCommentsLayer,
+} from './review/team-comments.ts'
 import { ROUND_NEEDS, type Rounds, roundNeeds, roundsLayer } from './review/rounds.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
@@ -312,6 +318,8 @@ export interface ProfileParts {
     | undefined
   /** Where a suite holds a Ship (R9): never held otherwise. */
   readonly ship?: { readonly hold?: ShipHold | undefined } | undefined
+  /** How often the team's comments are read (R8): every 5 minutes otherwise. */
+  readonly teamComments?: TeamCommentsParts | undefined
   /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
   readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
@@ -445,6 +453,7 @@ export type EngineServices =
   | Pushes
   | Rounds
   | Ship
+  | TeamComments
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -571,6 +580,8 @@ export const startProfile = (
     const reviewContext = yield* Layer.build(reviewDeskLayer)
     // Where the gate reaches a Review round's tools, served by the rounds (#468).
     const roundContext = yield* Layer.build(roundDeskLayer)
+    // Where the gate reaches the team comments' draft, served by the team comments (R8).
+    const teamCommentContext = yield* Layer.build(teamCommentDeskLayer)
     // The database as a suite sees it, wrapped around the real one (#341): one connection either way.
     const realDatabase = databaseLayer(file)
     const wrapDatabase = parts.database
@@ -601,6 +612,7 @@ export const startProfile = (
       Layer.succeedContext(docsContext),
       Layer.succeedContext(reviewContext),
       Layer.succeedContext(roundContext),
+      Layer.succeedContext(teamCommentContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask, guard.spawn)),
@@ -824,8 +836,12 @@ export const startProfile = (
       outside,
       checkpoints,
       diffs,
-      // The rounds over Review's feedback (#468), which the window reaches too.
-      roundsLayer({ log, fixed: parts.review?.fixed }).pipe(
+      // The rounds over Review's feedback (#468), which the window reaches too, and the team's
+      // comments from the forge (R8), which become feedback through the user.
+      Layer.mergeAll(
+        roundsLayer({ log, fixed: parts.review?.fixed }),
+        teamCommentsLayer({ log, every: parts.teamComments?.every }),
+      ).pipe(
         Layer.provideMerge(
           reviewLayer({ log, hold: parts.review?.hold }).pipe(
             Layer.provide(Layer.mergeAll(diffs, checkpoints, outside)),

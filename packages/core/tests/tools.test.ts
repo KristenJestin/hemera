@@ -296,11 +296,12 @@ describe('Each role has exactly its tools', () => {
         'spec_read',
       ],
     ],
+    ['team-comment', ['fs_list', 'fs_read', 'search', 'spec_read', 'team_comment_draft']],
   ])('%s', (role, tools) => {
     expect(toolsFor(role)).toEqual(tools)
   })
 
-  test('every role has a place, and the read-only ones are the Planner, the cold read, the ticket-event and pre-launch Planners, the reviewers, the setup agent, the living spec agent and the Planner in round mode', () => {
+  test('every role has a place, and the read-only ones are the Planner, the cold read, the ticket-event and pre-launch Planners, the reviewers, the setup agent, the living spec agent, the Planner in round mode and in team-comment mode', () => {
     expect(ROLES.filter((role) => ROLE_PLACES[role].readOnly)).toEqual([
       'planner',
       'cold-read',
@@ -311,8 +312,10 @@ describe('Each role has exactly its tools', () => {
       'setup',
       'living-spec',
       'round-planner',
+      'team-comment',
     ])
     expect(ROLE_PLACES['round-planner'].kind).toBe('workspace')
+    expect(ROLE_PLACES['team-comment'].kind).toBe('workspace')
     expect(ROLE_PLACES['living-spec'].kind).toBe('main-checkout')
     expect(ROLE_PLACES.planner.kind).toBe('main-checkout')
     expect(ROLE_PLACES.probe.kind).toBe('own-worktree')

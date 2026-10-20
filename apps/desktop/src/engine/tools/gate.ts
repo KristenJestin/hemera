@@ -107,6 +107,7 @@ import { STOPPED_AT_THE_END } from '../building/helper-store.ts'
 import { DocsDesk } from '../building/docs-desk.ts'
 import { ReviewDesk } from '../building/review-desk.ts'
 import { RoundDesk } from '../review/round-desk.ts'
+import { TeamCommentDesk } from '../review/team-comment-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -229,6 +230,7 @@ export type GateServices =
   | DocsDesk
   | ReviewDesk
   | RoundDesk
+  | TeamCommentDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -524,6 +526,8 @@ const decodeCall = (
       return decoder(tool, TOOLS.round_ready.input)(raw)
     case 'feedback_answer':
       return decoder(tool, TOOLS.feedback_answer.input)(raw)
+    case 'team_comment_draft':
+      return decoder(tool, TOOLS.team_comment_draft.input)(raw)
   }
 }
 
@@ -1082,6 +1086,8 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* RoundDesk.use((desk) => desk.ready(grant, call.args))
             case 'feedback_answer':
               return yield* RoundDesk.use((desk) => desk.answer(grant, call.args))
+            case 'team_comment_draft':
+              return yield* TeamCommentDesk.use((desk) => desk.draft(grant, call.args))
           }
         })
 
