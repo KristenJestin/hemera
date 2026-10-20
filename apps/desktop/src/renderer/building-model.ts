@@ -511,6 +511,20 @@ function requirementsOf(read: BuildingRead, now: Date): Building.Requirement[] {
   }))
 }
 
+/**
+ * A round's points (R2), each with the tasks it became. `building.read` names a point by its id
+ * only: its title is the round's own read, which does not cross to the window yet (R10).
+ */
+function pointsOf(building: BuildingView): Building.RoundPoint[] | undefined {
+  if (building.round === null) return undefined
+  const tasks = building.tasks.filter((one) => one.origin === 'round')
+  return building.round.points.map((id) => ({
+    id,
+    title: '',
+    tasks: tasks.filter((one) => one.requirements.includes(id)).map((one) => taskOf(building, one)),
+  }))
+}
+
 /** The phases of a Building in their order, and the engine's phases each one covers. */
 const PHASES = [
   { id: 'tasks', title: 'Tasks', covers: ['tasks'] },
@@ -774,7 +788,9 @@ export function buildingMomentOf(read: BuildingRead, now: Date): Building.Buildi
     needs: [],
     mission: missionThingsOf(read.things, now),
   }
-  const withNext = next === undefined ? moment : { ...moment, next }
+  const points = pointsOf(building)
+  const withPoints = points === undefined ? moment : { ...moment, points }
+  const withNext = next === undefined ? withPoints : { ...withPoints, next }
   return outside === undefined ? withNext : { ...withNext, outside }
 }
 

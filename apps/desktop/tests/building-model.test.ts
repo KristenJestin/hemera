@@ -1044,6 +1044,32 @@ describe('The Building page in its own words', () => {
     expect(moment.round).toBe(2)
   })
 
+  test('the round’s points, each with the tasks it became', () => {
+    const moment = buildingMomentOf(
+      reading({
+        building: building({
+          label: 'Building · round 2',
+          round: { number: 2, points: ['R2.1', 'R2.2'] },
+          tasks: [
+            task({ id: 'T1', requirements: ['R1'] }),
+            task({ id: 'T5', origin: 'round', requirements: ['R2.1'], state: 'in_progress' }),
+            task({ id: 'T6', origin: 'round', requirements: ['R2.2'] }),
+            task({ id: 'T7', origin: 'round', requirements: ['R2.1', 'R2.2'] }),
+          ],
+        }),
+      }),
+      NOW,
+    )
+    expect(moment.points?.map((point) => [point.id, point.tasks.map((one) => one.id)])).toEqual([
+      ['R2.1', ['T5', 'T7']],
+      ['R2.2', ['T6', 'T7']],
+    ])
+  })
+
+  test('no points on a Building that is not a round', () => {
+    expect(buildingMomentOf(reading(), NOW).points).toBeUndefined()
+  })
+
   test('the Workspace and its branch', () => {
     const moment = buildingMomentOf(reading(), NOW)
     expect(moment.workspace).toBe('acme-12')
