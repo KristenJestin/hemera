@@ -506,7 +506,12 @@ export function DiffStage({
         notes.map((note) =>
           note.metadata.kind === 'draft'
             ? ['draft', note.side, note.lineNumber]
-            : note.metadata.comments.map((one) => [one.id, one.state, one.text, lit === one.id]),
+            : [
+                note.side,
+                note.lineNumber,
+                // The whole comment: an answer or a follow-up moves it as much as its state does.
+                note.metadata.comments.map((one) => [one, lit === one.id]),
+              ],
         ),
         open,
         writable,

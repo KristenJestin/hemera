@@ -150,7 +150,6 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
             props.onFollowUp(id, text)
             change(id, (one) => ({
               ...one,
-              state: 'waiting',
               thread: [...(one.thread ?? []), { who: 'you', text, at: 'now' }],
             }))
           }}
