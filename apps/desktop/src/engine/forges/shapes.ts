@@ -102,6 +102,23 @@ const NAME = String.raw`(?!-)(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
 export const REPO_NAME = new RegExp(`^${NAME}$`)
 /** A repository read through gh's API: its visibility and the account's permissions (R7). */
 const REPO_PATH = new RegExp(String.raw`^repos/${NAME}/${NAME}$`)
+/** The lists of a pull request's comments and reviews, read through gh's REST API (R8). */
+const COMMENTS_PATH = new RegExp(
+  String.raw`^repos/${NAME}/${NAME}/(pulls/\d+/comments|issues/\d+/comments|pulls/\d+/reviews)$`,
+)
+/**
+ * The one GraphQL query Hemera sends (R8): a pull request's review threads, each resolved or not,
+ * with the ids of its comments. A query, never a mutation; on one line, which `cmd.exe` would cut
+ * at its first newline.
+ */
+export const THREADS_QUERY =
+  'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { databaseId } } } } } } }'
+/** The query given whole and nothing else: `query=` and its exact text. */
+const ONLY_THREADS_QUERY = new RegExp(
+  `^query=${THREADS_QUERY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+)
+/** A variable of that query: the repository's owner and name, the pull request's number. */
+const THREADS_VARIABLE = new RegExp(String.raw`^(owner=${NAME}|name=${NAME}|number=\d+)$`)
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
@@ -173,6 +190,39 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     'read',
     'pr.view',
     ['pr', 'view', '<number>'],
+    [...BKT_PLACE, ['--json', switchFlag(true)]],
+    [NUMBER],
+  ),
+  // The comments of a pull request, inline and general, and its reviews (R8): read only, in
+  // pages. Hemera never posts, edits, reacts to or resolves anything on a forge.
+  shape(
+    'gh',
+    'read',
+    'comments.list',
+    ['api', '--hostname', '<host>', '<path>'],
+    [
+      ['--paginate', switchFlag(true)],
+      ['--slurp', switchFlag(true)],
+    ],
+    [['<path>', COMMENTS_PATH]],
+  ),
+  shape(
+    'gh',
+    'read',
+    'comments.threads',
+    ['api', '--hostname', '<host>', 'graphql'],
+    [
+      ['-f', valueFlag(true, ONLY_THREADS_QUERY)],
+      ['-F', { value: true, pattern: THREADS_VARIABLE, required: true, repeat: true }],
+    ],
+  ),
+  // bkt's own list of a pull request's comments, as read in its source at `5068ddc`: Cloud's API
+  // comments, or Data Center's from the pull request's activities. To confirm on a real forge.
+  shape(
+    'bkt',
+    'read',
+    'comments.list',
+    ['pr', 'comments', '<number>'],
     [...BKT_PLACE, ['--json', switchFlag(true)]],
     [NUMBER],
   ),
