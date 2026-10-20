@@ -15,7 +15,9 @@
  * A submodule's own Git folder is read as the repository's (#470): each one under the common
  * folder's `modules/`, nested ones under theirs, and each one a checkout's `.git` leads to, for every
  * submodule its index names (its gitlinks), as `git status` walks into them. Its checkout is where
- * its hooks run from.
+ * its hooks run from. An index that cannot be read for them (a link, not a file, past `INDEX_CAP`,
+ * locked, cut, of a version not known) is never taken as naming none: it stands in the fingerprint
+ * at its path, by its reason (#474), so the guard asks about it.
  *
  * Every file is read on the engine's own behalf (`readOwnSync`): never a link as its last name,
  * never waiting on a pipe, never more than `SHAPE_CAP`; a hooks folder is walked to `WALKED`
@@ -39,7 +41,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 import { Result } from 'effect'
 
-import { readOwnSync } from './tools/judged.ts'
+import { NotJudged, readOwnSync } from './tools/judged.ts'
 
 /** The most of one file that is read and hashed: past it, its size and times stand for it. */
 export const SHAPE_CAP = 8 * 1024 * 1024
@@ -50,8 +52,11 @@ const TEXT_KEPT = 64 * 1024
 /** The most entries walked under one hooks folder: past it, the folder stands as one, too large. */
 const WALKED = 20_000
 
-/** The most of an index that is read for its submodules: past it, they are not looked for. */
+/** The most of an index that is read for its submodules: past it, the index is said unread. */
 const INDEX_CAP = 64 * 1024 * 1024
+
+/** The digest of an index that could not be read for its submodules, before its reason. */
+const UNREAD_INDEX = 'index:unread:'
 
 /** How deep includes are followed: Git's own limit (`MAX_INCLUDE_DEPTH`). */
 const INCLUDE_DEPTH = 10
@@ -154,7 +159,7 @@ const indexed = new Map<
   {
     readonly stat: string
     readonly settled: boolean
-    readonly gitlinks: ReadonlyArray<string>
+    readonly read: Gitlinks
   }
 >()
 
@@ -298,15 +303,18 @@ interface IndexRead {
   readonly shared: string | null
 }
 
+/** The submodules a Git folder's index names, or why it could not be read for them. */
+type Gitlinks = Result.Result<ReadonlyArray<string>, string>
+
 /**
  * The paths of the submodules an index names (its gitlinks), in its versions 2 to 4, and the shared
- * index a split index builds on. An index Git would refuse names none: Git walks into none.
+ * index a split index builds on; null for an index it cannot parse (cut, another version), which is
+ * never taken as naming none.
  */
-function indexOf(bytes: Buffer, hash: number): IndexRead {
-  const none: IndexRead = { gitlinks: [], shared: null }
-  if (bytes.length < 12 || bytes.toString('latin1', 0, 4) !== 'DIRC') return none
+function indexOf(bytes: Buffer, hash: number): IndexRead | null {
+  if (bytes.length < 12 || bytes.toString('latin1', 0, 4) !== 'DIRC') return null
   const version = bytes.readUInt32BE(4)
-  if (version < 2 || version > 4) return none
+  if (version < 2 || version > 4) return null
   const gitlinks: string[] = []
   let at = 12
   let previous: Buffer<ArrayBufferLike> = Buffer.alloc(0)
@@ -328,12 +336,12 @@ function indexOf(bytes: Buffer, hash: number): IndexRead {
           cut = ((cut + 1) << 7) + (byte & 127)
         }
         const end = bytes.indexOf(0, at)
-        if (end < 0 || cut > previous.length) return none
+        if (end < 0 || cut > previous.length) return null
         name = Buffer.concat([previous.subarray(0, previous.length - cut), bytes.subarray(at, end)])
         at = end + 1
       } else {
         const end = bytes.indexOf(0, at)
-        if (end < 0) return none
+        if (end < 0) return null
         name = bytes.subarray(at, end)
         at = start + ((at - start + name.length + 8) & ~7)
       }
@@ -349,44 +357,81 @@ function indexOf(bytes: Buffer, hash: number): IndexRead {
     }
     return { gitlinks, shared: shared === null || /^0+$/.test(shared) ? null : shared }
   } catch {
-    // An entry past the end: the index is cut, and Git would refuse it.
-    return none
+    // An entry past the end: the index is cut.
+    return null
   }
 }
 
 /**
- * The submodules the index of a Git folder names, and its shared index's, if a split index; read
- * again only once the index's stat changed, as a hooks folder's files are.
+ * The submodules the index of a Git folder names, and its shared index's, if a split index, or why
+ * it could not be read for them (a link, not a file, past `INDEX_CAP`, an error, not parsed); read
+ * again only once the index's stat changed, as a hooks folder's files are. A Git folder with no
+ * index names none, as Git reads it.
  */
-function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): ReadonlyArray<string> {
+function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): Gitlinks {
   const path = join(gitDir, 'index')
   let named: ShapeStat
   try {
     named = statOf(path)
-  } catch {
-    return []
+  } catch (cause) {
+    if (codeOf(cause) === 'ENOENT' || codeOf(cause) === 'ENOTDIR') return Result.succeed([])
+    return Result.fail(`it could not be read (${codeOf(cause)})`)
   }
   const stat = statKey(named)
   const known = indexed.get(path)
-  if (known !== undefined && known.settled && known.stat === stat) return known.gitlinks
+  if (known !== undefined && known.settled && known.stat === stat) return known.read
   const settled = settledOf(named)
-  const own = indexIn(path, hash)
-  const shared =
-    own.shared === null ? [] : indexIn(join(gitDir, `sharedindex.${own.shared}`), hash).gitlinks
-  const gitlinks = [...own.gitlinks, ...shared]
+  const read = readGitlinks(gitDir, path, named, hash)
   if (indexed.size >= REMEMBERED) indexed.clear()
-  indexed.set(path, { stat, settled, gitlinks })
-  return gitlinks
+  indexed.set(path, { stat, settled, read })
+  return read
 }
 
-/** An index file read on the engine's own behalf, or none where it cannot be. */
-function indexIn(path: string, hash: number): IndexRead {
-  try {
-    return indexOf(readOwnSync(path, INDEX_CAP).bytes, hash)
-  } catch {
-    return { gitlinks: [], shared: null }
+/** What an index of this stat names, its shared part's included, or why it could not be read. */
+function readGitlinks(gitDir: string, path: string, named: ShapeStat, hash: number): Gitlinks {
+  if (named.isSymbolicLink()) return Result.fail('it is a link, never followed')
+  if (!named.isFile()) return Result.fail('it is not a regular file, never opened')
+  if (named.size > BigInt(INDEX_CAP)) {
+    return Result.fail(`it is larger than ${String(INDEX_CAP / 1024 / 1024)} MiB`)
   }
+  const own = indexIn(path, hash)
+  if (Result.isFailure(own)) return Result.fail(own.failure)
+  if (own.success.shared === null) return Result.succeed(own.success.gitlinks)
+  const shared = indexIn(join(gitDir, `sharedindex.${own.success.shared}`), hash)
+  if (Result.isFailure(shared))
+    return Result.fail(`its shared part (a split index): ${shared.failure}`)
+  return Result.succeed([...own.success.gitlinks, ...shared.success.gitlinks])
 }
+
+/** An index file read on the engine's own behalf and parsed, or why it was not. */
+function indexIn(path: string, hash: number): Result.Result<IndexRead, string> {
+  let bytes: Buffer
+  try {
+    bytes = readOwnSync(path, INDEX_CAP).bytes
+  } catch (cause) {
+    return Result.fail(
+      `it could not be read (${cause instanceof NotJudged ? cause.message : codeOf(cause)})`,
+    )
+  }
+  const read = indexOf(bytes, hash)
+  return read === null
+    ? Result.fail('it is cut, or of a version or a format Hemera does not know')
+    : Result.succeed(read)
+}
+
+/**
+ * An index that could not be read for its submodules, as the fingerprint says it: by its reason
+ * only, so it is asked about once, and with words for the question.
+ */
+const unreadIndex = (reason: string): Shape =>
+  shapeOf(
+    'other',
+    `${UNREAD_INDEX}${reason}`,
+    `Hemera could not read this index for its submodules: ${reason}.\nThe Git folders of the submodules it names are not watched until it can.\n`,
+  )
+
+/** Whether a shape stands for an index that could not be read for its submodules. */
+export const isUnreadIndex = (shape: Shape): boolean => shape.digest.startsWith(UNREAD_INDEX)
 
 /** Whether a path is a folder or under it. */
 const inside = (folder: string, path: string): boolean =>
@@ -551,7 +596,13 @@ export function shapesOf(
     const common = realOf(commonDirOf(gitDir))
     commonOnce(common)
     const hash = parsed(join(common, 'config'))?.sha256 === true ? 32 : 20
-    for (const path of gitlinksAt(gitDir, hash, statOf)) pending.push(realOf(join(checkout, path)))
+    const gitlinks = gitlinksAt(gitDir, hash, statOf)
+    if (Result.isFailure(gitlinks)) {
+      // Never read as naming none: an embedded repository's own filter would go unwatched.
+      shapes.set(join(gitDir, 'index'), unreadIndex(gitlinks.failure))
+      continue
+    }
+    for (const path of gitlinks.success) pending.push(realOf(join(checkout, path)))
   }
   for (const common of repositories) commonOnce(common)
   const homeConfigs = [join(home.home, '.gitconfig'), join(home.configHome, 'git', 'config')]
