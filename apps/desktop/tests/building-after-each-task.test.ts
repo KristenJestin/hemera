@@ -20,18 +20,21 @@ import {
   type DeliveryRulesDraft,
   defaultDeliveryRules,
 } from '@hemera/core/domain'
+import type { CommandDraft } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
 import { Effect, Layer, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { type BuilderHold, BuildingEnd } from '../src/engine/building/builder.ts'
 import { latestBuildingIn } from '../src/engine/building/tasks.ts'
+import { saveCommand } from '../src/engine/catalogue.ts'
 import {
   missionCopies,
   readDeliveryRules,
   saveDeliveryRules,
 } from '../src/engine/delivery-rules.ts'
 import { cancelMissionIn, getMission } from '../src/engine/missions.ts'
+import { getProject } from '../src/engine/projects.ts'
 import { retryNeed } from '../src/engine/needs.ts'
 import { CommitRights, Judge, stepCommitRights } from '../src/engine/permissions/ports.ts'
 import { Secrets } from '../src/engine/secrets.ts'
@@ -40,6 +43,7 @@ import { effectfulActions, sessionDeliveries } from '../src/engine/storage/schem
 import { mutate } from '../src/engine/transaction.ts'
 import { acmeAt, call, eventsOf } from './building-world.ts'
 import { builderAgents, builderOf, launched, taskIn } from './builder-world.ts'
+import { nodeLine } from './commands-engine.ts'
 import { git } from './repositories.ts'
 import { HELPER, held, sessionsEngine, until, within } from './sessions-world.ts'
 import { ALLOW, questionsKept, verdictsSaying } from './tools-world.ts'
@@ -711,6 +715,55 @@ describe('After each task: the Building’s own steps', () => {
     expect(seen.needs).toHaveLength(1)
     expect(seen.needs[0]?.missing).toContain('T1')
   })
+
+  test('a commit an earlier Building of the mission made for a task of the same id is not this Building’s', async () => {
+    const seen = await engine().run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId, api, head } = yield* building([HEMERA])
+          const secrets = yield* Secrets
+          yield* Effect.flatMap(Database, (database) =>
+            database.insert(effectfulActions).values({
+              id: 'earlier-commit',
+              kind: 'git.commit',
+              ownerKind: 'mission',
+              ownerId: mission.id,
+              taskId: 'T1',
+              details: secrets.mask(
+                JSON.stringify({ repository: 'api', paths: ['invoices.ts'], message: 'earlier' }),
+              ),
+              state: 'done',
+              startedAt: '2000-01-01T00:00:00.000Z',
+            }),
+          )
+          yield* t1Done(mission.id, grantId)
+          yield* committedTimes(mission.id, 1)
+          return { log: logOf(api, head) }
+        }),
+      ),
+    )
+    expect(seen.log).toBe('ACME-1: Export as CSV')
+  })
+})
+
+/** A script command of the catalogue in a repository, writing what it writes. */
+const lateCommand = (line: string, repositoryId: string | null): CommandDraft => ({
+  name: 'late',
+  type: 'script',
+  line,
+  lineWindows: null,
+  lineLinux: null,
+  repositoryId,
+  folder: null,
+  scope: 'workspace',
+  portless: false,
+  portlessName: null,
+  check: false,
+  atOpen: false,
+  askBeforeRunning: false,
+  readOnly: false,
+  writeGlobs: [],
 })
 
 /**
@@ -806,5 +859,67 @@ describe('After each task: the end waits for the last task’s steps', () => {
       ),
     )
     expect(order).toEqual(['confirm', 'end'])
+  })
+
+  test('the last task whose own command still runs: the end waits for that command and its commit', async () => {
+    // What the end saw: how many commits were made when it was called.
+    const seen: number[] = []
+    let commits: Effect.Effect<number> = Effect.succeed(-1)
+    const engineOf = sessionsEngine(data, builderAgents, {
+      roles: [HELPER],
+      tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
+      building: {
+        end: Layer.succeed(BuildingEnd, {
+          end: () =>
+            Effect.flatMap(
+              Effect.suspend(() => commits),
+              (count) => Effect.sync(() => void seen.push(count)),
+            ),
+        }),
+      },
+    })
+    await engineOf.run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { project, mission, grantId } = yield* building([HEMERA])
+          commits = within(
+            profile,
+            Effect.map(commitsOf(mission.id), (rows) => rows.length),
+          )
+          const release = join(work, 'release')
+          const script = join(work, 'late.mjs')
+          writeFileSync(
+            script,
+            `import { existsSync, writeFileSync } from 'node:fs'\nwhile (!existsSync(process.argv[2])) await new Promise((done) => setTimeout(done, 20))\nwriteFileSync('README.md', 'Acme api, late\\n')\n`,
+          )
+          const api = (yield* getProject(project.id)).repositories.find((one) => one.path === 'api')
+          const late = yield* saveCommand({
+            projectId: project.id,
+            id: null,
+            command: lateCommand(nodeLine(script, release), api?.id ?? null),
+          })
+          for (const id of ['T1', 'T2', 'T4']) {
+            yield* call(grantId, 'task_start', { task: id })
+            yield* call(grantId, 'task_finished', { task: id, summary: 'Nothing to change.' })
+            yield* taskIn(mission.id, id, 'done')
+          }
+          yield* call(grantId, 'task_start', { task: 'T3' })
+          yield* call(grantId, 'fs_read', { repository: 'api', path: 'README.md' })
+          yield* call(grantId, 'fs_write', {
+            repository: 'api',
+            path: 'README.md',
+            content: 'Acme api, with exports\n',
+          })
+          yield* call(grantId, 'commands_run', { command: late.id, timeout: 1 })
+          yield* call(grantId, 'task_finished', { task: 'T3', summary: 'README.' })
+          yield* taskIn(mission.id, 'T3', 'done')
+          writeFileSync(release, '')
+          yield* until(Effect.sync(() => seen.length > 0))
+        }),
+      ),
+    )
+    // Called once, after T3's commit, which holds what the command wrote last.
+    expect(seen).toEqual([1])
   })
 })
