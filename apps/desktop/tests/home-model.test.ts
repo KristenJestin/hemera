@@ -107,6 +107,7 @@ const project = (id: string, name: string): Project => ({
       remote: null,
       baseBranch: 'main',
       lastFetchedAt: null,
+      testReporting: null,
     },
   ],
 })

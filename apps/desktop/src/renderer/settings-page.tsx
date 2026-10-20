@@ -21,6 +21,7 @@ import {
   IconPlug,
   IconStack2,
   IconTerminal,
+  IconTestPipe,
   IconVariable,
 } from '@hemera/ui/icons'
 import type { Command, RecipeStep, Repository } from '@hemera/ipc'
@@ -60,6 +61,7 @@ export interface SettingsPageProps {
 
 const SECTIONS: ReadonlyArray<SettingsSection & { readonly id: SectionId }> = [
   { id: 'repositories', label: 'Repositories', icon: <IconGitBranch size="sm" /> },
+  { id: 'tests', label: 'Tests', icon: <IconTestPipe size="sm" /> },
   { id: 'workspaces', label: 'Workspaces', icon: <IconStack2 size="sm" /> },
   { id: 'commands', label: 'Commands', icon: <IconTerminal size="sm" /> },
   { id: 'preparation', label: 'Preparation', icon: <IconListNumbers size="sm" /> },

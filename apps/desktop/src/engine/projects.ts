@@ -24,6 +24,7 @@ import {
   keyPrefix,
   projectName,
   repositoryPath,
+  TestReporting,
 } from '@hemera/core/domain'
 import {
   type BaseBranchEdit,
@@ -46,7 +47,7 @@ import {
   type WorkspacesRootEdit,
 } from '@hemera/ipc'
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
-import { Effect, Option, Result, Stream } from 'effect'
+import { Effect, Option, Result, Schema, Stream } from 'effect'
 
 import { DomainEvents } from './domain-events.ts'
 import { Git } from './git.ts'
@@ -149,6 +150,13 @@ const defaultRemote = (folder: string): Effect.Effect<string | null, never, Git>
     Effect.orElseSucceed(() => null),
   )
 
+/** A repository's test reporting as its row keeps it: JSON, or null; a row that does not read is null. */
+const reportingCodec = Schema.fromJsonString(TestReporting)
+const testReportingOf = (text: string | null) =>
+  text === null ? null : Option.getOrNull(Schema.decodeUnknownOption(reportingCodec)(text))
+export const testReportingText = (reporting: TestReporting | null) =>
+  reporting === null ? null : Schema.encodeSync(reportingCodec)(reporting)
+
 type ProjectRow = typeof projects.$inferSelect
 type RepositoryRow = typeof projectRepositories.$inferSelect
 
@@ -160,6 +168,7 @@ const repositoryOf = (row: RepositoryRow): Repository => ({
   remote: row.remote,
   baseBranch: row.baseBranch,
   lastFetchedAt: row.lastFetchedAt,
+  testReporting: testReportingOf(row.testReporting),
 })
 
 const projectOf = (row: ProjectRow, repositories: ReadonlyArray<RepositoryRow>): Project => ({
@@ -242,7 +251,7 @@ type ProjectChange = Partial<
 
 /** What an edit of a repository may change of its row. */
 type RepositoryChange = Partial<
-  Pick<RepositoryRow, 'path' | 'includedByDefault' | 'remote' | 'baseBranch'>
+  Pick<RepositoryRow, 'path' | 'includedByDefault' | 'remote' | 'baseBranch' | 'testReporting'>
 >
 
 /**
@@ -330,6 +339,7 @@ const insertRepositories = (
           remote: row.remote,
           baseBranch: DEFAULT_BASE_BRANCH,
           lastFetchedAt: null,
+          testReporting: null,
         })),
       )
       .returning()
@@ -588,7 +598,7 @@ export const addRepository = (asked: NewRepository) =>
  * Writes a change of one repository, at its Project's version. Nothing else in the Profile names a
  * repository by its path, so a new path needs nothing carried over to it.
  */
-const changeRepository = (
+export const changeRepository = (
   edit: { readonly id: string; readonly version: number },
   located: { readonly repository: Repository; readonly project: Project },
   change: RepositoryChange,

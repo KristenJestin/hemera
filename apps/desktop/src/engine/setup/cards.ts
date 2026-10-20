@@ -206,6 +206,7 @@ const plannedWith = (planned: Planned, change: SetupChange): Planned => {
         remote: change.remote ?? null,
         baseBranch: change.baseBranch ?? DEFAULT_BASE_BRANCH,
         lastFetchedAt: null,
+        testReporting: null,
       }
       const repositories = [...planned.project.repositories, repository]
       return { ...planned, project: { ...planned.project, repositories } }
