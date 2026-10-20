@@ -32,7 +32,16 @@ import { useOverlayContainer } from '../../overlay.ts'
  * the catalogue.
  */
 const POPUP =
-  'min-w-48 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
+  'rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
+
+/** How wide the panel is: as its content, or as the row it hangs off. */
+const FITS = {
+  content: 'min-w-48',
+  row: 'w-anchor',
+} as const
+
+/** A panel as wide as its row turns to the other side when it must, and never moves sideways. */
+const ROW_AVOIDANCE = { side: 'flip', align: 'none', fallbackAxisSide: 'none' } as const
 
 export interface PopoverProps {
   /** What opens it: the caller's own control, whatever shape it has. */
@@ -86,6 +95,13 @@ export interface PopoverProps {
   onClosed?: (() => void) | undefined
   /** Where the trigger sits — a row the whole width of its list; never how it looks. */
   className?: string | undefined
+  /**
+   * How wide the panel is. As its content, by default. As the row it hangs off — the wrapper
+   * `className` makes the whole width of its list — for a picker at the end of a list: it then
+   * keeps to the row's start edge and never shifts sideways onto what is beside it, and when
+   * there is no room on its side it turns to the other one, still against that edge.
+   */
+  fit?: keyof typeof FITS | undefined
 }
 
 export function Popover({
@@ -103,6 +119,7 @@ export function Popover({
   initialFocus,
   at,
   className,
+  fit = 'content',
 }: PopoverProps): ReactNode {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
@@ -118,9 +135,15 @@ export function Popover({
         {anchorOnly ? trigger : <BasePopover.Trigger render={trigger} />}
       </span>
       <BasePopover.Portal container={container}>
-        <BasePopover.Positioner anchor={at ?? anchor} side={side} align={align} sideOffset={4}>
+        <BasePopover.Positioner
+          anchor={at ?? anchor}
+          side={side}
+          align={align}
+          sideOffset={4}
+          collisionAvoidance={fit === 'row' ? ROW_AVOIDANCE : undefined}
+        >
           <BasePopover.Popup
-            className={POPUP}
+            className={cn(POPUP, FITS[fit])}
             aria-label={title === undefined ? label : undefined}
             initialFocus={keepFocus ? false : initialFocus}
             finalFocus={keepFocus ? false : undefined}
