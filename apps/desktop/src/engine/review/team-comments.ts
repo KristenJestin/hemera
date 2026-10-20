@@ -64,7 +64,7 @@ import {
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { type ForgeComment, isMine, readComments, signedInAccount } from '../forges/comments.ts'
-import { ForgePort } from '../forges/port.ts'
+import type { ForgePort } from '../forges/port.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
 import { Secrets } from '../secrets.ts'
