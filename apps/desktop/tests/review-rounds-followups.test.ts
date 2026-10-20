@@ -334,6 +334,84 @@ describe('A round grilled without its Workspace', () => {
   )
 })
 
+/** Why a start from the feedback is refused, or null when it is allowed. */
+const refusalOf = (feedbackId: string) =>
+  Rounds.use((rounds) => rounds.startMissionFrom(feedbackId)).pipe(
+    Effect.map(() => null),
+    Effect.catchTag('FeedbackRefused', (refused) => Effect.succeed(refused.reason)),
+  )
+
+describe('A second mission from the same feedback', () => {
+  test(
+    'a feedback its round still grills or builds refuses a second "Start a mission from this", through a restart and once the round is answered; the first mission gets the link',
+    SLOW,
+    async () => {
+      const first = rounding(data, work)
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId, projectId, lineage } = yield* reviewed(work)
+            const one = yield* written(missionId, remark('The CSV has no header row.'))
+            const two = yield* written(missionId, remark('The export button is grey.'))
+            yield* fix(missionId)
+            const planner = yield* roundPlannerOf(missionId)
+            yield* headerPoint(planner.grantId, [one.id])
+            const started = yield* startedFrom(projectId, one.id)
+            yield* withdrawnAndTold(missionId, two.id)
+            return {
+              missionId,
+              lineage,
+              planner: planner.session.id,
+              one: one.id,
+              started,
+              again: yield* refusalOf(one.id),
+            }
+          }),
+        ),
+      )
+      const after = rounding(data, work, { resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = left
+            const restarted = yield* refusalOf(left.one)
+            const planner = yield* roundPlannerOf(missionId, left.planner)
+            yield* headerTask(planner.grantId)
+            yield* used(planner.grantId, 'round_ready', { why: 'One point, one task.' })
+            yield* roundBuilding(missionId, 1)
+            const building = yield* refusalOf(left.one)
+            const builder = yield* roundBuilderOf(missionId, left.lineage)
+            yield* builtHeader(builder.grantId)
+            yield* used(builder.grantId, 'feedback_answer', {
+              source: left.one,
+              text: 'The header row is written first.',
+            })
+            yield* throughEnd(after.world, missionId)
+            yield* until(
+              Effect.map(feedbackNow(missionId), (all) => all.get(left.one)?.state === 'resolved'),
+              LONG,
+            )
+            return {
+              restarted,
+              building,
+              closed: (yield* feedbackNow(missionId)).get(left.one),
+              answered: yield* refusalOf(left.one),
+            }
+          }),
+        ),
+      )
+      const reason = 'A mission was started from this feedback already.'
+      expect(left.again).toBe(reason)
+      expect(seen.restarted).toBe(reason)
+      expect(seen.building).toBe(reason)
+      expect(seen.answered).toBe(reason)
+      expect(seen.closed?.answer).toContain(left.started.key)
+    },
+  )
+})
+
 /** The test of the Markdown export: it fails until `export.ts` holds `markdown`. */
 const MARKDOWN_TEST = [
   "import { test } from 'node:test'",
