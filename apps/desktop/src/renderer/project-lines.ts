@@ -58,18 +58,25 @@ export interface SidebarGroup {
 export function sidebarGroupsOf(
   lines: readonly MissionLine[],
   events: ReadonlyMap<string, string>,
+  percents: ReadonlyMap<string, number> = new Map(),
 ): SidebarGroup[] {
   return byStage(lines).map((group) => ({
     stage: group.stage,
     count: group.lines.length,
     folded: FOLDED_STAGES.has(group.stage),
-    rows: group.lines.map((line) => ({
-      missionKey: line.key,
-      title: line.title,
-      ball: line.ball,
-      event: events.get(line.id),
-      needsYou: line.needs > 0,
-    })),
+    rows: group.lines.map((line) => {
+      const row: SidebarGroup['rows'][number] = {
+        missionKey: line.key,
+        title: line.title,
+        ball: line.ball,
+        event: events.get(line.id),
+        needsYou: line.needs > 0,
+      }
+      // Building's percentage (open question 24) is shown in Building, and nowhere else.
+      const percent = line.stage === 'Building' ? percents.get(line.id) : undefined
+      if (percent !== undefined) row.percent = percent
+      return row
+    }),
   }))
 }
 
