@@ -84,7 +84,6 @@ import {
   buildings,
   checkpointRepositories,
   missionShips,
-  missions,
   proofRuns,
   reviewFeedback,
   reviewRounds,
@@ -95,8 +94,8 @@ import {
 import { mutate } from '../transaction.ts'
 import { Diffs } from './diffs.ts'
 
-/** Where a suite holds a Ship: as the reruns begin, once they ended, before the freeze. */
-export type ShipMoment = 'rerunning' | 'checked' | 'freezing'
+/** Where a suite holds a Ship: as the reruns begin, and before the freeze. */
+export type ShipMoment = 'rerunning' | 'freezing'
 
 export type ShipHold = (at: ShipMoment) => Effect.Effect<void>
 
@@ -122,11 +121,6 @@ export class Ship extends Context.Service<Ship, ShipService>()('Ship') {}
 
 /** The mission moved (a Cancel) between the checks and the freeze. */
 const MOVED_MEANWHILE = 'The mission moved meanwhile: nothing was frozen.'
-
-/** What the freeze's transaction ends on: shipped, or refused with nothing written. */
-type Frozen = { readonly shipped: Shipped } | { readonly refused: ReadonlyArray<string> }
-
-const refusedFrozen = (refused: ReadonlyArray<string>): Frozen => ({ refused })
 
 const now = (): string => new Date().toISOString()
 
@@ -751,7 +745,6 @@ export const shipLayer = (settings: ShipSettings) =>
               }),
             ])
           }
-          yield* hold('checked')
           // What the reruns ran on must still be what is frozen.
           const changed: string[] = []
           for (const place of places) {
@@ -773,17 +766,11 @@ export const shipLayer = (settings: ShipSettings) =>
           )
           const copies = yield* missionCopies(missionId).pipe(Effect.orElseSucceed(() => []))
           const secrets = yield* Secrets
+          const mission = yield* getMission(missionId)
           const shippedAt = now()
-          const frozen = yield* mutate('freezing a mission at Ship', (transaction) =>
+          // A refusal fails the transaction: the copies it wrote go with it.
+          const shipped = yield* mutate('freezing a mission at Ship', (transaction) =>
             Effect.gen(function* () {
-              const [mission] = yield* transaction
-                .select({ id: missions.id, stage: missions.stage, round: missions.round })
-                .from(missions)
-                .where(eq(missions.id, missionId))
-                .pipe(Effect.mapError(refusedWhile('reading the mission')))
-              if (mission === undefined || mission.stage !== 'review') {
-                return { result: refusedFrozen([MOVED_MEANWHILE]), events: [] }
-              }
               const waves = yield* copyIn(transaction, 'waves')
               const end = yield* copyIn(transaction, 'end')
               const preparation = copies.find((one) => one.section === 'preparation')
@@ -795,10 +782,9 @@ export const shipLayer = (settings: ShipSettings) =>
                   waves: waves.copy,
                 })
                 if (problems.length > 0) {
-                  return {
-                    result: refusedFrozen(problems.map((problem) => problem.sentence)),
-                    events: [],
-                  }
+                  return yield* new ShipRefused({
+                    reasons: problems.map((problem) => problem.sentence),
+                  })
                 }
               }
               const deliveredAt = allLocal(waves.copy) ? shippedAt : null
@@ -814,19 +800,14 @@ export const shipLayer = (settings: ShipSettings) =>
                   deliveredAt,
                 })
                 .pipe(Effect.mapError(refusedWhile('freezing the mission')))
+              // Written only while the mission is still in Review: a Cancel since refuses it.
               const movedTo = yield* moveIn(
                 transaction,
-                { id: mission.id, stage: 'review', round: mission.round },
+                { id: missionId, stage: 'review', round: mission.round },
                 'ship',
                 'user',
               )
-              const shipped: Shipped = {
-                missionId,
-                shippedAt,
-                trees: candidate,
-                deliveredAt,
-              }
-              const result: Frozen = { shipped }
+              const result: Shipped = { missionId, shippedAt, trees: candidate, deliveredAt }
               return {
                 result,
                 events: [
@@ -842,14 +823,14 @@ export const shipLayer = (settings: ShipSettings) =>
               }
             }),
           ).pipe(
-            Effect.catchTag('MoveRefused', () => Effect.succeed(refusedFrozen([MOVED_MEANWHILE]))),
+            Effect.catchTag('MoveRefused', () => refuse(missionId, [MOVED_MEANWHILE])),
             Effect.catchTag('DeliveryRulesUnreadable', (failure) =>
-              Effect.succeed(refusedFrozen([failure.message])),
+              refuse(missionId, [failure.message]),
             ),
+            Effect.catchTag('ShipRefused', (failure) => refuse(missionId, failure.reasons)),
           )
-          if ('refused' in frozen) return yield* refuse(missionId, frozen.refused)
           yield* say(missionId, { step: 'shipped', message: null })
-          return frozen.shipped
+          return shipped
         })
 
       type Needs =

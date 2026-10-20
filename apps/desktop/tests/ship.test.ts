@@ -20,7 +20,7 @@ import { Effect, Fiber, Result, Stream } from 'effect'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 import { OutsideChanges } from '../src/engine/building/outside.ts'
-import { saveDeliveryRules } from '../src/engine/delivery-rules.ts'
+import { missionCopies, saveDeliveryRules } from '../src/engine/delivery-rules.ts'
 import { Memory } from '../src/engine/memory/index.ts'
 import { getMission, moveMission } from '../src/engine/missions.ts'
 import { createNeed, needService } from '../src/engine/needs.ts'
@@ -338,6 +338,7 @@ describe('A change made outside Hemera is redone at Ship, never a refusal', () =
               proof: { state: proof?.state, phase: green?.phase, trees: green?.trees },
               shippedEvents: yield* eventsOf(mission.missionId, 'mission.shipped'),
               reruns: yield* eventsOf(mission.missionId, 'mission.ship_rerun'),
+              copied: (yield* missionCopies(mission.missionId)).map((one) => one.section),
               lines,
             }
           }),
@@ -357,6 +358,8 @@ describe('A change made outside Hemera is redone at Ship, never a refusal', () =
       )
       expect(world.asked.count).toBe(1)
       expect(seen.shippedEvents).toHaveLength(1)
+      // The waves and the End are copied as Ship freezes the mission (CT-47).
+      expect(seen.copied).toEqual(expect.arrayContaining(['preparation', 'waves', 'end']))
       expect(seen.reruns).toHaveLength(1)
       expect(seen.lines).toContain(
         'Ship ran again the proof R1.S2 and the final check test · api: green.',
@@ -720,6 +723,66 @@ describe('Ship ships what the user saw', () => {
       expect(seen.stage).toBe('review')
       expect(seen.row).toBeNull()
       expect(seen.again.possible).toBe(true)
+    },
+    SLOW,
+  )
+})
+
+describe('The rules Ship copies must fit what the mission copied before', () => {
+  test(
+    'waves that need a pull request the copied preparation never opened refuse Ship, nothing frozen',
+    async () => {
+      const world = shipWorld()
+      const { run } = shipEngine(world)
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            // The preparation the mission copies pushes, and opens no pull request; no wave yet.
+            const before = rulesWith((draft) => ({
+              ...draft,
+              preparation: {
+                ...draft.preparation,
+                presets: {
+                  ...draft.preparation.presets,
+                  application: [
+                    { id: 'commit', kind: 'commit-by-hemera', mode: 'auto' },
+                    { id: 'push', kind: 'push', mode: 'auto' },
+                  ],
+                },
+              },
+              waves: {
+                ...draft.waves,
+                presets: { ...draft.waves.presets, application: [] },
+              },
+            }))
+            const mission = yield* shipReady(world, before)
+            const project = yield* getProject(mission.projectId)
+            // Then the Project's rules: a pull request, and waves that squash it.
+            yield* saveDeliveryRules(
+              mission.projectId,
+              rulesWith()(
+                (path) => project.repositories.find((one) => one.path === path)?.id ?? path,
+              ),
+              1,
+            )
+            const reasons = yield* refusedWith(shipNow(mission.missionId))
+            return {
+              reasons,
+              row: yield* shipRow(mission.missionId),
+              stage: (yield* getMission(mission.missionId)).stage,
+              copied: (yield* missionCopies(mission.missionId)).map((one) => one.section),
+            }
+          }),
+        ),
+      )
+      expect(seen.reasons).toEqual([
+        'Merge needs a pull request: api has no pull request step.',
+        'Merge needs a pull request: web has no pull request step.',
+      ])
+      expect(seen.row).toBeNull()
+      expect(seen.stage).toBe('review')
+      expect(seen.copied).not.toContain('waves')
     },
     SLOW,
   )
