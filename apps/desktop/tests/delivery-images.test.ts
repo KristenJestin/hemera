@@ -470,11 +470,12 @@ const inReview = <R = never>(
       30_000,
     )
     const ids: Array<string> = []
+    const feedbacks: Array<string> = []
     for (const image of images) {
       const added = yield* Review.use((review) =>
         review.imageAdd(mission.id, image.name, image.bytes),
       )
-      yield* Review.use((review) =>
+      const feedback = yield* Review.use((review) =>
         review.feedbackAdd(
           mission.id,
           { kind: 'remark', body: image.feedback, anchor: null, images: [added.evidenceId] },
@@ -482,6 +483,7 @@ const inReview = <R = never>(
         ),
       )
       ids.push(added.evidenceId)
+      feedbacks.push(feedback.id)
     }
     const key = yield* missionKeyOf(mission.id)
     return {
@@ -489,6 +491,7 @@ const inReview = <R = never>(
       api,
       evidence: join(missionFolder(data, key), 'evidence'),
       images: ids,
+      feedbacks,
     }
   }).pipe(Effect.orDie)
 
@@ -519,6 +522,9 @@ const fileOf = (bytes: Buffer) => `${createHash('sha256').update(bytes).digest('
 /** The asset URL the fake forge gives a file. */
 const assetOf = (bytes: Buffer) =>
   `https://github.com/user-attachments/assets/${fileOf(bytes).replace(/\.png$/, '')}`
+
+const NO_LONGER_CHOSEN =
+  'No longer chosen for publication (unmarked, or its feedback withdrawn): its file name is listed.'
 
 const setPublishable = (evidenceId: string, publishable: boolean) =>
   Pushes.use((pushes) => pushes.setPublishable(evidenceId, publishable))
@@ -753,6 +759,69 @@ describe('A public repository asks first', () => {
         'acme/api is public and you chose to list the file names instead of publishing the images.',
       )
       expect(seen.api?.images.map((one) => one.state)).toEqual(['listed'])
+    },
+    SLOW,
+  )
+
+  test.each([
+    {
+      case: 'Publish after an unmark',
+      undo: (mission: { readonly images: ReadonlyArray<string> }) =>
+        setPublishable(mission.images[1] ?? '', false),
+    },
+    {
+      case: 'Publish after a feedback withdrawn',
+      undo: (mission: { readonly feedbacks: ReadonlyArray<string> }) =>
+        Review.use((review) =>
+          review.feedbackWithdraw(mission.feedbacks[1] ?? '', FeedbackUser.make({})),
+        ),
+    },
+  ])(
+    '$case: only the image still chosen is uploaded, the other stays listed by name and says why',
+    async ({ undo }) => {
+      forgeIs({ ...GITHUB, visibility: 'public' })
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* inReview(BODY, [GREY, LABELS])
+            yield* pushed(mission.missionId)
+            const question = yield* decisionSaying(mission.missionId, 'public pull request')
+            yield* untilApi(mission.missionId, 'done')
+            yield* undo(mission)
+            yield* chosen(question, 'Publish')
+            yield* until(
+              Effect.map(
+                pushesOf(mission.missionId),
+                (pushes) => apiOf(pushes)?.images[0]?.state === 'published',
+              ),
+              60_000,
+            )
+            return apiOf(yield* pushesOf(mission.missionId))
+          }),
+        ),
+      )
+      const [edit, ...more] = prCalls('edit')
+      expect(more).toEqual([])
+      expect(attached(edit?.args ?? [])).toEqual([`${fileOf(GREY.bytes)}#The save button is grey.`])
+      expect(fake.calls().some((one) => one.args.join(' ').includes(fileOf(LABELS.bytes)))).toBe(
+        false,
+      )
+      expect(pullRequests()[0]?.body).toBe(
+        [
+          'What changed.',
+          '',
+          `![The save button is grey.](${assetOf(GREY.bytes)})`,
+          '- labels-overflow.png',
+          '',
+          'The end.',
+        ].join('\n'),
+      )
+      expect(seen?.images.map((one) => [one.state, one.message])).toEqual([
+        ['published', null],
+        ['listed', NO_LONGER_CHOSEN],
+      ])
     },
     SLOW,
   )
@@ -992,6 +1061,36 @@ describe('Partial failures and Retry', () => {
         [fileOf(GREY.bytes), fileOf(LABELS.bytes)].sort(),
       )
       expect(seen.after).toEqual(seen.before)
+    },
+    SLOW,
+  )
+
+  test(
+    'Retry after an unmark: the image not published is not sent again, it stays listed and says why; the one published stays published',
+    async () => {
+      forgeIs({ ...GITHUB, failing: [fileOf(LABELS.bytes)] })
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* inReview(BODY, [GREY, LABELS])
+            yield* pushed(mission.missionId)
+            yield* untilApi(mission.missionId, 'failed')
+            forgeIs(GITHUB)
+            for (const image of mission.images) yield* setPublishable(image, false)
+            yield* Pushes.use((pushes) => pushes.retry(mission.missionId, 'api'))
+            yield* untilApi(mission.missionId, 'done')
+            return apiOf(yield* pushesOf(mission.missionId))
+          }),
+        ),
+      )
+      expect(prCalls('create')).toHaveLength(1)
+      expect(prCalls('edit')).toEqual([])
+      expect(seen?.images.map((one) => [one.state, one.url, one.message])).toEqual([
+        ['published', assetOf(GREY.bytes), null],
+        ['listed', null, NO_LONGER_CHOSEN],
+      ])
     },
     SLOW,
   )

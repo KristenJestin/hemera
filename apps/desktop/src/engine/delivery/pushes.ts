@@ -1067,6 +1067,10 @@ export const pushesLayer = (settings: PushesSettings) => {
           } satisfies Hosting
         }).pipe(Effect.provide(context))
 
+      /** Why an image chosen when its pull request opened is no longer sent. */
+      const NO_LONGER_CHOSEN =
+        'No longer chosen for publication (unmarked, or its feedback withdrawn): its file name is listed.'
+
       const listedByChoice = (full: string) =>
         `${full} is public and you chose to list the file names instead of publishing the images.`
 
@@ -1160,7 +1164,9 @@ export const pushesLayer = (settings: PushesSettings) => {
        * Sends a pull request's images not in its description yet, then records where each stands
        * from the description read back (CT-54). An image whose copy is there already is never sent
        * again; `tried`, sent by the create that answered `said`, is not sent twice in one run.
-       * With `replace`, the description is first rewritten (the file names become the images).
+       * Each image is checked against what is chosen right before it is sent: one unmarked since,
+       * or whose feedback was withdrawn, is listed instead. With `replace`, the images listed by
+       * name in the description, it is first rewritten: each name sent becomes its image.
        * Answers why some images are not published, or null.
        */
       const sendImages = (
@@ -1168,14 +1174,20 @@ export const pushesLayer = (settings: PushesSettings) => {
         pullRequest: { readonly number: number; readonly url: string },
         tried: ReadonlyArray<string>,
         told: string | null,
-        replace: { readonly from: string; readonly to: string } | null,
+        replace: ReadonlyArray<ImageRow> | null,
       ) =>
         Effect.gen(function* () {
           const missionId = one.mission.id
-          const rows = (yield* imageRowsOf(missionId, one.repositoryId)).filter(
+          const unsent = (yield* imageRowsOf(missionId, one.repositoryId)).filter(
             (row) => row.state === 'pending' || row.state === 'not-published',
           )
-          if (rows.length === 0) return null
+          if (unsent.length === 0) return null
+          // By file: another evidence holding the same bytes may still choose it.
+          const still = new Set(
+            (yield* provided(chosenImages(missionId, secrets.mask))).map((image) => image.file),
+          )
+          const rows = unsent.filter((row) => still.has(row.file))
+          const dropped = unsent.filter((row) => !still.has(row.file))
           const folder = yield* evidenceFolderOf(missionId)
           const bodyNow = pullRequestBody(one.repositoryId, pullRequest.number).pipe(
             Effect.provide(context),
@@ -1193,10 +1205,17 @@ export const pushesLayer = (settings: PushesSettings) => {
             return why === null
           })
           let failed = told
+          const sent = new Set(sendable.map((row) => row.evidenceId))
+          const from = replace === null ? '' : nameList(replace)
           let body =
-            replace === null || Result.isFailure(before) || !before.success.includes(replace.from)
+            replace === null || Result.isFailure(before) || !before.success.includes(from)
               ? null
-              : before.success.replace(replace.from, replace.to)
+              : before.success.replace(
+                  from,
+                  replace
+                    .map((row) => (sent.has(row.evidenceId) ? imageLines([row]) : nameList([row])))
+                    .join('\n'),
+                )
           for (let at = 0; at < sendable.length; at += ATTACH_AT_ONCE) {
             const answer = yield* attachToPullRequest(
               one.repositoryId,
@@ -1249,7 +1268,11 @@ export const pushesLayer = (settings: PushesSettings) => {
           yield* provided(
             mutate('recording the images of a pull request', (transaction) =>
               Effect.gen(function* () {
-                for (const { row, set } of settled) {
+                const unchosen = dropped.map((row) => ({
+                  row,
+                  set: { state: 'listed', url: null, message: secrets.mask(NO_LONGER_CHOSEN) },
+                }))
+                for (const { row, set } of [...unchosen, ...settled]) {
                   yield* transaction
                     .update(deliveryImages)
                     .set({ ...set, updatedAt: now() })
@@ -1361,10 +1384,7 @@ export const pushesLayer = (settings: PushesSettings) => {
               }),
             ),
           )
-          const left = yield* sendImages(one, pullRequest, [], null, {
-            from: nameList(onList),
-            to: imageLines(onList),
-          })
+          const left = yield* sendImages(one, pullRequest, [], null, onList)
           if (left === null) return
           yield* stopRow(
             one,
