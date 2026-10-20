@@ -511,6 +511,7 @@ const CI_WORDS: Record<MarkState, string> = {
   blocked: 'blocked',
   skipped: 'skipped',
   idle: 'not started',
+  unverified: 'green, not verified',
 }
 
 /** What a pull request's line says beside its name, where it stands. */
