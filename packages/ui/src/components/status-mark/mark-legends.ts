@@ -6,6 +6,8 @@
  * - `todo` · a dotted ring, quiet: nothing has started.
  * - `running` · an arc of the ring, turning, in the running tone.
  * - `done` · the ring closes and a ✓ draws itself in it; `failed`, a ✕.
+ * - `unverified` · the ✓ drawn in the dotted ring: done, but no check has proven it yet. The ring
+ *   closes around the ✓ once one does, so verifying a task is the ring closing.
  * - `waiting` · the ring closes around a dot that waits for the user, a ring leaving it on the
  *   beat of the theme's `ping`.
  * - `blocked` · the ring closes around a bar: the way is shut.
@@ -20,6 +22,7 @@ export type MarkState =
   | 'todo'
   | 'running'
   | 'done'
+  | 'unverified'
   | 'failed'
   | 'waiting'
   | 'blocked'
@@ -31,6 +34,7 @@ export const MARK_LEGENDS: Record<MarkState, string> = {
   todo: 'To do',
   running: 'Running',
   done: 'Done',
+  unverified: 'Done, not verified',
   failed: 'Failed',
   waiting: 'Waiting for you',
   blocked: 'Blocked',

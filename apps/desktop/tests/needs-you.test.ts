@@ -265,6 +265,58 @@ describe('What each card says', () => {
     })
   })
 
+  test('a decision resting on outputs: its question first, each output under what it is, then the rest', () => {
+    const question = [
+      'S8’s red is not the one Planning saw.',
+      'Planning observed (key line: Currency):',
+      ['```', 'Expected column "Currency" in invoices.csv, found none', '```'].join('\n'),
+      'Now:',
+      ['```', 'Expected "¥1200" in column "Amount"', 'received "1200.00"', '```'].join('\n'),
+    ].join('\n\n')
+    const card = cardOf(
+      need(
+        onMission('m1'),
+        DecisionFields.make({
+          question,
+          options: ['Accept the new red', 'Send back'],
+          recommended: null,
+        }),
+        '2026-10-05T10:00:00Z',
+      ),
+      NOW,
+    )
+    expect(card.title).toBe('S8’s red is not the one Planning saw.')
+    expect(card.text).toBeUndefined()
+    expect(card.ask).toEqual({
+      kind: 'decision',
+      options: [{ label: 'Accept the new red' }, { label: 'Send back' }],
+      evidence: [
+        {
+          what: 'Planning observed (key line: Currency)',
+          output: 'Expected column "Currency" in invoices.csv, found none',
+        },
+        { what: 'Now', output: 'Expected "¥1200" in column "Amount"\nreceived "1200.00"' },
+      ],
+    })
+  })
+
+  test('a scenario that already passes: the run as its output, and what can be done under it', () => {
+    const question = `S7 already passes before any fix: its proof should fail first.\n\nThe run:\n${['```', '1 passed', '```'].join('\n')}\n\nWrite more information for the Builder, set the scenario aside, or cancel the mission.`
+    const card = cardOf(
+      need(
+        onMission('m1'),
+        DecisionFields.make({ question, options: ['More information'], recommended: null }),
+        '2026-10-05T10:00:00Z',
+      ),
+      NOW,
+    )
+    expect(card.title).toBe('S7 already passes before any fix: its proof should fail first.')
+    expect(card.text).toBe(
+      'Write more information for the Builder, set the scenario aside, or cancel the mission.',
+    )
+    expect(card.ask).toMatchObject({ evidence: [{ what: 'The run', output: '1 passed' }] })
+  })
+
   test('an error: what failed, what was tried, what is proposed', () => {
     expect(cardOf(need(onMission('m1'), ERROR, '2026-10-05T10:00:00Z'), NOW)).toMatchObject({
       title: 'The shared package does not build',

@@ -1,14 +1,19 @@
 /** The missions under an open Project in the sidebar: by stage, two lines each. */
 
 import { AgentWorking, ApplicationOwner, DecisionFields, WaitingOnYou } from '@hemera/core/domain'
-import type { Mission, Need } from '@hemera/ipc'
+import type { BuildingView, Mission, Need } from '@hemera/ipc'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { lineOf } from '../src/renderer/missions.ts'
 import { sidebarGroupsOf } from '../src/renderer/project-lines.ts'
-import { SidebarMissionList, SidebarMissions } from '../src/renderer/sidebar-missions.tsx'
+import {
+  SidebarMissionList,
+  SidebarMissions,
+  followPercents,
+} from '../src/renderer/sidebar-missions.tsx'
+import { building, task } from './building-fixtures.ts'
 import { SILENT_LINK } from './fake-link.ts'
 
 const mission = (more: Partial<Mission> = {}): Mission => ({
@@ -95,6 +100,16 @@ describe('The stages under a Project in the sidebar', () => {
     })
   })
 
+  test('a mission in Building has its percentage beside it, and only in Building', () => {
+    const percents = new Map([
+      ['d', 33],
+      ['c', 80],
+    ])
+    const groups = sidebarGroupsOf(lines, new Map(), percents)
+    expect(groups.find((group) => group.stage === 'Building')?.rows[0]?.percent).toBe(33)
+    expect(groups.find((group) => group.stage === 'Review')?.rows[0]).not.toHaveProperty('percent')
+  })
+
   test('a mission that moves stage moves group', () => {
     const moved = [lineOf(mission({ id: 'c', key: 'ACME-3', stage: 'ready' }), (id) => id)]
     expect(sidebarGroupsOf(moved, new Map()).map((group) => group.stage)).toEqual(['Ready'])
@@ -107,6 +122,7 @@ describe('The sidebar’s list', () => {
       createElement(SidebarMissionList, {
         lines,
         events: new Map([['d', 'T3 done in api']]),
+        percents: new Map([['d', 33]]),
         current,
         onOpenMission: () => undefined,
       }),
@@ -117,6 +133,7 @@ describe('The sidebar’s list', () => {
     expect(markup).toContain('aria-label="Review"')
     expect(markup).toContain('ACME-4')
     expect(markup).toContain('T3 done in api')
+    expect(markup).toContain('33%')
     expect(markup).toContain('aria-label="Needs you"')
     expect(markup).not.toContain('ACME-1<')
   })
@@ -138,5 +155,35 @@ describe('The sidebar’s list', () => {
         }),
       ),
     ).toBe('')
+  })
+})
+
+describe('The percentage of a mission in Building', () => {
+  test('follows each Building as it moves, and stops following a mission no longer listed', () => {
+    const listeners = new Map<string, (view: BuildingView | null) => void>()
+    const stopped: string[] = []
+    const heard: Array<ReadonlyMap<string, number>> = []
+    const link = {
+      ...SILENT_LINK,
+      onBuilding: (missionId: string, listener: (view: BuildingView | null) => void) => {
+        listeners.set(missionId, listener)
+        return () => stopped.push(missionId)
+      },
+    }
+    const following = followPercents(link, (percents) => heard.push(percents))
+    following.follow(['d'])
+    listeners.get('d')?.(
+      building({
+        tasks: [
+          task({ id: 'T1', state: 'done', verified: true }),
+          task({ id: 'T2', state: 'done', verified: false }),
+        ],
+      }),
+    )
+    expect(heard.at(-1)?.get('d')).toBe(50)
+    following.follow([])
+    expect(stopped).toEqual(['d'])
+    expect(heard.at(-1)?.has('d')).toBe(false)
+    following.stop()
   })
 })

@@ -111,6 +111,13 @@ import {
   IconBrandGithub as TablerBrandGithub,
   IconBrandJira as TablerBrandJira,
   IconHistory as TablerHistory,
+  IconArrowsVertical as TablerArrowsVertical,
+  IconBinary as TablerBinary,
+  IconCircleDashed as TablerCircleDashed,
+  IconFileCode as TablerFileCode,
+  IconLayoutColumns as TablerLayoutColumns,
+  IconLayoutRows as TablerLayoutRows,
+  IconMessagePlus as TablerMessagePlus,
   IconBrandBitbucket as TablerBrandBitbucket,
   IconGitCommit as TablerGitCommit,
   IconGitMerge as TablerGitMerge,
@@ -311,6 +318,25 @@ export const IconBrandOpenai = catalogued(TablerBrandOpenai, TablerBrandOpenai, 
 export const IconBrandGithub = catalogued(TablerBrandGithub, TablerBrandGithub, 'IconBrandGithub')
 export const IconBrandJira = catalogued(TablerBrandJira, TablerBrandJira, 'IconBrandJira')
 export const IconHistory = catalogued(TablerHistory, TablerHistory, 'IconHistory')
+export const IconArrowsVertical = catalogued(
+  TablerArrowsVertical,
+  TablerArrowsVertical,
+  'IconArrowsVertical',
+)
+export const IconBinary = catalogued(TablerBinary, TablerBinary, 'IconBinary')
+export const IconCircleDashed = catalogued(
+  TablerCircleDashed,
+  TablerCircleDashed,
+  'IconCircleDashed',
+)
+export const IconFileCode = catalogued(TablerFileCode, TablerFileCode, 'IconFileCode')
+export const IconLayoutColumns = catalogued(
+  TablerLayoutColumns,
+  TablerLayoutColumns,
+  'IconLayoutColumns',
+)
+export const IconLayoutRows = catalogued(TablerLayoutRows, TablerLayoutRows, 'IconLayoutRows')
+export const IconMessagePlus = catalogued(TablerMessagePlus, TablerMessagePlus, 'IconMessagePlus')
 export const IconBrandBitbucket = catalogued(
   TablerBrandBitbucket,
   TablerBrandBitbucket,
