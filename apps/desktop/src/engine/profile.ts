@@ -56,7 +56,7 @@ import { helperDeskLayer } from './building/helper-desk.ts'
 import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
 import { roundDeskLayer } from './review/round-desk.ts'
-import { type Rounds, roundsLayer } from './review/rounds.ts'
+import { ROUND_NEEDS, type Rounds, roundNeeds, roundsLayer } from './review/rounds.ts'
 import { REVIEW_NEEDS } from './building/review-store.ts'
 import { HELPER_MAPPERS } from './building/helper-store.ts'
 import { type HelpersSettings, cancelHelpersIn, helpersLayer } from './building/helpers.ts'
@@ -675,6 +675,7 @@ export const startProfile = (
         [BUILDER_NEEDS, builder.handler],
         [REVIEW_NEEDS, ending.handler],
         [END_NEEDS, ending.retry],
+        [ROUND_NEEDS, roundNeeds],
         [DELIVERY_NEEDS, pushes.handler],
         ...(parts.missions?.owners ?? []),
       ]),

@@ -52,11 +52,37 @@ export const installProbe = (
       enginePid: () => engine.pid,
       changeTheme: (theme) =>
         Effect.runPromise(changePreferences(engineClient, application)({ theme })),
-      createProject: (name, folder) =>
+      createProject: (name, folder, repositories = []) =>
         Effect.runPromise(
           closedAs(gone)(
-            engineClient['projects.create']({ name, mainCheckout: folder, repositories: [] }),
+            engineClient['projects.create']({ name, mainCheckout: folder, repositories }),
           ).pipe(Effect.map((project) => project.id)),
+        ),
+      addService: (projectId, name, line) =>
+        Effect.runPromise(
+          closedAs(gone)(
+            engineClient['catalogue.save']({
+              projectId,
+              id: null,
+              command: {
+                name,
+                type: 'serve',
+                line,
+                lineWindows: null,
+                lineLinux: null,
+                repositoryId: null,
+                folder: null,
+                scope: 'workspace',
+                portless: false,
+                portlessName: null,
+                check: false,
+                atOpen: false,
+                askBeforeRunning: false,
+                readOnly: false,
+                writeGlobs: [],
+              },
+            }),
+          ).pipe(Effect.map((command) => command.id)),
         ),
       backUp: (folder) =>
         Effect.runPromise(closedAs(gone)(engineClient['profile.backup']({ folder }))),

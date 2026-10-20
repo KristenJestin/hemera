@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { BuildingScreen } from './screen.tsx'
+import { BuildingScreen } from './building-screen-fixture.tsx'
 
 /**
  * A task opened over the Building page (open question 76 is settled: a stacked view, the trail
@@ -10,7 +10,7 @@ import { BuildingScreen } from './screen.tsx'
  * Only the sections that have something to say are drawn.
  */
 const meta = {
-  title: 'Explorations/Building/Task view',
+  title: 'Surfaces/Task view',
   component: BuildingScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
@@ -38,6 +38,9 @@ export const SecondTry: Story = {
       within(view.getByRole('region', { name: 'Tries' })).getAllByRole('listitem'),
     ).toHaveLength(2)
     await expect(view.getByText(/Unable to find role="progressbar"/)).toBeVisible()
+    // Each target says whether the task creates it or changes it.
+    await expect(view.getAllByRole('img', { name: 'Changed by the task' })).toHaveLength(2)
+    await expect(view.getByRole('img', { name: 'Created by the task' })).toBeVisible()
     await expect(
       within(canvasElement).getByRole('navigation', { name: 'Where you are' }),
     ).toHaveTextContent(/ACME-12.*Building.*T8/)
