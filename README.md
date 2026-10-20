@@ -16,3 +16,9 @@ pnpm check        # typecheck, lint, fmt:check and test
 ```
 
 See [`AGENTS.md`](AGENTS.md) for the working rules.
+
+## Licence
+
+Hemera is free software, published under the GNU Affero General Public License, version 3 or any
+later version (`AGPL-3.0-or-later`): see [`LICENSE`](LICENSE). What it ships that it did not make
+keeps its own licence, listed in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).

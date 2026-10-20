@@ -4,7 +4,7 @@
   "private": true,
   "description": "Desktop cockpit for coding agents",
   "homepage": "https://github.com/KristenJestin/hemera",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-or-later",
   "author": {
     "name": "Kristen Jestin",
     "email": "kristen.jestin@pm.me"
