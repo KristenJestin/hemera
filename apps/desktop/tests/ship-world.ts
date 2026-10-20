@@ -67,11 +67,21 @@ export const LONG = 60_000
  * approval and its CI (`checks`, GitHub's status check rollup) are what the test wrote on it.
  */
 const FORGE_PROGRAM = String.raw`
-const { existsSync, readFileSync, writeFileSync } = require('node:fs')
+const { existsSync, readFileSync, renameSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 const config = JSON.parse(readFileSync(join(__dirname, 'forge.json'), 'utf8'))
 const kept = join(__dirname, 'prs.json')
 const read = () => (existsSync(kept) ? JSON.parse(readFileSync(kept, 'utf8')) : [])
+// One create held between its read and its write, when a suite arms the hold (holdCreate).
+const held = () => {
+  try {
+    renameSync(join(__dirname, 'create-hold'), join(__dirname, 'create-held'))
+  } catch {
+    return
+  }
+  const pause = new Int32Array(new SharedArrayBuffer(4))
+  while (!existsSync(join(__dirname, 'create-go'))) Atomics.wait(pause, 0, 0, 10)
+}
 const valueOf = (args, flag) => {
   const at = args.indexOf(flag)
   return at < 0 ? undefined : args[at + 1]
@@ -109,6 +119,7 @@ module.exports = (cli, args) => {
   }
   if (args[1] === 'create') {
     const body = readFileSync(0, 'utf8')
+    held()
     const number = prs.length + 1
     const created = {
       repo,
@@ -159,6 +170,10 @@ export interface ShipWorld {
   readonly data: string
   readonly work: string
   readonly fake: FakeForge
+  /** The fake forge's program, what `gh pr` runs. */
+  readonly program: string
+  /** Holds the next `gh pr create` between its read and its write, until `go`. */
+  readonly holdCreate: () => { readonly held: () => boolean; readonly go: () => void }
   readonly pullRequests: () => ReadonlyArray<FakePullRequest>
   /** Changes a pull request of the fake forge, by its repository's name. */
   readonly setPullRequest: (name: string, change: Partial<FakePullRequest>) => void
@@ -192,6 +207,14 @@ export const shipWorld = (): ShipWorld => {
     data,
     work,
     fake,
+    program,
+    holdCreate: () => {
+      writeFileSync(join(folder, 'create-hold'), '')
+      return {
+        held: () => existsSync(join(folder, 'create-held')),
+        go: () => writeFileSync(join(folder, 'create-go'), ''),
+      }
+    },
     pullRequests,
     setPullRequest: (name, change) =>
       writeFileSync(
