@@ -10,7 +10,10 @@
  * tree is not the candidate's, and stops when one is red, or when a tree moved while they ran:
  * nothing frozen, the mission still in Review. All green, one transaction freezes the trees, copies
  * the waves and the End, and moves the mission to Shipping with `mission.shipped`; with the Local
- * preset everywhere, the mission is marked delivered at that time. One Ship at a time per mission.
+ * preset everywhere, the mission is marked delivered at that time. The same transaction hands the
+ * repositories changed since their last push to R6's pushes, which push them right after, as Ship's
+ * last step; a push that fails holds its need in Shipping and never undoes Ship. One Ship at a time
+ * per mission.
  */
 
 import { createHash } from 'node:crypto'
@@ -94,8 +97,8 @@ import {
 import { mutate } from '../transaction.ts'
 import { Diffs } from './diffs.ts'
 
-/** Where a suite holds a Ship: as the reruns begin, and before the freeze. */
-export type ShipMoment = 'rerunning' | 'freezing'
+/** Where a suite holds a Ship: as the reruns begin, before the freeze, and before its push. */
+export type ShipMoment = 'rerunning' | 'freezing' | 'pushing'
 
 export type ShipHold = (at: ShipMoment) => Effect.Effect<void>
 
@@ -767,6 +770,12 @@ export const shipLayer = (settings: ShipSettings) =>
           const copies = yield* missionCopies(missionId).pipe(Effect.orElseSucceed(() => []))
           const secrets = yield* Secrets
           const mission = yield* getMission(missionId)
+          // What changed since its last push, handed to the pushes as the mission is frozen.
+          const push = yield* Pushes.use((pushes) => pushes.atShip(missionId)).pipe(
+            Effect.catchTag('DeliveryRulesUnreadable', (failure) =>
+              refuse(missionId, [failure.message]),
+            ),
+          )
           const shippedAt = now()
           // A refusal fails the transaction: the copies it wrote go with it.
           const shipped = yield* mutate('freezing a mission at Ship', (transaction) =>
@@ -801,6 +810,7 @@ export const shipLayer = (settings: ShipSettings) =>
                   deliveredAt,
                 })
                 .pipe(Effect.mapError(refusedWhile('freezing the mission')))
+              yield* push.handIn(transaction)
               // Written only while the mission is still in Review: a Cancel since refuses it.
               const movedTo = yield* moveIn(
                 transaction,
@@ -833,6 +843,10 @@ export const shipLayer = (settings: ShipSettings) =>
             ),
             Effect.catchTag('ShipRefused', (failure) => refuse(missionId, failure.reasons)),
           )
+          // Pushed by R6's own sequence; one that fails holds its need in Shipping, Ship stays.
+          yield* say(missionId, { step: 'pushing' })
+          yield* hold('pushing')
+          yield* push.push
           yield* say(missionId, { step: 'shipped', message: null })
           return shipped
         })

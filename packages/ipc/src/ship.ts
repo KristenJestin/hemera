@@ -103,6 +103,7 @@ export const ShipProgress = Schema.Struct({
     'checkpoint',
     'rerunning',
     'freezing',
+    'pushing',
     'shipped',
     'stopped',
   ]),
