@@ -341,6 +341,37 @@ describe('The views over the base', () => {
   })
 })
 
+describe('The diff of a mission (#497)', () => {
+  test('is offered in the mission’s `…` from Building on, never before its Workspace', () => {
+    expect(drawn({ mission: mission({ stage: 'building', round: 1, frozen: true }) })).toContain(
+      'aria-label="More for ACME-14"',
+    )
+    expect(drawn({ mission: mission({ stage: 'done', round: 1, frozen: true }) })).toContain(
+      'aria-label="More for ACME-14"',
+    )
+    expect(drawn()).not.toContain('aria-label="More for ACME-14"')
+    expect(drawn({ mission: mission({ stage: 'ready', frozen: true }) })).not.toContain(
+      'aria-label="More for ACME-14"',
+    )
+  })
+
+  test('opens as a wide sheet over the base, its layout in its head, its files while they are read', () => {
+    const frame: MissionFrameState = { open: ['diff'], shown: 'diff' }
+    const markup = drawn({ mission: mission({ stage: 'review', round: 1, frozen: true }), frame })
+    expect(markup).toMatch(/data-base=""[^>]*inert/)
+    expect(markup).toContain('aria-label="Layout of the diff"')
+    expect(markup).toMatch(
+      /aria-busy="true"[^>]*aria-label="The diff"|aria-label="The diff"[^>]*aria-busy="true"/,
+    )
+  })
+
+  test('wears the live mark while a round writes it', () => {
+    const frame: MissionFrameState = { open: ['diff'], shown: 'diff' }
+    const markup = drawn({ mission: mission({ stage: 'building', round: 2, frozen: true }), frame })
+    expect(markup).toContain('Live: round 2 is writing these files')
+  })
+})
+
 describe('The needs of a mission in Planning', () => {
   const waiting = [
     permission('n1', 'pnpm --filter api test notes-export'),

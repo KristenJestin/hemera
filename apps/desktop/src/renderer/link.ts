@@ -127,9 +127,18 @@ import {
   type VariableKey,
   type WindowNotice,
   type WorkspacesRootEdit,
+  type CommentedVersion,
+  type DiffChange,
+  type DiffContents,
+  type FeedbackView,
+  type MissionDiff,
+  type ReviewChange,
+  type ReviewStateView,
 } from '@hemera/ipc'
 import type {
   AgentProvider,
+  AnchorAsked,
+  FeedbackKind,
   ChatMention,
   ModelSettingValue,
   NeverEntry,
@@ -646,6 +655,52 @@ export interface Link {
     listener: (decision: PermissionDecision) => void,
     onEnd: (error: Error) => void,
   ) => () => void
+  /** The mission's diff, live from its Workspace or from its last checkpoint. */
+  readonly liveDiff: (missionId: string) => Promise<MissionDiff>
+  /** Each repository of the mission's diff that moved, as it moves. */
+  readonly onDiffChanges: (
+    missionId: string,
+    listener: (change: DiffChange) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Both sides of one file of the live diff; a large one only with `force`. */
+  readonly diffFile: (
+    missionId: string,
+    repository: string,
+    path: string,
+    force: boolean,
+  ) => Promise<DiffContents>
+  /** Both sides of one file of a checkpoint. */
+  readonly diffFileAtCheckpoint: (
+    checkpointId: string,
+    repository: string,
+    path: string,
+  ) => Promise<DiffContents>
+  /** The mission's Review: its rounds and every feedback, anchored on the live diff. */
+  readonly reviewState: (missionId: string) => Promise<ReviewStateView>
+  /** Each change of the mission's Review, to read it again. */
+  readonly onReviewChanges: (
+    missionId: string,
+    listener: (change: ReviewChange) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  readonly addFeedback: (
+    missionId: string,
+    kind: FeedbackKind,
+    body: string,
+    anchor: AnchorAsked | null,
+  ) => Promise<FeedbackView>
+  /** Its words written again, on the version the user read. */
+  readonly editFeedback: (
+    feedbackId: string,
+    body: string,
+    version: number,
+  ) => Promise<FeedbackView>
+  readonly withdrawFeedback: (feedbackId: string) => Promise<FeedbackView>
+  readonly resolveFeedback: (feedbackId: string) => Promise<FeedbackView>
+  readonly followUpFeedback: (feedbackId: string, body: string) => Promise<FeedbackView>
+  /** The version of a file a code comment was written on. */
+  readonly commentedVersion: (feedbackId: string) => Promise<CommentedVersion>
   readonly close: () => void
 }
 
@@ -1075,6 +1130,28 @@ export function linkOver(port: Port): Link {
         Predicate.isNever,
         () => undefined,
       ),
+    liveDiff: (missionId) => call((ready) => ready['diff.live']({ missionId })),
+    onDiffChanges: (missionId, listener, onEnd) =>
+      follow((ready) => ready['diff.changes']({ missionId }), listener, anError, onEnd),
+    diffFile: (missionId, repository, path, force) =>
+      call((ready) => ready['diff.file']({ missionId, repository, path, force })),
+    diffFileAtCheckpoint: (checkpointId, repository, path) =>
+      call((ready) => ready['diff.fileAtCheckpoint']({ checkpointId, repository, path })),
+    reviewState: (missionId) => call((ready) => ready['review.state']({ missionId })),
+    onReviewChanges: (missionId, listener, onEnd) =>
+      follow((ready) => ready['review.changes']({ missionId }), listener, anError, onEnd),
+    addFeedback: (missionId, kind, body, anchor) =>
+      call((ready) => ready['review.feedbackAdd']({ missionId, kind, body, anchor, images: [] })),
+    editFeedback: (feedbackId, body, version) =>
+      call((ready) => ready['review.feedbackEdit']({ feedbackId, body, version })),
+    withdrawFeedback: (feedbackId) =>
+      call((ready) => ready['review.feedbackWithdraw']({ feedbackId })),
+    resolveFeedback: (feedbackId) =>
+      call((ready) => ready['review.feedbackResolve']({ feedbackId })),
+    followUpFeedback: (feedbackId, body) =>
+      call((ready) => ready['review.feedbackFollowUp']({ feedbackId, body, images: [] })),
+    commentedVersion: (feedbackId) =>
+      call((ready) => ready['review.commentedVersion']({ feedbackId })),
     close: () => {
       Effect.runFork(Scope.close(scope, Exit.void))
     },

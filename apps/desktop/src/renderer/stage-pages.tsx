@@ -7,9 +7,10 @@ import {
   type NeedsYouListProps,
   type ViewWidth,
 } from '@hemera/ui'
-import { IconRefresh } from '@hemera/ui/icons'
+import { IconGitCompare, IconHistory, IconRefresh } from '@hemera/ui/icons'
 import { createElement, type ReactNode } from 'react'
 
+import { DiffHeadActions, DiffSheet, VersionSheet } from './diff-route.tsx'
 import type { Link } from './link.ts'
 import { differenceOf } from './mission-header-model.ts'
 import { PlanningStage } from './planning-stage.tsx'
@@ -71,15 +72,26 @@ export const STAGE_PAGES: Partial<Record<MissionStage, (props: StagePageProps) =
   Planning: PlanningStage,
 }
 
+/** What a view's body is handed beside its mission: the link, and the way to open another view. */
+export interface ViewContext {
+  link: Link
+  open: (view: string) => void
+}
+
 /** A view a mission can open over its base: the one contract of every view. */
 export interface MissionViewEntry {
   title: string
   icon: ReactNode
   width: ViewWidth
-  body: (mission: Mission) => ReactNode
+  /** What the sheet's head holds beside its title. */
+  actions?: ((mission: Mission) => ReactNode) | undefined
+  body: (mission: Mission, context: ViewContext) => ReactNode
 }
 
-/** The views of a mission by id; the outdated mark opens `difference`. */
+/**
+ * The views of a mission by id; the outdated mark opens `difference`, the mission's `…` the diff,
+ * and an outdated comment of the diff the version it was written on.
+ */
 export const MISSION_VIEWS = {
   difference: {
     title: 'What changed',
@@ -92,5 +104,18 @@ export const MISSION_VIEWS = {
         difference: seen?.difference ?? null,
       })
     },
+  },
+  diff: {
+    title: 'Diff',
+    icon: createElement(IconGitCompare, { size: 'sm' }),
+    width: 'wide',
+    actions: (mission) => createElement(DiffHeadActions, { mission }),
+    body: (mission, { link, open }) => createElement(DiffSheet, { link, mission, open }),
+  },
+  version: {
+    title: 'Commented version',
+    icon: createElement(IconHistory, { size: 'sm' }),
+    width: 'wide',
+    body: (mission, { link }) => createElement(VersionSheet, { link, mission }),
   },
 } satisfies Record<string, MissionViewEntry>
