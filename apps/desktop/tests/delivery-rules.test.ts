@@ -406,6 +406,113 @@ describe('Repository dependencies', () => {
   })
 })
 
+describe('The gestures of the delivery rules (#502)', () => {
+  /** web's CI moved from its waves to Review, after its pull request, now on a click. */
+  const ciMovedToReview = (world: Acme): DeliveryRulesDraft => {
+    const rules = chain(world)
+    return {
+      ...rules,
+      preparation: {
+        ...rules.preparation,
+        repositories: [
+          {
+            ...reviewedBy(rules, world.id('web'), []).preparation.repositories[0]!,
+            steps: {
+              off: [],
+              changed: [],
+              added: [],
+              moved: [{ after: 'pull-request', step: { id: 'ci', kind: 'ci', mode: 'click' } }],
+            },
+          },
+        ],
+      },
+    }
+  }
+
+  test('a step moved across moments keeps its settings, and is saved and read back there', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        yield* saveDeliveryRules(world.projectId, ciMovedToReview(world), 0)
+        return { world, read: yield* readDeliveryRules(world.projectId) }
+      }),
+    )
+    const web = seen.read.repositories.find((one) => one.name === 'web')
+    expect(web?.stacks.preparation.map((step) => [step.id, step.mode])).toEqual([
+      ['commit', 'auto'],
+      ['push', 'click'],
+      ['pull-request', 'click'],
+      ['ci', 'click'],
+    ])
+    expect(web?.stacks.waves.map((step) => step.id)).toEqual(['bump', 'merge'])
+  })
+
+  test('a mission already copied keeps its old order when a step moves (CT-47)', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        yield* saveDeliveryRules(world.projectId, chain(world), 0)
+        const mission = yield* createMission({
+          projectId: world.projectId,
+          idea: { sentence: 'Export the ledger as CSV', ticket: null },
+        })
+        const copied = [
+          yield* copySection(mission.id, 'preparation'),
+          yield* copySection(mission.id, 'waves'),
+        ]
+        yield* saveDeliveryRules(world.projectId, ciMovedToReview(world), 1)
+        const again = [
+          yield* copySection(mission.id, 'preparation'),
+          yield* copySection(mission.id, 'waves'),
+        ]
+        return { world, copied, again, kept: yield* missionCopies(mission.id) }
+      }),
+    )
+    expect(seen.again).toEqual(seen.copied)
+    expect(seen.kept).toEqual(seen.copied)
+    const copiedWaves = seen.copied[1]
+    const web =
+      copiedWaves?.section === 'waves'
+        ? copiedWaves.repositories.find((one) => one.repositoryId === seen.world.id('web'))
+        : undefined
+    expect(web?.steps.map((step) => step.id)).toEqual(['bump', 'merge', 'ci'])
+  })
+
+  test('a removed dependency that a manifest names comes back as proposed', async () => {
+    const seen = await engine(
+      Effect.gen(function* () {
+        const world = yield* acme
+        writeFileSync(join(world.main, 'shared', 'package.json'), '{"name":"@acme/shared"}')
+        writeFileSync(
+          join(world.main, 'api', 'package.json'),
+          '{"name":"@acme/api","dependencies":{"@acme/shared":"workspace:*"}}',
+        )
+        const proposed = yield* readDeliveryRules(world.projectId)
+        const accepted = yield* acceptDependencies(world.projectId, proposed.proposedDependencies)
+        const draft = accepted.rules
+        const removed = yield* saveDeliveryRules(
+          world.projectId,
+          {
+            ...draft,
+            waves: {
+              ...draft.waves,
+              repositories: draft.waves.repositories.map((one) =>
+                Object.assign({}, one, { deliversAfter: [] }),
+              ),
+            },
+          },
+          accepted.rules.version,
+        )
+        return { world, accepted, removed }
+      }),
+    )
+    const edge = { repositoryId: seen.world.id('api'), deliversAfter: seen.world.id('shared') }
+    expect(seen.accepted.proposedDependencies).toEqual([])
+    expect(seen.removed.repositories.every((one) => one.deliversAfter.length === 0)).toBe(true)
+    expect(seen.removed.proposedDependencies).toEqual([edge])
+  })
+})
+
 describe('A mission copies each section when it starts acting', () => {
   test('copySection twice answers the same copy and writes one Journal line; after a Project change, preparationChangedSinceCopy lists the difference', async () => {
     const seen = await engine(
