@@ -302,6 +302,11 @@ jobs:
       # every file, each once. The split follows the time each file took on these runners
       # (`tools/test-shards.ts`), not the hash of its path, which had put the two slowest files
       # in the same half of two: that half took 13 to 15 minutes, the other 8 to 10 (#359).
+      - name: DIAG522 probe
+        if: startsWith(matrix.part, 'repository')
+        working-directory: source/apps/desktop
+        shell: bash
+        run: node diag-522.mjs
       - name: Test the repository suites
         if: startsWith(matrix.part, 'repository')
         working-directory: source
