@@ -24,7 +24,12 @@ import { join, relative } from 'node:path'
 import { REPORT_CAP } from '@hemera/core/domain'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
-import { disposeReport, prepareReport, reportFor } from '../src/engine/building/proof-report.ts'
+import {
+  disposeReport,
+  prepareReport,
+  reportFor,
+  reportIn,
+} from '../src/engine/building/proof-report.ts'
 
 const COMMAND = 'vp test run export.test.ts'
 const windows = process.platform === 'win32'
@@ -126,5 +131,52 @@ describe('The report Hemera asks a proof’s runner for (#342, round 9)', () => 
     const read = prepareReport(plan)
     execFileSync('mkfifo', [plan.path])
     expect(read()).toEqual({ kind: 'unreadable', reason: 'not a regular file' })
+  })
+})
+
+describe('the proof run uses the custom value (#421)', () => {
+  test('a runner set by hand other than the one the command runs gets no reporting from Hemera', () => {
+    expect(reportFor(COMMAND, 'pytest')).toBeNull()
+    const plan = reportFor(COMMAND, 'vitest')
+    if (plan !== null) plans.push(plan)
+    expect(plan?.reporting.runner).toBe('vitest')
+  })
+
+  test('a report set by hand is read in the repository, which Hemera never empties', () => {
+    const repository = mkdtempSync(join(tmpdir(), 'acme-api-'))
+    const plan = reportIn('make test', repository, 'pytest', {
+      format: 'junit',
+      path: 'reports/junit.xml',
+    })
+    plans.push(plan)
+    expect(plan.line).toBe('make test')
+    expect(plan.path).toBe(join(repository, 'reports', 'junit.xml'))
+    mkdirSync(join(repository, 'reports'))
+    writeFileSync(plan.path, '<testsuites/>')
+    utimesSync(plan.path, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000))
+    const read = prepareReport(plan)
+    // The file there before the run stays, and its age alone keeps it from being read.
+    expect(existsSync(plan.path)).toBe(true)
+    expect(read()).toEqual({ kind: 'unreadable', reason: 'older than the run' })
+    writeFileSync(plan.path, '<testsuites></testsuites>')
+    expect(read()).toEqual({ kind: 'read', text: '<testsuites></testsuites>' })
+    rmSync(repository, { recursive: true, force: true })
+  })
+
+  test('a report set by hand that a link leads outside the repository is not read', () => {
+    const repository = mkdtempSync(join(tmpdir(), 'acme-api-'))
+    const outside = mkdtempSync(join(tmpdir(), 'acme-outside-'))
+    const plan = reportIn('make test', repository, 'pytest', {
+      format: 'junit',
+      path: 'reports/junit.xml',
+    })
+    plans.push(plan)
+    const read = prepareReport(plan)
+    // A junction on Windows, which needs no privilege; a directory link elsewhere.
+    symlinkSync(outside, join(repository, 'reports'), 'junction')
+    writeFileSync(join(outside, 'junit.xml'), '<testsuites></testsuites>')
+    expect(read()).toEqual({ kind: 'unreadable', reason: 'it leads outside the repository' })
+    rmSync(repository, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
   })
 })

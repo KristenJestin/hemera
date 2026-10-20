@@ -49,7 +49,13 @@ import { mutate } from '../transaction.ts'
 import { placeOf } from '../workspaces.ts'
 import { BuildDesk } from './desk.ts'
 import { goModuleOf } from './go-module.ts'
-import { type ReportPlan, disposeReport, prepareReport, reportFor } from './proof-report.ts'
+import {
+  type ReportPlan,
+  disposeReport,
+  prepareReport,
+  reportFor,
+  reportIn,
+} from './proof-report.ts'
 import { writeTrees } from './proof-store.ts'
 import { bases as basesCodec } from './tasks.ts'
 
@@ -182,10 +188,19 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
     const testBytes = read !== null && 'bytes' in read ? read.bytes : null
     // A catalogue command's line is the catalogue's: with Hemera's reporting, it runs as a copy of
     // it, in its folder, its marks (ask before running, its resources) still read from it.
+    const ran = catalogue === null ? command : lineFor(catalogue, process.platform)
+    // The test's repository's runner and report set in Project settings, read at each run (#421).
+    const own =
+      test === null
+        ? null
+        : (workspace.project.repositories.find((one) => one.path === test.repository)
+            ?.testReporting ?? null)
     plan =
       test === null || base === null
         ? null
-        : reportFor(catalogue === null ? command : lineFor(catalogue, process.platform))
+        : own?.report === undefined
+          ? reportFor(ran, own?.runner)
+          : reportIn(ran, base.folder, own.runner, own.report)
     const asking = plan
     const repository = workspace.project.repositories.find(
       (one) => one.id === catalogue?.repositoryId,
@@ -228,7 +243,7 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
       ),
     }
     const launched = yield* startRun(
-      catalogue === null || asking === null
+      catalogue === null || asking === null || asking.repository !== undefined
         ? asks
         : { ...asks, copied: { line: asking.line, folder: under === '.' ? null : posixOf(under) } },
     ).pipe(Effect.result)
@@ -297,12 +312,17 @@ const runProof = (asked: ProofAsked, limits: ProofLimits) => {
     })
     const key = asked.proof.key_line
     // What ran, when Hemera added its reporting to the Spec's command: the line, and what it added.
-    const ran = asking === null ? '' : `$ ${line}\nHemera added: ${asking.added}\n\n`
+    const reported =
+      asking === null
+        ? ''
+        : asking.repository === undefined
+          ? `$ ${line}\nHemera added: ${asking.added}\n\n`
+          : `$ ${line}\nIts report, as Project settings set it: ${test?.repository ?? ''}/${asking.repository.path}\n\n`
     const unread =
       read !== null && 'refused' in read && test !== null
         ? `Hemera did not read ${test.repository}/${test.path}: ${read.refused}\n\n`
         : ''
-    const heading = `${ran}${unread}`
+    const heading = `${reported}${unread}`
     const evidence = (name: string, text: string) =>
       putEvidence({
         missionId: asked.missionId,
