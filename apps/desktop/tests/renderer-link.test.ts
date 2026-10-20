@@ -16,6 +16,7 @@ import {
   EngineApartRpcs,
   ChecksRpcs,
   DiffRpcs,
+  ReviewRpcs,
   CheckRefused,
   InvalidProofLimit,
   DocRecipesRpcs,
@@ -607,6 +608,20 @@ const main = async (engine: 'answers' | 'gone') => {
       'diff.atCheckpoint': unused,
       'diff.fileAtCheckpoint': unused,
       'diff.changes': () => Stream.die('the window’s link is not asked for a diff here'),
+    }),
+    ReviewRpcs.toLayer({
+      'review.state': unused,
+      'review.feedbackAdd': unused,
+      'review.feedbackEdit': unused,
+      'review.feedbackWithdraw': unused,
+      'review.feedbackResolve': unused,
+      'review.feedbackFollowUp': unused,
+      'review.imageAdd': unused,
+      'review.commentedVersion': unused,
+      'review.fix': unused,
+      'review.round': unused,
+      'review.startMissionFrom': unused,
+      'review.changes': () => Stream.die('the window’s link is not asked for a review here'),
     }),
   )
   const program = Effect.gen(function* () {

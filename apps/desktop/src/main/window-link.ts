@@ -20,6 +20,7 @@ import {
   DocRecipesRpcs,
   ForgeRpcs,
   DeliveryRulesRpcs,
+  ReviewRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
@@ -1030,6 +1031,57 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['diff.changes'](request).pipe(
           streamClosedAs(gone),
           observedStream('diff.changes', log),
+        ),
+    }),
+    // Review's feedback (#341), which the diff view writes (#497), a layer of its own.
+    ReviewRpcs.toLayer({
+      'review.state': (request) =>
+        engine['review.state'](request).pipe(closedAs(gone), observed('review.state', log)),
+      'review.feedbackAdd': (request) =>
+        engine['review.feedbackAdd'](request).pipe(
+          closedAs(gone),
+          observed('review.feedbackAdd', log),
+        ),
+      'review.feedbackEdit': (request) =>
+        engine['review.feedbackEdit'](request).pipe(
+          closedAs(gone),
+          observed('review.feedbackEdit', log),
+        ),
+      'review.feedbackWithdraw': (request) =>
+        engine['review.feedbackWithdraw'](request).pipe(
+          closedAs(gone),
+          observed('review.feedbackWithdraw', log),
+        ),
+      'review.feedbackResolve': (request) =>
+        engine['review.feedbackResolve'](request).pipe(
+          closedAs(gone),
+          observed('review.feedbackResolve', log),
+        ),
+      'review.feedbackFollowUp': (request) =>
+        engine['review.feedbackFollowUp'](request).pipe(
+          closedAs(gone),
+          observed('review.feedbackFollowUp', log),
+        ),
+      'review.imageAdd': (request) =>
+        engine['review.imageAdd'](request).pipe(closedAs(gone), observed('review.imageAdd', log)),
+      'review.commentedVersion': (request) =>
+        engine['review.commentedVersion'](request).pipe(
+          closedAs(gone),
+          observed('review.commentedVersion', log),
+        ),
+      'review.fix': (request) =>
+        engine['review.fix'](request).pipe(closedAs(gone), observed('review.fix', log)),
+      'review.round': (request) =>
+        engine['review.round'](request).pipe(closedAs(gone), observed('review.round', log)),
+      'review.startMissionFrom': (request) =>
+        engine['review.startMissionFrom'](request).pipe(
+          closedAs(gone),
+          observed('review.startMissionFrom', log),
+        ),
+      'review.changes': (request) =>
+        engine['review.changes'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('review.changes', log),
         ),
     }),
   )

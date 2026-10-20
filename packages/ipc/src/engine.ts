@@ -211,22 +211,21 @@ export const EngineDeliveryRulesRpcs = DeliveryRulesRpcs
 /** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
 export const EngineReviewRpcs = DiffRpcs
 
+/** Review's feedback (#341), which the diff view writes (#497): a layer of its own (TS2589). */
+export const EngineFeedbackRpcs = ReviewRpcs
+
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
   EngineSettingsRpcs,
   EngineForgeRpcs,
   EngineDeliveryRulesRpcs,
   EngineReviewRpcs,
+  EngineFeedbackRpcs,
 )
 
 /**
  * Everything the engine serves: what main asks, and the proofs (#144), the automatic review
- * (#147), Review's feedback (#341) and the pushes (R6), served apart until their screens (R10)
- * forward them; their handlers are layers of their own (TS2589).
+ * (#147) and the pushes (R6), served apart until their screens (R10) forward them; their handlers
+ * are layers of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(
-  ProofsRpcs,
-  AutoReviewRpcs,
-  ReviewRpcs,
-  DeliveryRpcs,
-)
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, AutoReviewRpcs, DeliveryRpcs)
