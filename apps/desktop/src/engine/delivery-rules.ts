@@ -301,11 +301,6 @@ const copiesIn = (reader: EngineTransaction, projectId: string, missionId: strin
 export const sectionCopier = (missionId: string) =>
   Effect.gen(function* () {
     const mission = yield* getMission(missionId)
-    // A section already copied is answered from its copy: the forge is read only to make one.
-    const copied = (yield* reading((reader) =>
-      copiesIn(reader, mission.projectId, missionId),
-    )).find((copy) => copy.section === section)
-    if (copied !== undefined) return copied
     const project = yield* getProject(mission.projectId)
     const delivery = yield* deliveryProjectOf(project)
     return (transaction: EngineTransaction, section: DeliverySection) =>
@@ -349,6 +344,12 @@ export const copySection = (
   hold: Effect.Effect<void> = Effect.void,
 ) =>
   Effect.gen(function* () {
+    const mission = yield* getMission(missionId)
+    // A section already copied is answered from its copy: the forge is read only to make one.
+    const copied = (yield* reading((reader) =>
+      copiesIn(reader, mission.projectId, missionId),
+    )).find((copy) => copy.section === section)
+    if (copied !== undefined) return copied
     const copyIn = yield* sectionCopier(missionId)
     yield* hold
     return yield* mutate('copying the delivery rules into a mission', (transaction) =>
