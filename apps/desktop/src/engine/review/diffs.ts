@@ -136,6 +136,10 @@ export interface DiffsService {
   readonly places: (
     missionId: string,
   ) => Effect.Effect<ReadonlyArray<Place> | null, UnknownMission | DatabaseError>
+  /** The branch the mission's Workspace was made on, or null: detached, or no Workspace. */
+  readonly branch: (
+    missionId: string,
+  ) => Effect.Effect<string | null, UnknownMission | DatabaseError>
 }
 
 /** A repository of the Workspace as the live diff computed it last. */
@@ -931,6 +935,8 @@ export const diffsLayer = (run: GitBytesSpawn, log: Log) =>
         ),
         places: (missionId) =>
           Effect.map(workspaceNow(missionId), (workspace) => workspace?.places ?? null),
+        branch: (missionId) =>
+          Effect.map(workspaceNow(missionId), (workspace) => workspace?.branch ?? null),
         at: (missionId, repository) =>
           Effect.gen(function* () {
             const workspace = yield* workspaceNow(missionId)
