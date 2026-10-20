@@ -52,6 +52,7 @@ import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 import { AutoReviewRpcs } from './review.ts'
 import { ReviewRpcs } from './feedback.ts'
+import { ShipRpcs } from './ship.ts'
 
 /** The channel a build of Hemera was made for; each one keeps a data folder of its own. */
 export const Channel = Schema.Literals(['dev', 'beta', 'prod'])
@@ -221,12 +222,13 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
 
 /**
  * Everything the engine serves: what main asks, and the proofs (#144), the automatic review
- * (#147), Review's feedback (#341) and the pushes (R6), served apart until their screens (R10)
- * forward them; their handlers are layers of their own (TS2589).
+ * (#147), Review's feedback (#341), the pushes (R6) and Ship (R9), served apart until their
+ * screens (R10) forward them; their handlers are layers of their own (TS2589).
  */
 export const EngineServedRpcs = EngineMainRpcs.merge(
   ProofsRpcs,
   AutoReviewRpcs,
   ReviewRpcs,
   DeliveryRpcs,
+  ShipRpcs,
 )

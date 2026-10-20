@@ -420,6 +420,11 @@ describe('No MCP tool can Ship, push, merge, close, cancel or clean up a mission
     for (const said of ['Ship it', 'git push', 'merges the branch', 'Close', 'clean up', 'cleanup'])
       expect(said).toMatch(SHIP_WORDS)
   })
+
+  test('the Ship gesture is caught as a tool would name it: its preview and its confirmation', () => {
+    for (const said of ['ship_preview', 'ship_confirm', 'ship.preview', 'ship.confirm', 'shipped'])
+      expect(said).toMatch(SHIP_WORDS)
+  })
 })
 
 describe('A name an agent reports is read back as the tool it designates', () => {
