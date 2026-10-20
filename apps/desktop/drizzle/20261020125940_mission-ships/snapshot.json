@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "3a9847f9-2d4a-43ae-ab90-dc42c2ef48da",
+  "id": "34fd7f3d-64c6-4865-a4e1-6a526b87ccf6",
   "prevIds": ["84c9e121-6cb7-440d-9724-e6c4631157af"],
   "ddl": [
     {
@@ -230,6 +230,10 @@
     },
     {
       "name": "mission_recommendations",
+      "entityType": "tables"
+    },
+    {
+      "name": "mission_ships",
       "entityType": "tables"
     },
     {
@@ -6214,6 +6218,76 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "checkpoint_id",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trees",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "versions",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "confirmation",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shipped_at",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "delivered_at",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -8629,16 +8703,6 @@
       "default": null,
       "generated": null,
       "name": "last_fetched_at",
-      "entityType": "columns",
-      "table": "project_repositories"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "test_reporting",
       "entityType": "columns",
       "table": "project_repositories"
     },
@@ -14874,6 +14938,17 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_mission_ships_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "mission_ships"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_mission_spent_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "mission_spent"
@@ -16469,6 +16544,13 @@
       "nameExplicit": false,
       "name": "mission_recommendations_pk",
       "table": "mission_recommendations",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["mission_id"],
+      "nameExplicit": false,
+      "name": "mission_ships_pk",
+      "table": "mission_ships",
       "entityType": "pks"
     },
     {

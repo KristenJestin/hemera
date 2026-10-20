@@ -24,6 +24,7 @@ import {
   type EngineStatus,
   SetupEditRefused,
   SetupRefused,
+  ShipRpcs,
   TesterFolderUnreadable,
 } from '@hemera/ipc'
 import { Layer, Stream, SubscriptionRef } from 'effect'
@@ -43,6 +44,7 @@ import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
 import { Review, type ReviewService } from './review/feedback.ts'
 import { Pushes } from './delivery/pushes.ts'
+import { Ship } from './review/ship.ts'
 import { Rounds } from './review/rounds.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
@@ -920,7 +922,28 @@ export const engineHandlers = (
     autoReviewHandlers(profile, log),
     reviewHandlers(profile, log),
     pushesHandlers(profile, log),
+    shipHandlers(profile, log),
   )
+}
+
+/**
+ * Ship (R9), a layer of its own (see `EngineServedRpcs`): the user's gesture, asked by the window
+ * alone. No agent's tool reaches it.
+ */
+const shipHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return ShipRpcs.toLayer({
+    'ship.preview': ({ missionId }) =>
+      use(Ship.use((ship) => ship.preview(missionId))).pipe(observed('ship.preview', log)),
+    'ship.confirm': ({ missionId, previewId }) =>
+      use(Ship.use((ship) => ship.confirm(missionId, previewId))).pipe(
+        observed('ship.confirm', log),
+      ),
+    'ship.progress': ({ missionId }) =>
+      follow(Stream.unwrap(Ship.useSync((ship) => ship.progress(missionId)))).pipe(
+        observedStream('ship.progress', log),
+      ),
+  })
 }
 
 /** The pushes and pull requests (R6), a layer of their own (see `EngineServedRpcs`). */

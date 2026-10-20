@@ -22,7 +22,11 @@
  * - **Answers.** `feedback_answer` marks a feedback addressed, never resolved: the Planner answers
  *   the round's questions, the round's Builder the sources of its points.
  * - **A mission of its own.** `startMissionFrom` answers what the start field opens with; once a
- *   mission is created from the feedback, the feedback closes in its round as moved, with the link.
+ *   mission is created from the feedback, the feedback closes in its round as moved, with the link;
+ *   one its round still grills or builds closes once the round is answered. A point whose sources
+ *   all moved so answers nothing: `round_ready` refuses it, as one from withdrawn feedback.
+ * - **No Workspace.** A round whose Workspace is missing has no Planner: an environment need says
+ *   so, once, and its Retry starts the Planner, or raises the need again.
  * - **A stop.** At every start, a round being grilled has its Planner (its lineage resumed, or a
  *   fresh one) and the deliveries a stop left; a Planner left alive past its grilling is ended; a
  *   feedback a new mission was started from and not closed yet is closed.
@@ -32,6 +36,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
+  EnvironmentFields,
   KEEP_IN_ROUND,
   NEW_MISSION_DETAILS,
   NEW_MISSION_OPTIONS,
@@ -43,6 +48,7 @@ import {
   START_A_MISSION,
   type ToolArguments,
   graphProblemSaid,
+  MissionOwner,
   maskedJson,
   missionKey,
   proofRefusals,
@@ -73,6 +79,7 @@ import { type DomainEvent, type NewEvent, eventOf } from '../journal.ts'
 import { livingStandingIn } from '../living-spec/store.ts'
 import { Memory } from '../memory/index.ts'
 import { moveIn } from '../missions.ts'
+import { type NeedHandler, createNeedIn, needService } from '../needs.ts'
 import { prepareDeliveries, queuedForPlanner } from '../planning/handover.ts'
 import { askWave } from '../planning/questions.ts'
 import { readProof } from '../planning/plan.ts'
@@ -155,6 +162,15 @@ export interface RoundsSettings {
 /** Why a Fix is refused when nothing in the collecting round waits for one. */
 export const NOTHING_WAITS =
   'Nothing waits for a fix: questions and withdrawn remarks are not fixed.'
+
+/** The needs of a round's grilling: its Planner cannot start without the mission's Workspace. */
+export const ROUND_NEEDS = needService('review-rounds')
+
+/** What a round's need says is missing stays missing until the user's Retry tries again. */
+export const roundNeeds: NeedHandler = {
+  deliver: () => Effect.succeed([]),
+  recheck: (_need, retried) => Effect.succeed(!retried),
+}
 
 const now = (): string => new Date().toISOString()
 
@@ -240,9 +256,60 @@ export const roundsLayer = (settings: RoundsSettings) =>
           rows.filter((one) => one.role === 'round-planner'),
         )
 
+      /** Whether the need that the round's Workspace is missing waits on the user's Retry. */
+      const workspaceWaits = (missionId: string) =>
+        database
+          .select({ id: needs.id })
+          .from(needs)
+          .where(
+            and(
+              eq(needs.missionId, missionId),
+              eq(needs.service, ROUND_NEEDS),
+              eq(needs.state, 'pending'),
+            ),
+          )
+          .limit(1)
+          .pipe(
+            Effect.mapError(refusedWhile('reading the round’s needs')),
+            Effect.map((rows) => rows.length > 0),
+          )
+
+      /** The round's Planner cannot start without the Workspace: the user is told, and Retries. */
+      const workspaceMissing = (missionId: string, round: number, folder: string | null) =>
+        Effect.gen(function* () {
+          const mission = yield* missionOf(missionId)
+          const write = yield* createNeedIn(
+            ROUND_NEEDS,
+            MissionOwner.make({ projectId: mission.projectId, missionId, taskId: null }),
+            EnvironmentFields.make({
+              missing: `The Planner in round mode cannot start round ${String(round)}: the mission's Workspace is missing${folder === null ? '' : ` (${folder})`}.`,
+              action: 'Put the Workspace back where it was, then Retry; or cancel the mission.',
+              settingsSection: null,
+            }),
+          )
+          yield* mutate('saying the round’s Workspace is missing', (transaction) =>
+            Effect.map(write(transaction), (made) => ({ result: undefined, events: made.events })),
+          )
+          yield* said(`no Workspace for round ${String(round)} of ${missionId}`)
+        }).pipe(
+          provided,
+          Effect.catchTags({
+            NeedRefused: (refused) => said(`no need for ${missionId}: ${refused.reason}`),
+            UnknownMission: () => Effect.void,
+            UnknownProject: () => Effect.void,
+          }),
+        )
+
+      /** The folder of the mission's Workspace while it is on disk, or null. */
+      const workspaceThere = (missionId: string) =>
+        Effect.map(workspaceFolderIn(database, missionId), (folder) =>
+          folder !== null && existsSync(folder) ? folder : null,
+        )
+
       /**
        * The Planner of the round being grilled: nothing when one lives; its lineage resumed when it
-       * stopped during this round; a fresh session otherwise, in the Workspace.
+       * stopped during this round; a fresh session otherwise, in the Workspace. Without its
+       * Workspace, an environment need, once, whose Retry comes back here.
        */
       const ensureGriller = (missionId: string) =>
         Semaphore.withPermits(
@@ -253,6 +320,14 @@ export const roundsLayer = (settings: RoundsSettings) =>
             const round = yield* grillingRoundIn(database, missionId)
             if (round === null) return
             if ((yield* griller(missionId)).length > 0) return
+            if (yield* workspaceWaits(missionId)) return
+            if ((yield* workspaceThere(missionId)) === null) {
+              return yield* workspaceMissing(
+                missionId,
+                round,
+                yield* workspaceFolderIn(database, missionId),
+              )
+            }
             const row = yield* roundRowIn(database, missionId, round)
             const owner = { kind: 'mission', missionId } as const
             const last = (yield* sessionsIn(['ended', 'failed', 'replaced'], owner))
@@ -264,8 +339,8 @@ export const roundsLayer = (settings: RoundsSettings) =>
               const resumed = yield* sessions.resume(last.id)
               if (resumed !== null) return
             }
-            const folder = yield* workspaceFolderIn(database, missionId)
-            if (folder === null) return yield* said(`no Workspace for the round of ${missionId}`)
+            const folder = yield* workspaceThere(missionId)
+            if (folder === null) return
             yield* sessions.open({ owner, role: 'round-planner', folder }).pipe(
               Effect.asVoid,
               Effect.catchTag('SessionRefused', (refused) =>
@@ -1060,12 +1135,22 @@ export const roundsLayer = (settings: RoundsSettings) =>
           const withdrawn = new Set(
             feedback.filter((one) => one.state === 'withdrawn').map((one) => one.id),
           )
+          // A remark leaves the round only withdrawn or moved to a mission of its own: "Start a
+          // mission from this" answered, then the mission created.
+          const gone = new Set(
+            feedback.filter((one) => one.state !== 'in_round').map((one) => one.id),
+          )
           for (const point of points) {
             if (!scenarios.some((one) => one.point === point.id && one.proof !== null)) {
               problems.push(`${point.id} has no scenario with its proof.`)
             }
             if (point.sources.every((one) => withdrawn.has(one))) {
               problems.push(`${point.id} comes only from withdrawn feedback: remove it.`)
+            } else if (point.sources.every((one) => gone.has(one))) {
+              const how = point.sources.some((one) => withdrawn.has(one))
+                ? 'withdrawn or moved to a mission of its own'
+                : 'moved to a mission of its own'
+              problems.push(`${point.id} comes only from feedback ${how}: remove it.`)
             }
           }
           const tasks = yield* roundTasksIn(transaction, missionId, round)
@@ -1354,7 +1439,12 @@ export const roundsLayer = (settings: RoundsSettings) =>
           return view
         })
 
-      /** A feedback a mission was started from, closed in its round as moved, with the link. */
+      /**
+       * A feedback a mission was started from, linked to it as soon as the mission exists, so a
+       * second start is refused whatever the feedback is by then. One its round still grills or
+       * builds stays the round's until the round is answered; a withdrawn one stays withdrawn and
+       * says where it went; any other closes as moved, with the link.
+       */
       const movedIn = (missionId: string, feedbackId: string) =>
         provided(
           mutate('closing a feedback moved to a mission', (transaction) =>
@@ -1372,16 +1462,28 @@ export const roundsLayer = (settings: RoundsSettings) =>
               if (
                 created === undefined ||
                 row === undefined ||
-                row.movedTo !== null ||
                 row.missionId !== created.originId ||
-                row.state === 'withdrawn'
+                (row.movedTo !== null && row.movedTo !== missionId)
               ) {
                 return { result: undefined, events: [] }
               }
               const moved = secrets.mask(`Moved to a new mission: ${keyOf(created)}.`)
+              const closes =
+                row.state !== 'in_round' &&
+                row.state !== 'withdrawn' &&
+                !(row.state === 'resolved' && row.answer === moved)
+              const says = row.state === 'withdrawn' && row.answer !== moved
+              if (row.movedTo !== null && !closes && !says) {
+                return { result: undefined, events: [] }
+              }
               yield* transaction
                 .update(reviewFeedback)
-                .set({ state: 'resolved', movedTo: missionId, answer: moved, updatedAt: now() })
+                .set({
+                  state: closes ? 'resolved' : row.state,
+                  movedTo: missionId,
+                  answer: closes || says ? moved : row.answer,
+                  updatedAt: now(),
+                })
                 .where(eq(reviewFeedback.id, feedbackId))
                 .pipe(Effect.mapError(refusedWhile('closing a feedback')))
               return {
@@ -1397,6 +1499,22 @@ export const roundsLayer = (settings: RoundsSettings) =>
             }),
           ),
         )
+
+      /** Each feedback of `origin` a mission was started from and not closed yet, closed now. */
+      const movedLeft = (origin: string | null) =>
+        Effect.gen(function* () {
+          const created = yield* database
+            .select()
+            .from(domainEvents)
+            .where(eq(domainEvents.type, 'mission.created'))
+            .orderBy(asc(domainEvents.sequence))
+            .pipe(Effect.mapError(refusedWhile('reading the missions created')))
+          for (const one of created.map(eventOf)) {
+            if (origin !== null && one.payload['origin'] !== origin) continue
+            const feedbackId = Option.getOrNull(readString(one.payload['originFeedback']))
+            if (feedbackId !== null) yield* movedIn(one.entityId, feedbackId)
+          }
+        })
 
       // --- following what happens --------------------------------------------------------------
 
@@ -1415,8 +1533,19 @@ export const roundsLayer = (settings: RoundsSettings) =>
             if (yield* plannerWaits(missionId)) return
             return yield* ensureGriller(missionId)
           }
-          if (event.type === 'review.round_building' || event.type === 'review.round_answered') {
+          // The user's Retry of the need that the round's Workspace is missing.
+          if (event.type === 'need.withdrawn' && event.payload['service'] === ROUND_NEEDS) {
+            const missionId = Option.getOrNull(readString(event.payload['missionId']))
+            if (missionId !== null) yield* grilledCaughtUp(missionId)
+            return
+          }
+          if (event.type === 'review.round_building') {
             return yield* endGriller(event.entityId, 'the round’s grilling is over')
+          }
+          if (event.type === 'review.round_answered') {
+            yield* endGriller(event.entityId, 'the round’s grilling is over')
+            // A feedback a mission was started from while its round ran closes now.
+            return yield* movedLeft(event.entityId)
           }
           if (event.type === 'review.feedback_withdrawn') {
             const grilled = yield* grillingRoundIn(database, event.entityId)
@@ -1433,6 +1562,41 @@ export const roundsLayer = (settings: RoundsSettings) =>
           }
         })
 
+      /**
+       * A round grilled with its Planner, and what its Planner was given and never handed over
+       * (CT-26): at a start, and at the Retry of its Workspace's need.
+       */
+      const grilledCaughtUp = (missionId: string) =>
+        Effect.gen(function* () {
+          yield* ensureGriller(missionId)
+          // The need holds the Planner like every other caller: its Retry comes back here.
+          if (yield* workspaceWaits(missionId)) return
+          const prepared = yield* provided(prepareDeliveries(missionId))
+          const left = (yield* provided(queuedForPlanner(missionId))).filter(
+            (queued) => !prepared.some((ready_) => ready_.id === queued.id),
+          )
+          const folder = yield* workspaceThere(missionId)
+          if (folder === null) return
+          for (const delivery of [...left, ...prepared]) {
+            yield* sessions
+              .deliverOrStart(
+                {
+                  id: delivery.id,
+                  owner: { kind: 'mission', missionId },
+                  target: { role: 'round-planner' },
+                  kind: delivery.kind,
+                  body: delivery.body,
+                },
+                { owner: { kind: 'mission', missionId }, role: 'round-planner', folder },
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  said(`a delivery was not handed over: ${String(cause)}`),
+                ),
+              )
+          }
+        })
+
       /** What a stop left: a round grilled without its Planner, a Planner past its grilling. */
       const catchUp = Effect.gen(function* () {
         const grilled = yield* database
@@ -1441,38 +1605,7 @@ export const roundsLayer = (settings: RoundsSettings) =>
           .innerJoin(missions, eq(missions.id, reviewRounds.missionId))
           .where(and(eq(reviewRounds.state, 'grilling'), eq(missions.stage, 'review')))
           .pipe(Effect.mapError(refusedWhile('reading the rounds')))
-        for (const one of grilled) {
-          yield* ensureGriller(one.missionId)
-          // What a stopped engine received and never handed over goes now (CT-26).
-          const prepared = yield* provided(prepareDeliveries(one.missionId))
-          const left = (yield* provided(queuedForPlanner(one.missionId))).filter(
-            (queued) => !prepared.some((ready_) => ready_.id === queued.id),
-          )
-          const folder = yield* workspaceFolderIn(database, one.missionId)
-          if (folder === null) continue
-          for (const delivery of [...left, ...prepared]) {
-            yield* sessions
-              .deliverOrStart(
-                {
-                  id: delivery.id,
-                  owner: { kind: 'mission', missionId: one.missionId },
-                  target: { role: 'round-planner' },
-                  kind: delivery.kind,
-                  body: delivery.body,
-                },
-                {
-                  owner: { kind: 'mission', missionId: one.missionId },
-                  role: 'round-planner',
-                  folder,
-                },
-              )
-              .pipe(
-                Effect.catchCause((cause) =>
-                  said(`a delivery was not handed over: ${String(cause)}`),
-                ),
-              )
-          }
-        }
+        for (const one of grilled) yield* grilledCaughtUp(one.missionId)
         // A Planner in round mode alive past its round's grilling ends.
         const living = yield* sessionsIn([...LIVE])
         for (const one of living) {
@@ -1481,16 +1614,7 @@ export const roundsLayer = (settings: RoundsSettings) =>
           yield* sessions.end(one.lineage, 'the round’s grilling is over')
         }
         // A mission started from a feedback a stop kept from closing.
-        const created = yield* database
-          .select()
-          .from(domainEvents)
-          .where(eq(domainEvents.type, 'mission.created'))
-          .orderBy(asc(domainEvents.sequence))
-          .pipe(Effect.mapError(refusedWhile('reading the missions created')))
-        for (const one of created.map(eventOf)) {
-          const feedbackId = Option.getOrNull(readString(one.payload['originFeedback']))
-          if (feedbackId !== null) yield* movedIn(one.entityId, feedbackId)
-        }
+        yield* movedLeft(null)
       })
 
       const subscribed = yield* events.subscribe
