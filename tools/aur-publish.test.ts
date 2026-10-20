@@ -143,6 +143,48 @@ describe('The .SRCINFO follows the PKGBUILD', () => {
   })
 })
 
+describe('The AUR packages are published under the AGPL-3.0-or-later', () => {
+  test.each(AUR_PACKAGES)('%s declares the licence in its PKGBUILD', (name) => {
+    expect(arrayOf(pkgbuildOf(name), 'license')).toEqual(['AGPL-3.0-or-later'])
+  })
+
+  test.each(AUR_PACKAGES)('%s declares it in its .SRCINFO too', (name) => {
+    expect(srcinfoOf(name)).toContain('\tlicense = AGPL-3.0-or-later\n')
+    expect(srcinfoOf(name)).not.toContain('UNLICENSED')
+  })
+
+  test.each(AUR_PACKAGES)(
+    '%s installs the LICENSE the deb carries to /usr/share/licenses',
+    (name) => {
+      expect(pkgbuildOf(name)).toMatch(
+        /install -Dm644 "\$pkgdir\/opt\/\$_app\/LICENSE" \\\n\s+"\$pkgdir\/usr\/share\/licenses\/\$pkgname\/LICENSE"/,
+      )
+    },
+  )
+
+  test.each(AUR_PACKAGES)('%s still installs the licenses of Chromium beside it', (name) => {
+    expect(pkgbuildOf(name)).toContain(
+      '"$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"',
+    )
+  })
+
+  test.each(AUR_PACKAGES)(
+    'a release writes the licence again, whatever the last one said',
+    (name) => {
+      const tag = name === 'hemera-bin' ? 'v0.4.0' : 'v0.5.0-beta.1'
+      const pkgbuild = renderPkgbuild(pkgbuildOf(name), versionOf(name, tag), HASH)
+      const stale = srcinfoOf(name).replace(
+        /^\tlicense = .*$/m,
+        '\tlicense = LicenseRef-UNLICENSED',
+      )
+      const rendered = renderSrcinfo(stale, pkgbuild)
+
+      expect(rendered).toContain('\tlicense = AGPL-3.0-or-later\n')
+      expect(rendered).not.toContain('UNLICENSED')
+    },
+  )
+})
+
 describe('Publishing without the AUR key', () => {
   test('an absent key skips the publication with a notice', () => {
     expect(skippedWithout({}, 'hemera-bin')).toContain('AUR_SSH_KEY')

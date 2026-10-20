@@ -16,7 +16,7 @@ pkgrel=1
 pkgdesc='Desktop cockpit for ACP agents (beta)'
 arch=('x86_64')
 url='https://github.com/KristenJestin/hemera'
-license=('LicenseRef-UNLICENSED')
+license=('AGPL-3.0-or-later')
 # What the Electron binary links against, as namcap finds it, and what it loads at run time:
 # libsecret for the cookie encryption key, xdg-utils to open a link in the browser.
 depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3'
@@ -52,6 +52,10 @@ package() {
     install -Dm644 "$icon" "$pkgdir/usr/share/icons/hicolor/$size/apps/$_app.${icon##*.}"
   done
 
+  # Hemera's own licence, which the package carries at the root of its folder: Electron's is
+  # LICENSE.electron.txt beside it.
+  install -Dm644 "$pkgdir/opt/$_app/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$pkgdir/opt/$_app/LICENSES.chromium.html" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"
 }
