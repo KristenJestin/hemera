@@ -1,0 +1,64 @@
+{
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 2,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 2,
+  "numPassedTests": 1,
+  "numFailedTests": 1,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1792342709439,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["export"],
+          "fullName": "export keeps",
+          "status": "passed",
+          "title": "keeps",
+          "duration": 1.7934280000000058,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["export"],
+          "fullName": "export saves",
+          "status": "failed",
+          "title": "saves",
+          "duration": 5.624655999999987,
+          "failureMessages": [
+            "AssertionError [ERR_ASSERTION]: expected \"csv\" to be \"md\"\n\n'csv' !== 'md'\n\n    at new AssertionError (node:internal/assert/assertion_error:380:5)\n    at /work/acme/api/tests/setup.mjs:6:11\n    at file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at wrapper (file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2004:37)\n    at file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3584:52\n    at run (file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1348:20)\n    at limiterFn (file:///work/acme/api/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1358:59)"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1792342709626,
+      "endTime": 1792342709633.6248,
+      "status": "failed",
+      "message": "",
+      "name": "/work/acme/api/tests/export.test.mjs"
+    }
+  ]
+}

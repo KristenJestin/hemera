@@ -20,6 +20,7 @@ import {
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { ForgeCli, ForgeName } from './forge.ts'
 import { EngineGone } from './gone.ts'
 import { UnknownMission } from './missions.ts'
 import { StaleVersion, StorageFailed } from './profile.ts'
@@ -131,5 +132,104 @@ export const DeliveryRulesRpcs = RpcGroup.make(
     payload: { missionId: Schema.String },
     success: Schema.NullOr(PreparationChange),
     error: failing(...always, UnknownMission, UnknownProject, DeliveryRulesUnreadable),
+  }),
+)
+
+// ——— The pushes and the pull requests (R6) ———
+
+/** Where a pull request stands on its forge, as Hemera last read it. */
+export const PullRequestState = Schema.Literals(['open', 'merged', 'closed'])
+export type PullRequestState = typeof PullRequestState.Type
+
+/** A team member's approval of a pull request, as the forge names them. */
+export const PullRequestApproval = Schema.Struct({ login: Schema.String })
+
+/**
+ * A pull request as the port reads it (`pullRequest.status`): its state, its head commit, the
+ * forge's review decision (GitHub's; null where the forge has none) and the approvals.
+ */
+export const PullRequestStatus = Schema.Struct({
+  forge: ForgeName,
+  host: Schema.String,
+  number: Schema.Number,
+  url: Schema.String,
+  state: PullRequestState,
+  head: Schema.String,
+  reviewDecision: Schema.NullOr(Schema.String),
+  approvals: Schema.Array(PullRequestApproval),
+})
+export type PullRequestStatus = typeof PullRequestStatus.Type
+
+/**
+ * Where a repository's push and pull request stand: waiting for the user's click, running,
+ * done, failed (with Git's or the forge's message), indeterminate (an outcome Hemera could not
+ * read, never shown as done), waiting for a forge CLI to be ready, or declined ("not now").
+ */
+export const PushState = Schema.Literals([
+  'waiting-for-click',
+  'running',
+  'done',
+  'failed',
+  'indeterminate',
+  'waiting-for-cli',
+  'declined',
+])
+export type PushState = typeof PushState.Type
+
+/** One repository of a mission, as its pushes stand. */
+export const RepositoryPush = Schema.Struct({
+  repositoryId: Schema.String,
+  /** Its path in the Workspace. */
+  repository: Schema.String,
+  state: PushState,
+  /** The action of the stack it stands at, by id; null before it started. */
+  step: Schema.NullOr(Schema.String),
+  /** What failed or could not be read, verbatim and masked. */
+  message: Schema.NullOr(Schema.String),
+  /** The CLI the pull request waits for, when it waits for one. */
+  waitingFor: Schema.NullOr(ForgeCli),
+  /** The last commit pushed, and when. */
+  commit: Schema.NullOr(Schema.String),
+  pushedAt: Schema.NullOr(Schema.String),
+  pullRequest: Schema.NullOr(PullRequestStatus),
+})
+export type RepositoryPush = typeof RepositoryPush.Type
+
+/** A mission's pushes, with the version of the preparation it copied (null before its first). */
+export const MissionPushes = Schema.Struct({
+  missionId: Schema.String,
+  rulesVersion: Schema.NullOr(Schema.Number),
+  repositories: Schema.Array(RepositoryPush),
+})
+export type MissionPushes = typeof MissionPushes.Type
+
+/** A Retry of a repository that has nothing to retry: it is neither failed nor indeterminate. */
+export class NothingToRetry extends Schema.TaggedError<NothingToRetry>()('NothingToRetry', {
+  repository: Schema.String,
+}) {
+  override get message(): string {
+    return `${this.repository} has nothing to retry.`
+  }
+}
+
+export const DeliveryRpcs = RpcGroup.make(
+  /** Per repository of the mission: its last push, its pull request and where its step stands. */
+  Rpc.make('delivery.pushes', {
+    payload: { missionId: Schema.String },
+    success: MissionPushes,
+    error: failing(...always, UnknownMission, DeliveryRulesUnreadable),
+  }),
+  /** Runs a failed or indeterminate repository again, doing only what is not already true. */
+  Rpc.make('delivery.retry', {
+    payload: { missionId: Schema.String, repository: Schema.String },
+    success: MissionPushes,
+    error: failing(...always, UnknownMission, NothingToRetry, DeliveryRulesUnreadable),
+  }),
+  /** The mission's pushes now, then after each change, for as long as the caller listens. */
+  Rpc.make('delivery.changes', {
+    payload: { missionId: Schema.String },
+    success: MissionPushes,
+    error: failing(...always, UnknownMission, DeliveryRulesUnreadable),
+    stream: true,
   }),
 )

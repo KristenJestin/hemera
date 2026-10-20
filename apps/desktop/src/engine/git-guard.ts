@@ -14,8 +14,10 @@
  *
  * Every repository Hemera knows is first seen at the start and as it is added, and any other one
  * when an agent's action opens on it or when the engine's Git first reaches it, before that call:
- * what it has then is its baseline, and nothing is asked. The snapshot stores are repositories as
- * any. A scope with a baseline
+ * what it has then is its baseline, and nothing is asked, an index that cannot be read for its
+ * submodules included (#474): one that cannot be read later asks, and one read again is dropped from
+ * the baseline unasked, what it names compared from then on. The snapshot stores are repositories
+ * as any. A scope with a baseline
  * kept is compared, so a change made while the engine was stopped asks at the next start; a scope
  * without one is a first sighting. A checkout's own `.git` is part of its repository's scope: one
  * pointed at another repository is a change of the first.
@@ -65,8 +67,10 @@ import {
   type ShapeChange,
   type ShapeHome,
   type Shapes,
+  asCloned,
   checkoutOf,
   commonOf,
+  isUnreadIndex,
   onlyWorktreeFormat,
   realPathOf,
   repositoryOf,
@@ -428,20 +432,23 @@ export const engineGitGuard = (
     /**
      * A configuration that changed only by what a user's everyday Git writes on its own and that
      * runs nothing (a submodule's address, a branch's upstream): its steady digest is the same, and
-     * what it has now is taken into the baseline, whoever wrote it. Nothing is asked.
+     * what it has now is taken into the baseline, whoever wrote it. So is a submodule's Git folder
+     * as `git submodule` clones it (#470). Nothing is asked.
      */
     const everyday = (scope: Scope, now: Shapes): void => {
       const taken = [...now].filter(([path, shape]) => {
         const was = scope.baseline.get(path)
-        return (
-          was !== undefined &&
-          was.digest !== shape.digest &&
-          shape.steady !== null &&
-          was.steady === shape.steady
-        )
+        if (was === undefined) return !scope.home && asCloned(scope.key, path, shape)
+        return was.digest !== shape.digest && shape.steady !== null && was.steady === shape.steady
       })
-      if (taken.length === 0) return
-      scope.baseline = new Map([...scope.baseline, ...taken])
+      // An index read again: what it names is compared from now on, and asks as any.
+      const read = [...scope.baseline].filter(
+        ([path, shape]) => isUnreadIndex(shape) && !now.has(path),
+      )
+      if (taken.length === 0 && read.length === 0) return
+      const baseline = new Map([...scope.baseline, ...taken])
+      for (const [path] of read) baseline.delete(path)
+      scope.baseline = baseline
       keep(scope)
     }
 
@@ -860,18 +867,22 @@ export const engineGitGuard = (
         .pipe(Effect.mapError(refusedWhile('reading the holds of the Git guard')))
       const unread = (what: string) => Effect.fail(new Error(`a record does not read: ${what}`))
       const readScopes: Scope[] = []
+      /** The baselines kept before their files had a steady digest (before #458's round 5). */
+      const unsteady: Scope[] = []
       for (const row of baselines) {
         const shapes = Option.getOrNull(readShapes(row.shapes))
         const checkouts = Option.getOrNull(readFolders(row.checkouts))
         if (shapes === null || checkouts === null) return yield* unread(`baseline ${row.id}`)
         const everywhere = row.id === HOME
-        readScopes.push({
+        const scope: Scope = {
           key: row.id,
           home: everywhere,
           checkouts: new Set(checkouts),
           projectId: row.projectId,
           baseline: new Map(shapes.map(({ path, ...shape }) => [path, unkept(shape, everywhere)])),
-        })
+        }
+        readScopes.push(scope)
+        if (shapes.some((shape) => shape.steady === undefined)) unsteady.push(scope)
       }
       const readHolds: Hold[] = []
       for (const row of rows) {
@@ -900,7 +911,7 @@ export const engineGitGuard = (
           answer,
         })
       }
-      return { readScopes, readHolds }
+      return { readScopes, readHolds, unsteady }
     })
 
     /**
@@ -928,8 +939,21 @@ export const engineGitGuard = (
         ask(hold)
         return
       }
-      const { readScopes, readHolds } = outcome.success
+      const { readScopes, readHolds, unsteady } = outcome.success
       for (const scope of readScopes) scopes.set(scope.key, scope)
+      // A baseline kept without steady digests takes them from its files still as it has them: an
+      // everyday change made from now on is taken as one. A file changed meanwhile keeps none, and
+      // asks.
+      for (const scope of unsteady) {
+        const now = fingerprintOf(scope)
+        scope.baseline = new Map(
+          [...scope.baseline].map(([path, was]) => {
+            const shape = now.get(path)
+            return [path, shape?.digest === was.digest ? { ...was, steady: shape.steady } : was]
+          }),
+        )
+        keep(scope)
+      }
       for (const hold of readHolds) {
         holds.set(hold.key, hold)
         if (hold.answer !== 'none') continue

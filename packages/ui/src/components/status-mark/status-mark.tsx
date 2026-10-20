@@ -10,6 +10,7 @@ const TONES: Record<MarkState, string> = {
   todo: 'relative inline-flex shrink-0 text-muted-foreground',
   running: 'relative inline-flex shrink-0 text-info',
   done: 'relative inline-flex shrink-0 text-success',
+  unverified: 'relative inline-flex shrink-0 text-success',
   failed: 'relative inline-flex shrink-0 text-destructive',
   waiting: 'relative inline-flex shrink-0 text-warning',
   blocked: 'relative inline-flex shrink-0 text-destructive',
@@ -50,7 +51,9 @@ const ARC = 0.28
 
 /** How much of the ring each pose closes. */
 function ringOf(state: MarkState): number {
-  if (state === 'todo' || state === 'skipped' || state === 'idle') return 0
+  if (state === 'todo' || state === 'skipped' || state === 'idle' || state === 'unverified') {
+    return 0
+  }
   if (state === 'running') return ARC
   return 1
 }
@@ -72,7 +75,8 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
   const ringing = useTransition(morph)
   const drawing = useTransition(check.draw)
   const beat = useTransition(pinging)
-  const dashed = state === 'todo' || state === 'skipped' || state === 'idle'
+  const dashed =
+    state === 'todo' || state === 'skipped' || state === 'idle' || state === 'unverified'
   const ring = ringOf(state)
   const waiting = state === 'waiting'
   const mark = (
@@ -121,7 +125,7 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
             d="M6.6 10.3l2.3 2.3l4.5 -4.7"
             data-figure="check"
             initial={false}
-            animate={drawn(state === 'done')}
+            animate={drawn(state === 'done' || state === 'unverified')}
             transition={drawing}
           />
           <motion.path

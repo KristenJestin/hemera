@@ -162,6 +162,10 @@ export const sessionsEngine = (
     readonly building?: ProfileParts['building']
     /** Where a suite holds Review's feedback (#341). */
     readonly review?: ProfileParts['review']
+    /** The fake forge CLIs' environment and limits (#253). */
+    readonly forge?: ProfileParts['forge']
+    /** The pushes' Git and where a suite holds them (R6). */
+    readonly delivery?: ProfileParts['delivery']
     /** Where a suite holds a run as it is written or launched. */
     readonly runs?: ProfileParts['runs']
     /** The engine on a test clock the suite moves (#85). */
@@ -205,6 +209,8 @@ export const sessionsEngine = (
     ticketSync: options.ticketSync,
     building: options.building,
     review: options.review,
+    forge: options.forge,
+    delivery: options.delivery,
     missions: { ...options.missions, guards: PASSING },
     sessions: {
       discovery: everyAgentFound,

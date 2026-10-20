@@ -111,6 +111,44 @@ export const Decision: Story = {
   },
 }
 
+/**
+ * A decision that rests on what was seen: the outputs to compare, one under the other, before the
+ * options. Here a scenario's test fails during Building, but not the way it failed in Planning.
+ */
+export const DecisionWithOutputs: Story = {
+  args: {
+    title: 'S4 fails, but not the way it did in Planning',
+    text: 'In Planning the test failed on the missing column; now it fails on the date format.',
+    ask: {
+      kind: 'decision',
+      options: [
+        {
+          label: 'Keep the new failure as S4’s red',
+          recommended: 'it is still the behaviour asked',
+        },
+        { label: 'Back to the Planning failure' },
+      ],
+      evidence: [
+        {
+          what: 'In Planning',
+          output: 'Expected column "Due date" in invoices.csv, found none',
+        },
+        {
+          what: 'Now',
+          output: 'Expected "2026-03-01" in column "Due date", received "01/03/2026"',
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const outputs = canvas.getByRole('list', { name: 'Outputs to compare' })
+    await expect(within(outputs).getAllByRole('listitem')).toHaveLength(2)
+    await expect(within(outputs).getByText(/found none/)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /Keep the new failure/ })).toBeVisible()
+  },
+}
+
 /** While the mission is in Planning, a need can be discussed too. */
 export const DecisionInPlanning: Story = {
   args: { ...Decision.args, planning: true },

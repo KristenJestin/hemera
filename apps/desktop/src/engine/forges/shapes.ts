@@ -82,6 +82,8 @@ const read = (cli: ForgeCli, operation: string, words: ReadonlyArray<string>) =>
 export const SAFE_WORD = /^(?!-)(?!\.{1,2}$)[A-Za-z0-9._~-]+$/
 
 const NUMBER: readonly [string, RegExp] = ['<number>', /^\d+$/]
+/** The fields a gh read asks for: names and commas, nothing a shell or `--jq` would read. */
+const JSON_FIELDS = /^[A-Za-z]+(,[A-Za-z]+)*$/
 /** One owner or repository name: never `.` or `..`, which would walk out of the path, nor a flag. */
 const NAME = String.raw`(?!-)(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
 /** An owner or repository name, as the shapes accept it: a gh owner, a gh or bkt repository. */
@@ -115,6 +117,51 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
   read('gh', 'user', ['api', '--hostname', '<host>', 'user', '--jq', '.login']),
   read('bkt', 'version', ['--version']),
   read('bkt', 'auth.status', ['auth', 'status', '--json']),
+  // The pull requests (R6): found before one is created, read for their state, head and
+  // approvals. Only the open ones are listed, and only the fields named.
+  shape(
+    'gh',
+    'read',
+    'pr.list',
+    ['pr', 'list'],
+    [
+      GH_REPO,
+      ['--head', valueFlag(true)],
+      ['--base', valueFlag(true)],
+      ['--state', valueFlag(true, /^open$/)],
+      ['--json', valueFlag(true, JSON_FIELDS)],
+    ],
+  ),
+  shape(
+    'gh',
+    'read',
+    'pr.view',
+    ['pr', 'view', '<number>'],
+    [GH_REPO, ['--json', valueFlag(true, JSON_FIELDS)]],
+    [NUMBER],
+  ),
+  // bkt's list and view as read in its source at `5068ddc` (#253): to confirm on a real forge.
+  shape(
+    'bkt',
+    'read',
+    'pr.list',
+    ['pr', 'list'],
+    [
+      ...BKT_PLACE,
+      ['--source', valueFlag(true)],
+      ['--target', valueFlag(true)],
+      ['--state', valueFlag(true, /^OPEN$/)],
+      ['--json', switchFlag(true)],
+    ],
+  ),
+  shape(
+    'bkt',
+    'read',
+    'pr.view',
+    ['pr', 'view', '<number>'],
+    [...BKT_PLACE, ['--json', switchFlag(true)]],
+    [NUMBER],
+  ),
 
   // CT-50's network writes. The push is Git's own (R6).
   shape('git', 'network-write', 'push', ['push']),
@@ -131,6 +178,8 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
       ['--title', valueFlag(true)],
       ['--body-file', valueFlag(true, FROM_INPUT)],
       ['--draft', switchFlag()],
+      // The reviewers of the rules, joined by commas (R6).
+      ['--reviewer', valueFlag()],
     ],
   ),
   // Before `pr.edit`: an image attached is an edit of its own (R7).
@@ -189,6 +238,7 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
       ['--title', valueFlag(true)],
       ['--description', valueFlag()],
       ['--draft', switchFlag()],
+      ['--reviewer', valueFlag()],
     ],
   ),
   shape(

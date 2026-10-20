@@ -47,7 +47,7 @@ import { HomeRpcs } from './home.ts'
 import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
 import { ForgeRpcs } from './forge.ts'
-import { DeliveryRulesRpcs } from './delivery.ts'
+import { DeliveryRpcs, DeliveryRulesRpcs } from './delivery.ts'
 import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 import { AutoReviewRpcs } from './review.ts'
@@ -221,7 +221,12 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
 
 /**
  * Everything the engine serves: what main asks, and the proofs (#144), the automatic review
- * (#147) and Review's feedback (#341), served apart until their screens (R10) forward them; their
- * handlers are layers of their own (TS2589).
+ * (#147), Review's feedback (#341) and the pushes (R6), served apart until their screens (R10)
+ * forward them; their handlers are layers of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, AutoReviewRpcs, ReviewRpcs)
+export const EngineServedRpcs = EngineMainRpcs.merge(
+  ProofsRpcs,
+  AutoReviewRpcs,
+  ReviewRpcs,
+  DeliveryRpcs,
+)

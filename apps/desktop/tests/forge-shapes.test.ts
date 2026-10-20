@@ -362,3 +362,89 @@ describe('What a shape refuses stays refused', () => {
     }
   })
 })
+
+/** R6's reads of the pull requests: found before one is created, and read for their state. */
+const READS: ReadonlyArray<readonly ['gh' | 'bkt', string, ReadonlyArray<string>]> = [
+  [
+    'gh',
+    'pr.list',
+    [
+      'pr',
+      'list',
+      '--repo',
+      'github.com/acme/shop',
+      '--head',
+      'feat/export',
+      '--base',
+      'main',
+      '--state',
+      'open',
+      '--json',
+      'number,url,state,headRefOid',
+    ],
+  ],
+  [
+    'gh',
+    'pr.view',
+    [
+      'pr',
+      'view',
+      '7',
+      '--repo',
+      'github.com/acme/shop',
+      '--json',
+      'number,url,state,headRefOid,reviewDecision,latestReviews',
+    ],
+  ],
+  [
+    'bkt',
+    'pr.list',
+    [
+      'pr',
+      'list',
+      '--context',
+      'oss',
+      '--workspace',
+      'acme-team',
+      '--repo',
+      'shop',
+      '--source',
+      'feat/export',
+      '--target',
+      'main',
+      '--state',
+      'OPEN',
+      '--json',
+    ],
+  ],
+  [
+    'bkt',
+    'pr.view',
+    ['pr', 'view', '7', '--context', 'oss', '--workspace', 'acme-team', '--repo', 'shop', '--json'],
+  ],
+]
+
+describe('The pull requests are found and read before anything is written (R6)', () => {
+  test.each(READS)('%s %s: a read, closed', (cli, operation, args) => {
+    const shape = shapeOf(cli, args)
+    expect(shape?.operation).toBe(operation)
+    expect(shape?.class).toBe('read')
+    for (const extra of [['--delete-branch'], ['--repo=other/x'], ['--', 'more'], ['positional']]) {
+      expect(shapeOf(cli, [...args, ...extra]), extra.join(' ')).toBeNull()
+    }
+  })
+
+  test('a list reads the open pull requests only, and only the fields named', () => {
+    const list = READS[0]?.[2] ?? []
+    expect(shapeOf('gh', list.with(9, 'all'))).toBeNull()
+    expect(shapeOf('gh', list.with(11, 'number;rm'))).toBeNull()
+  })
+
+  test.each([
+    ['gh', ['--reviewer', 'grace,acme/core']],
+    ['bkt', ['--reviewer', 'grace']],
+  ] as const)('a %s pull request is created with its reviewers', (cli, reviewers) => {
+    const create = ALLOWED.find((one) => one[0] === cli && one[1] === 'pr.create')?.[2] ?? []
+    expect(shapeOf(cli, [...create, ...reviewers])?.operation).toBe('pr.create')
+  })
+})

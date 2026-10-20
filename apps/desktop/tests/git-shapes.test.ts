@@ -9,8 +9,11 @@
 
 import { execFileSync } from 'node:child_process'
 import {
+  type BigIntStats,
   chmodSync,
   lstatSync,
+  readdirSync,
+  renameSync,
   readFileSync,
   mkdirSync,
   realpathSync,
@@ -25,6 +28,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import {
   SHAPE_CAP,
   type ShapeHome,
+  type ShapeStat,
+  type StatOf,
   includesOf,
   shapeChanges,
   shapesOf,
@@ -159,6 +164,238 @@ describe('What shapes the engine’s Git in a checkout is fingerprinted (#457)',
     const before = shapesOf([main], home)
     chmodSync(hook, 0o755)
     expect(shapeChanges(before, shapesOf([main], home)).map((one) => one.path)).toEqual([hook])
+  })
+})
+
+/** Adds a submodule, cloned from a repository on the same disk, and commits it. */
+const submodule = (main: string, from: string, path: string) => {
+  git(main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', from, path)
+  git(
+    main,
+    '-c',
+    'protocol.file.allow=always',
+    'submodule',
+    'update',
+    '-q',
+    '--init',
+    '--recursive',
+  )
+  git(main, 'commit', '-q', '-m', path)
+}
+
+/** A repository with a submodule of its own, `deep`. */
+const withDeep = (path: string) => {
+  const outer = repository(path)
+  submodule(outer, repository(join(work, 'deep')), 'deep')
+  return outer
+}
+
+describe('A submodule’s own Git folder is part of what shapes Git (#470)', () => {
+  test('a submodule’s Git folder under .git/modules, and one nested in it: its config, its hooks, its info, and the .git file of each checkout', () => {
+    const main = repository(join(work, 'acme'))
+    submodule(main, withDeep(join(work, 'shared')), 'shared')
+    const modules = join(main, '.git', 'modules')
+    const seen = paths([main])
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        join(modules, 'shared', 'config'),
+        join(modules, 'shared', 'hooks', 'pre-commit.sample'),
+        join(modules, 'shared', 'info', 'exclude'),
+        join(modules, 'shared', 'modules', 'deep', 'config'),
+        join(main, 'shared', '.git'),
+        join(main, 'shared', 'deep', '.git'),
+      ]),
+    )
+  })
+
+  test('a submodule’s Git folder that is a link (a junction on Windows) to a folder outside is read where it leads', () => {
+    const main = repository(join(work, 'acme'))
+    submodule(main, repository(join(work, 'shared')), 'shared')
+    const outside = join(work, 'kept')
+    renameSync(join(main, '.git', 'modules', 'shared'), outside)
+    symlinkSync(
+      outside,
+      join(main, '.git', 'modules', 'shared'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+    expect(paths([main])).toEqual(
+      expect.arrayContaining([
+        join(outside, 'config'),
+        join(outside, 'hooks', 'pre-commit.sample'),
+      ]),
+    )
+  })
+
+  test('a submodule’s Git folder whose checkout is not there (not initialised) is still read', () => {
+    const main = repository(join(work, 'acme'))
+    submodule(main, repository(join(work, 'shared')), 'shared')
+    git(main, 'submodule', 'deinit', '-q', '-f', 'shared')
+    expect(paths([main])).toContain(join(main, '.git', 'modules', 'shared', 'config'))
+  })
+
+  test.each([
+    ['version 2', [], false],
+    [
+      'version 3, an entry with extended flags before it',
+      ['update-index', '--index-version', '3'],
+      true,
+    ],
+    [
+      'version 4, an entry with extended flags before it',
+      ['update-index', '--index-version', '4'],
+      true,
+    ],
+    ['a split index', ['update-index', '--split-index'], false],
+  ])(
+    'a repository the index holds as a submodule, its .git folder inside the checkout, is read: an index of %s',
+    (_, args, extended) => {
+      const main = repository(join(work, 'acme'))
+      writeFileSync(join(main, 'a.txt'), 'a\n')
+      repository(join(main, 'vendor'))
+      // An entry added with --intent-to-add carries extended flags: two bytes more before its name.
+      git(main, 'add', ...(extended ? ['--intent-to-add'] : []), 'a.txt')
+      git(main, 'add', 'vendor')
+      if (args.length > 0) git(main, ...args)
+      // Another entry after it, so a split index keeps the submodule in its shared part.
+      writeFileSync(join(main, 'b.txt'), 'b\n')
+      git(main, 'add', 'b.txt')
+      expect(paths([main])).toEqual(
+        expect.arrayContaining([
+          join(main, 'vendor', '.git', 'config'),
+          join(main, 'vendor', '.git', 'hooks', 'pre-commit.sample'),
+        ]),
+      )
+    },
+  )
+
+  test('a repository whose objects are named by sha256 has its submodules read from its index', () => {
+    const main = join(work, 'acme')
+    mkdirSync(main)
+    git(main, 'init', '-q', '--object-format=sha256', '-b', 'trunk')
+    const vendor = join(main, 'vendor')
+    mkdirSync(vendor)
+    git(vendor, 'init', '-q', '--object-format=sha256', '-b', 'trunk')
+    git(vendor, 'commit', '-q', '--allow-empty', '-m', 'base')
+    git(main, 'add', 'vendor')
+    expect(paths([main])).toContain(join(vendor, '.git', 'config'))
+  })
+})
+
+describe('An index that cannot be read for its submodules is said, never read as naming none (#474)', () => {
+  /** Acme with a file and an embedded repository in its index, and the path of that index. */
+  const indexed = () => {
+    const main = repository(join(work, 'acme'))
+    writeFileSync(join(main, 'a.txt'), 'a\n')
+    repository(join(main, 'vendor'))
+    git(main, 'add', 'a.txt', 'vendor')
+    return { main, index: join(main, '.git', 'index') }
+  }
+
+  /** Every path's stat as it is, but the index's, changed by `as`. */
+  const statsWith =
+    (index: string, as: (real: BigIntStats) => Partial<ShapeStat>) =>
+    (path: string): ShapeStat => {
+      const real = lstatSync(path, { bigint: true })
+      const stat: ShapeStat = {
+        isSymbolicLink: () => real.isSymbolicLink(),
+        isDirectory: () => real.isDirectory(),
+        isFile: () => real.isFile(),
+        size: real.size,
+        ino: real.ino,
+        dev: real.dev,
+        mode: real.mode,
+        mtimeNs: real.mtimeNs,
+        ctimeNs: real.ctimeNs,
+      }
+      return path === index ? { ...stat, ...as(real) } : stat
+    }
+
+  /** What the fingerprint says of the index: present only when it could not be read. */
+  const saidOf = (main: string, statOf?: StatOf) =>
+    shapesOf([main], home, [], statOf).get(join(main, '.git', 'index'))
+
+  test('an index past the read cap (about 600,000 files) is said, its stat alone read', () => {
+    const { main, index } = indexed()
+    const said = saidOf(
+      main,
+      statsWith(index, () => ({ size: 64n * 1024n * 1024n + 1n })),
+    )
+    expect(said?.kind).toBe('other')
+    expect(said?.text).toContain('larger than')
+  })
+
+  test('a linked index is said: it is never followed', () => {
+    const { main, index } = indexed()
+    renameSync(index, join(work, 'index'))
+    symlinkSync(join(work, 'index'), index)
+    expect(saidOf(main)?.text).toContain('a link, never followed')
+  })
+
+  test.each([
+    ['cut in half', (bytes: Buffer) => bytes.subarray(0, Math.floor(bytes.length / 2))],
+    ['empty', () => Buffer.alloc(0)],
+    [
+      'of an unknown version',
+      (bytes: Buffer) =>
+        Buffer.concat([bytes.subarray(0, 4), Buffer.from([0, 0, 0, 9]), bytes.subarray(8)]),
+    ],
+    ['not an index at all', () => Buffer.from('not an index\n')],
+  ])('an index %s is said', (_, written) => {
+    const { main, index } = indexed()
+    writeFileSync(index, written(readFileSync(index)))
+    expect(saidOf(main)?.text).toContain('does not know')
+  })
+
+  test('a split index whose shared part is gone is said', () => {
+    const { main } = indexed()
+    git(main, 'update-index', '--split-index')
+    for (const name of readdirSync(join(main, '.git'))) {
+      if (name.startsWith('sharedindex.')) rmSync(join(main, '.git', name))
+    }
+    expect(saidOf(main)?.text).toContain('shared')
+  })
+
+  test('a folder in place of the index is said', () => {
+    const { main, index } = indexed()
+    rmSync(index)
+    mkdirSync(index)
+    expect(saidOf(main)?.text).toContain('not a regular file, never opened')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe in place of the index is said, never waited on',
+    () => {
+      const { main, index } = indexed()
+      rmSync(index)
+      execFileSync('mkfifo', [index])
+      expect(saidOf(main)?.text).toContain('not a regular file, never opened')
+    },
+  )
+
+  test('a locked index, its stat refused (a sharing violation on Windows), is said', () => {
+    const { main, index } = indexed()
+    const locked: StatOf = (path) => {
+      if (path === index) throw Object.assign(new Error('locked'), { code: 'EBUSY' })
+      return lstatSync(path, { bigint: true })
+    }
+    expect(saidOf(main, locked)?.text).toContain('EBUSY')
+  })
+
+  test('an unreadable index is said the same way each time, so it asks once', () => {
+    const { main, index } = indexed()
+    writeFileSync(index, 'not an index\n')
+    const before = shapesOf([main], home)
+    writeFileSync(index, 'still not an index, longer\n')
+    expect(shapeChanges(before, shapesOf([main], home))).toEqual([])
+  })
+
+  test('an index that reads, or none at all as in a repository just made, is not said: Git reads no submodule from a missing one', () => {
+    const { main } = indexed()
+    expect(saidOf(main)).toBeUndefined()
+    const made = join(work, 'made')
+    mkdirSync(made)
+    git(made, 'init', '-q')
+    expect(saidOf(made)).toBeUndefined()
   })
 })
 
