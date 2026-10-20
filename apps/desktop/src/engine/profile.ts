@@ -198,6 +198,8 @@ import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/sna
 import { type Diffs, diffsLayer } from './review/diffs.ts'
 import { Review, type ReviewHold, reviewLayer } from './review/feedback.ts'
 import { DELIVERY_NEEDS, Pushes, type PushesHold, pushesLayer } from './delivery/pushes.ts'
+import { SHIP_MAPPERS } from './review/ship-journal.ts'
+import { type Ship, type ShipHold, shipLayer } from './review/ship.ts'
 import { DELIVERY_MAPPERS } from './delivery/journal.ts'
 import { REVIEW_MAPPERS } from './review/journal.ts'
 import {
@@ -308,6 +310,8 @@ export interface ProfileParts {
         readonly hold?: PushesHold | undefined
       }
     | undefined
+  /** Where a suite holds a Ship (R9): never held otherwise. */
+  readonly ship?: { readonly hold?: ShipHold | undefined } | undefined
   /** The database as a suite sees it, wrapped around the real one (#341): itself otherwise. */
   readonly database?: (real: EngineDatabase) => EngineDatabase
   /** The snapshot service as a suite sees it, wrapped around the real one (#208): itself otherwise. */
@@ -440,6 +444,7 @@ export type EngineServices =
   | Review
   | Pushes
   | Rounds
+  | Ship
   | FreezeLog
   | TicketProviders
   | TicketSync
@@ -660,6 +665,8 @@ export const startProfile = (
       git: parts.delivery?.git?.(deliveryGit) ?? deliveryGit,
       hold: parts.delivery?.hold,
     })
+    // One layer value: R6 and Ship (R9) share the same pushes.
+    const pushesLive = pushes.layer.pipe(Layer.provide(Layer.mergeAll(diffs, checkpoints)))
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -735,6 +742,7 @@ export const startProfile = (
         ...HELPER_MAPPERS,
         ...REVIEW_MAPPERS,
         ...DELIVERY_MAPPERS,
+        ...SHIP_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
     }
@@ -824,7 +832,19 @@ export const startProfile = (
           ),
         ),
       ),
-      pushes.layer.pipe(Layer.provide(Layer.mergeAll(diffs, checkpoints))),
+      pushesLive,
+      // Ship (R9): the user's alone, its reruns on the proofs' runner and the Project's checks.
+      shipLayer({ log, hold: parts.ship?.hold }).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            diffs,
+            checkpoints,
+            pushesLive,
+            parts.building?.checks ?? projectTaskChecks.pipe(Layer.provide(snapshots)),
+            proofRunnerLayer(parts.building?.proofLimit, parts.building?.proofMinute),
+          ),
+        ),
+      ),
     ).pipe(
       Layer.provideMerge(
         sessionsLayer({

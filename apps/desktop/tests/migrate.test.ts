@@ -176,6 +176,7 @@ describe('A fresh data folder gets the 1.0 schema', () => {
       'mission_grants',
       'mission_marks',
       'mission_recommendations',
+      'mission_ships',
       'mission_spent',
       'mission_stops',
       'mission_ticket_once',

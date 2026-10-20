@@ -39,7 +39,7 @@
  *
  * The baseline moves only through an allowed hold, a first sighting, and the engine's own
  * `worktree` calls: the administrative folder of the worktree such a call names is taken into the
- * baseline. What the engine's Git writes otherwise (the index, the refs, the
+ * baseline, but for an index there that cannot be read, which asks (#500). What the engine's Git writes otherwise (the index, the refs, the
  * logs, `ORIG_HEAD`, `FETCH_HEAD`, `packed-refs`) is not part of any fingerprint.
  *
  * A hold is written before its question (`git_holds`), its answer with the answer, and is read back
@@ -622,6 +622,8 @@ export const engineGitGuard = (
               if (was !== null && now !== null) {
                 if (!worktreeFormat(scope, { path, was, now })) continue
               } else if (!callOwns.some((one) => inside(one, path))) continue
+              // An index it cannot read is not the call's own: anyone may have written it (#500).
+              if (now !== null && isUnreadIndex(now)) continue
               if (now === null) baseline.delete(path)
               else baseline.set(path, now)
             }

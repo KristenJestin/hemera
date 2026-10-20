@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "3f2c6bb6-fdfb-45c1-9b7e-8b023a2994a4",
+  "id": "34fd7f3d-64c6-4865-a4e1-6a526b87ccf6",
   "prevIds": ["84c9e121-6cb7-440d-9724-e6c4631157af"],
   "ddl": [
     {
@@ -98,10 +98,6 @@
     },
     {
       "name": "command_runs",
-      "entityType": "tables"
-    },
-    {
-      "name": "delivery_images",
       "entityType": "tables"
     },
     {
@@ -234,6 +230,10 @@
     },
     {
       "name": "mission_recommendations",
+      "entityType": "tables"
+    },
+    {
+      "name": "mission_ships",
       "entityType": "tables"
     },
     {
@@ -3334,136 +3334,6 @@
       "generated": null,
       "name": "mission_id",
       "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "repository_id",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "evidence_id",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "position",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "file",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "alt",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "state",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "forge",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "host",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "number",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "url",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "message",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "updated_at",
-      "entityType": "columns",
-      "table": "delivery_images"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "mission_id",
-      "entityType": "columns",
       "table": "delivery_pushes"
     },
     {
@@ -3623,36 +3493,6 @@
       "default": null,
       "generated": null,
       "name": "pull_request",
-      "entityType": "columns",
-      "table": "delivery_pushes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "images_reason",
-      "entityType": "columns",
-      "table": "delivery_pushes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "images_answer",
-      "entityType": "columns",
-      "table": "delivery_pushes"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "images_need_id",
       "entityType": "columns",
       "table": "delivery_pushes"
     },
@@ -5742,16 +5582,6 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "publishable",
-      "entityType": "columns",
-      "table": "memory_evidence"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
       "name": "sequence",
       "entityType": "columns",
       "table": "memory_journal"
@@ -6385,6 +6215,76 @@
       "name": "at",
       "entityType": "columns",
       "table": "mission_recommendations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "checkpoint_id",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trees",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "versions",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "confirmation",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "shipped_at",
+      "entityType": "columns",
+      "table": "mission_ships"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "delivered_at",
+      "entityType": "columns",
+      "table": "mission_ships"
     },
     {
       "type": "text",
@@ -14642,28 +14542,6 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
-      "name": "fk_delivery_images_mission_id_missions_id_fk",
-      "entityType": "fks",
-      "table": "delivery_images"
-    },
-    {
-      "columns": ["evidence_id"],
-      "tableTo": "memory_evidence",
-      "columnsTo": ["id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
-      "name": "fk_delivery_images_evidence_id_memory_evidence_id_fk",
-      "entityType": "fks",
-      "table": "delivery_images"
-    },
-    {
-      "columns": ["mission_id"],
-      "tableTo": "missions",
-      "columnsTo": ["id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
       "name": "fk_delivery_pushes_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "delivery_pushes"
@@ -15052,6 +14930,17 @@
       "name": "fk_mission_recommendations_mission_id_missions_id_fk",
       "entityType": "fks",
       "table": "mission_recommendations"
+    },
+    {
+      "columns": ["mission_id"],
+      "tableTo": "missions",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_mission_ships_mission_id_missions_id_fk",
+      "entityType": "fks",
+      "table": "mission_ships"
     },
     {
       "columns": ["mission_id"],
@@ -16140,13 +16029,6 @@
       "table": "cold_read_findings"
     },
     {
-      "columns": ["mission_id", "repository_id", "evidence_id"],
-      "nameExplicit": false,
-      "name": "delivery_images_pk",
-      "entityType": "pks",
-      "table": "delivery_images"
-    },
-    {
       "columns": ["mission_id", "repository_id"],
       "nameExplicit": false,
       "name": "delivery_pushes_pk",
@@ -16662,6 +16544,13 @@
       "nameExplicit": false,
       "name": "mission_recommendations_pk",
       "table": "mission_recommendations",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["mission_id"],
+      "nameExplicit": false,
+      "name": "mission_ships_pk",
+      "table": "mission_ships",
       "entityType": "pks"
     },
     {
