@@ -1,4 +1,5 @@
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
+import { AGENTS } from '../../components/model-picker/model-picker-fixtures.ts'
 import type {
   BuildingMoment,
   Check,
@@ -10,7 +11,7 @@ import type {
   Service,
   Task,
   TaskDetail,
-} from './types.ts'
+} from './building-types.ts'
 
 /**
  * ACME-12 at a real size, for the Ready and Building pages of #149: nine requirements, twenty-two
@@ -116,12 +117,15 @@ export const REQUIREMENTS: readonly Requirement[] = [
     id: 'R6',
     title: 'Only the invoices the user may read',
     tasks: [
-      task('T12', 'Apply the read rules to the export query', 'blocked', ['api']),
+      {
+        ...task('T12', 'Apply the read rules to the export query', 'blocked', ['api']),
+        cause: 'waits for ACME-10’s read rules',
+      },
       task('T13', 'Hide the button from read-only roles', 'todo', ['web']),
     ],
     scenarios: [
       { id: 'S9', title: 'A sales role exports only its customers', proof: 'red', redAt: '09:15' },
-      { id: 'S10', title: 'A read-only role sees no button', proof: 'red', redAt: '09:15' },
+      { id: 'S10', title: 'A read-only role sees no button', proof: 'manual' },
     ],
   },
   {
@@ -211,54 +215,53 @@ const FINAL_CHECKS: readonly Check[] = [
 
 const SERVICES: readonly Service[] = [
   {
+    id: 'api',
     name: 'api',
     state: 'running',
-    startedAt: since(42),
-    endedAt: null,
     url: 'http://localhost:3012',
     line: 'pnpm --filter api dev',
   },
   {
+    id: 'web',
     name: 'web',
     state: 'running',
-    startedAt: since(41),
-    endedAt: null,
     url: 'http://localhost:4212',
     line: 'pnpm --filter web dev',
   },
 ]
 
 const IDLE = [
-  { name: 'storybook', line: 'pnpm --filter web storybook' },
-  { name: 'worker', line: 'pnpm --filter api worker' },
+  { id: 'storybook', name: 'storybook', line: 'pnpm --filter web storybook', dismissable: true },
+  { id: 'worker', name: 'worker', line: 'pnpm --filter api worker', dismissable: true },
 ]
 
 /** The Project's catalogue: twenty services, none declared for this mission. */
 const CATALOGUE = [
-  { name: 'mailpit', line: 'docker compose up mailpit' },
-  { name: 'docs', line: 'pnpm --filter docs dev' },
-  { name: 'postgres', line: 'docker compose up postgres' },
-  { name: 'redis', line: 'docker compose up redis' },
-  { name: 'minio', line: 'docker compose up minio' },
-  { name: 'rabbitmq', line: 'docker compose up rabbitmq' },
-  { name: 'grafana', line: 'docker compose up grafana' },
-  { name: 'prometheus', line: 'docker compose up prometheus' },
-  { name: 'jaeger', line: 'docker compose up jaeger' },
-  { name: 'keycloak', line: 'docker compose up keycloak' },
-  { name: 'opensearch', line: 'docker compose up opensearch' },
-  { name: 'localstack', line: 'docker compose up localstack' },
-  { name: 'adminer', line: 'docker compose up adminer' },
-  { name: 'nginx', line: 'docker compose up nginx' },
-  { name: 'mongo', line: 'docker compose up mongo' },
-  { name: 'clickhouse', line: 'docker compose up clickhouse' },
-  { name: 'temporal', line: 'docker compose up temporal' },
-  { name: 'meilisearch', line: 'docker compose up meilisearch' },
-  { name: 'wiremock', line: 'docker compose up wiremock' },
-  { name: 'emails', line: 'pnpm --filter emails preview' },
+  { id: 'mailpit', name: 'mailpit', line: 'docker compose up mailpit' },
+  { id: 'docs', name: 'docs', line: 'pnpm --filter docs dev' },
+  { id: 'postgres', name: 'postgres', line: 'docker compose up postgres' },
+  { id: 'redis', name: 'redis', line: 'docker compose up redis' },
+  { id: 'minio', name: 'minio', line: 'docker compose up minio' },
+  { id: 'rabbitmq', name: 'rabbitmq', line: 'docker compose up rabbitmq' },
+  { id: 'grafana', name: 'grafana', line: 'docker compose up grafana' },
+  { id: 'prometheus', name: 'prometheus', line: 'docker compose up prometheus' },
+  { id: 'jaeger', name: 'jaeger', line: 'docker compose up jaeger' },
+  { id: 'keycloak', name: 'keycloak', line: 'docker compose up keycloak' },
+  { id: 'opensearch', name: 'opensearch', line: 'docker compose up opensearch' },
+  { id: 'localstack', name: 'localstack', line: 'docker compose up localstack' },
+  { id: 'adminer', name: 'adminer', line: 'docker compose up adminer' },
+  { id: 'nginx', name: 'nginx', line: 'docker compose up nginx' },
+  { id: 'mongo', name: 'mongo', line: 'docker compose up mongo' },
+  { id: 'clickhouse', name: 'clickhouse', line: 'docker compose up clickhouse' },
+  { id: 'temporal', name: 'temporal', line: 'docker compose up temporal' },
+  { id: 'meilisearch', name: 'meilisearch', line: 'docker compose up meilisearch' },
+  { id: 'wiremock', name: 'wiremock', line: 'docker compose up wiremock' },
+  { id: 'emails', name: 'emails', line: 'pnpm --filter emails preview' },
 ]
 
 const HELPERS: readonly Helper[] = [
   {
+    id: 'helper',
     name: 'Helper',
     kind: 'helper',
     state: 'running',
@@ -316,7 +319,14 @@ export const MISSION_THINGS: MissionThings = {
       uses: 12,
     },
   ],
-  budget: { cap: '$40', spent: '$12.40', share: 0.31, estimated: false },
+  budget: {
+    cap: '30 tries',
+    spent: '12',
+    share: 0.4,
+    limits: ['12 of 30 tries', '1 of 8 launches', '0 of 3 rounds'],
+    usage: '$12.40 · 4.1 M tokens',
+    estimated: false,
+  },
 }
 
 const permission = (
@@ -458,9 +468,15 @@ export const REFUSALS: readonly NeedRow[] = [
     id: 'r1',
     project: 'Acme',
     need: {
-      ask: { kind: 'environment', action: 'Raise the budget', settings: 'Budget' },
-      title: 'The mission’s budget is spent: $40 of $40',
-      text: 'Building paused after T10. Nothing is lost; it goes on from T11 once the budget allows it.',
+      ask: {
+        kind: 'decision',
+        options: [
+          { label: 'Raise it by 10 for this mission', recommended: 'three tasks are left' },
+          { label: 'Keep the limit' },
+        ],
+      },
+      title: 'The attempts budget of ACME-12 is spent',
+      text: 'Building paused after T10: 30 of 30 tries. Nothing is lost; it goes on from T11 once the budget allows it.',
       when: 'now',
     },
   },
@@ -556,7 +572,12 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
     helpers: [],
     mission: {
       ...MISSION_THINGS,
-      budget: { cap: '$40', spent: '$40.00', share: 1, estimated: false },
+      budget: {
+        ...MISSION_THINGS.budget,
+        spent: '30',
+        share: 1,
+        limits: ['30 of 30 tries', '1 of 8 launches', '0 of 3 rounds'],
+      },
     },
   }),
   checkFailed: () => ({
@@ -577,6 +598,7 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
     helpers: [
       { ...HELPERS[0]!, state: 'stuck', startedAt: since(19) },
       {
+        id: 'documenter',
         name: 'Documenter',
         kind: 'documenter',
         state: 'running',
@@ -608,6 +630,7 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
     checks: FINAL_CHECKS,
     helpers: [
       {
+        id: 'code-reviewer',
         name: 'Code reviewer',
         kind: 'reviewer',
         state: 'running',
@@ -616,6 +639,7 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
         endedAt: null,
       },
       {
+        id: 'spec-reviewer',
         name: 'Spec reviewer',
         kind: 'reviewer',
         state: 'stuck',
@@ -624,6 +648,7 @@ export const MOMENTS: Record<MomentName, () => BuildingMoment> = {
         endedAt: null,
       },
       {
+        id: 'documenter',
         name: 'Documenter',
         kind: 'documenter',
         state: 'finished',
@@ -702,9 +727,9 @@ export const TASK_DETAILS = new Map<string, TaskDetail>([
       task: REQUIREMENTS[3]!.tasks[1]!,
       requirement: 'R4 · Show a progress for long exports',
       targets: [
-        'web/src/billing/export-button.tsx',
-        'web/src/billing/export-button.test.tsx',
-        'shared/src/export/progress.ts',
+        { path: 'web/src/billing/export-button.tsx', intent: 'change' },
+        { path: 'web/src/billing/export-button.test.tsx', intent: 'change' },
+        { path: 'shared/src/export/progress.ts', intent: 'create' },
       ],
       tries: [
         { n: 1, runner: 'Builder · Claude Code · Opus · High', state: 'failed', took: '11 min' },
@@ -737,7 +762,10 @@ export const TASK_DETAILS = new Map<string, TaskDetail>([
     {
       task: REQUIREMENTS[2]!.tasks[1]!,
       requirement: 'R3 · Dates in the customer’s own time zone',
-      targets: ['shared/src/dates/format.ts', 'shared/src/dates/format.test.ts'],
+      targets: [
+        { path: 'shared/src/dates/format.ts', intent: 'change' },
+        { path: 'shared/src/dates/format.test.ts', intent: 'change' },
+      ],
       tries: [
         { n: 1, runner: 'Helper · Claude Code · Sonnet · Medium', state: 'done', took: '7 min' },
       ],
@@ -769,7 +797,10 @@ export const TASK_DETAILS = new Map<string, TaskDetail>([
     {
       task: REQUIREMENTS[5]!.tasks[0]!,
       requirement: 'R6 · Only the invoices the user may read',
-      targets: ['api/src/invoices/export.query.ts', 'api/tests/invoices-export-rules.test.ts'],
+      targets: [
+        { path: 'api/src/invoices/export.query.ts', intent: 'change' },
+        { path: 'api/tests/invoices-export-rules.test.ts', intent: 'create' },
+      ],
       tries: [
         { n: 1, runner: 'Builder · Claude Code · Opus · High', state: 'failed', took: '6 min' },
         { n: 2, runner: 'Builder · Claude Code · Opus · High', state: 'failed', took: '9 min' },
@@ -792,6 +823,9 @@ export const TASK_DETAILS = new Map<string, TaskDetail>([
   ],
 ])
 
+const WHY =
+  'Nine requirements across three repositories, with read rules and time zones: a model that holds a long plan. A smaller one would do for R2 alone.'
+
 /** The frozen Spec in summary, on the Ready page. */
 const READY: ReadyMoment = {
   goal: 'Customers ask for their invoices in a spreadsheet. The billing page exports the invoices of its current filters as a CSV file, named after those filters, with the dates in the customer’s own time zone and the amounts in each invoice’s currency. A long export shows its progress and never blocks the page; only the invoices the user may read are exported, and each export is logged for the audit.',
@@ -801,9 +835,12 @@ const READY: ReadyMoment = {
     scenarios: requirement.scenarios.length,
   })),
   frozenAt: 'yesterday at 17:02',
-  model: { agent: 'claude', model: 'opus', effort: 'high' },
-  why: 'Nine requirements across three repositories, with read rules and time zones: a model that holds a long plan. A smaller one would do for R2 alone.',
-  overridden: false,
+  model: {
+    agents: AGENTS,
+    value: null,
+    fallback: { agent: 'claude', model: 'opus', effort: 'high' },
+    recommended: { words: 'Opus · High', why: WHY },
+  },
   check: { state: 'idle' },
   preparation: null,
   needs: [],
@@ -811,19 +848,26 @@ const READY: ReadyMoment = {
     ...MISSION_THINGS,
     dependencies: MISSION_THINGS.dependencies.slice(0, 1),
     grants: MISSION_THINGS.grants.slice(2),
-    budget: { cap: '$40', spent: '$3.10', share: 0.08, estimated: true },
+    budget: {
+      cap: '8 launches',
+      spent: '0',
+      share: 0,
+      limits: ['0 of 8 launches', '0 of 30 tries', '0 of 3 rounds'],
+      usage: '$3.10 · 900 k tokens',
+      estimated: true,
+    },
   },
 }
 
 const MOVED_TARGETS = [
   {
-    kind: 'target',
+    kind: 'other',
     what: 'api/src/invoices/invoices.query.ts',
     how: '+12 −3 in 2 commits',
     verdict: { holds: true, why: 'Only a column renamed; T2 reads the new name.' },
   },
   {
-    kind: 'proof',
+    kind: 'other',
     what: 'web/e2e/billing.spec.ts',
     how: '+40 in 1 commit',
     verdict: { holds: true, why: 'New tests of the filters, none on the export.' },
@@ -833,7 +877,7 @@ const MOVED_TARGETS = [
 
 const MOVED_BREAKING = [
   {
-    kind: 'target',
+    kind: 'other',
     what: 'api/src/invoices/export.query.ts',
     how: '+88 −14 in 3 commits',
     verdict: {
@@ -860,6 +904,7 @@ export type ReadyName =
   | 'unfetched'
   | 'silent'
   | 'expired'
+  | 'failed'
   | 'dependency'
   | 'preparing'
   | 'preparationFailed'
@@ -903,6 +948,13 @@ export const READY_MOMENTS: Record<ReadyName, () => ReadyMoment> = {
   }),
   silent: () => ({ ...READY, check: { state: 'silent', moved: MOVED_TARGETS } }),
   expired: () => ({ ...READY, check: { state: 'expired' } }),
+  failed: () => ({
+    ...READY,
+    check: {
+      state: 'failed',
+      reason: 'web could not be read: its folder is not a Git repository any more.',
+    },
+  }),
   dependency: () => ({
     ...READY,
     check: {
@@ -938,8 +990,7 @@ export const READY_MOMENTS: Record<ReadyName, () => ReadyMoment> = {
   }),
   overridden: () => ({
     ...READY,
-    model: { agent: 'claude', model: 'sonnet', effort: 'medium' },
-    overridden: true,
+    model: { ...READY.model, value: { agent: 'claude', model: 'sonnet', effort: 'medium' } },
   }),
   long: () => ({
     ...READY,
@@ -953,12 +1004,18 @@ export const READY_MOMENTS: Record<ReadyName, () => ReadyMoment> = {
           }
         : one,
     ),
-    why: `${READY.why} The api's export query is the risky part: it joins five tables and the read rules of ACME-10.`,
+    model: {
+      ...READY.model,
+      recommended: {
+        words: 'Opus · High',
+        why: `${WHY} The api's export query is the risky part: it joins five tables and the read rules of ACME-10.`,
+      },
+    },
     check: {
       state: 'outdated',
       moved: [
         {
-          kind: 'target',
+          kind: 'other',
           what: 'api/src/invoices/exports/streaming/csv/export-with-filters-and-time-zones.query.ts',
           how: '+88 −14 in 3 commits, two of them merges from the main branch of the repository',
           verdict: MOVED_BREAKING[0].verdict,
