@@ -1453,16 +1453,19 @@ describe('An index the guard cannot read for its submodules asks, never taken as
     expect(shown(result.needs[0])).toContain('a link')
   })
 
-  test('an index it cannot read when it first sees the repository asks before the engine’s first Git call there', async () => {
+  test('an index it cannot read when it first sees the repository is taken as it is, as any first sighting: the engine’s Git there is not stopped', async () => {
     const result = await withBuilder(() =>
       Effect.gen(function* () {
         const loose = repository(join(work, 'loose'))
         writeFileSync(join(loose, '.git', 'index'), 'not an index\n')
-        return { first: yield* engineStatus(loose), needs: yield* asked }
+        const first = yield* engineStatus(loose)
+        const quiet = yield* until(guardNeeds, (needs) => needs.length > 0, 1_000)
+        return { first, quiet }
       }),
     )
-    expect(result.first).toContain('Hemera stopped its Git')
-    expect(shown(result.needs[0])).toContain('~/loose/.git/index (added)')
+    // Git itself refuses that index: the call runs and fails there, not at the guard.
+    expect(result.first).not.toContain('Hemera stopped its Git')
+    expect(result.quiet).toEqual([])
   })
 
   test('allowed once, the engine’s Git runs; the index read again afterwards asks nothing', async () => {

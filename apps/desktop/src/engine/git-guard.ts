@@ -14,10 +14,10 @@
  *
  * Every repository Hemera knows is first seen at the start and as it is added, and any other one
  * when an agent's action opens on it or when the engine's Git first reaches it, before that call:
- * what it has then is its baseline, and nothing is asked, but for an index that cannot be read for
- * its submodules, asked about once at the next comparison (#474); an index read again is dropped
- * from the baseline unasked, what it names compared from then on. The snapshot stores are
- * repositories as any. A scope with a baseline
+ * what it has then is its baseline, and nothing is asked, an index that cannot be read for its
+ * submodules included (#474): one that cannot be read later asks, and one read again is dropped from
+ * the baseline unasked, what it names compared from then on. The snapshot stores are repositories
+ * as any. A scope with a baseline
  * kept is compared, so a change made while the engine was stopped asks at the next start; a scope
  * without one is a first sighting. A checkout's own `.git` is part of its repository's scope: one
  * pointed at another repository is a change of the first.
@@ -511,13 +511,6 @@ export const engineGitGuard = (
       return now
     }
 
-    /**
-     * What a first sighting takes as its baseline: what it has, but an index it cannot read for its
-     * submodules, which is asked about once at its next comparison (#474).
-     */
-    const sighted = (shapes: Shapes): Shapes =>
-      new Map([...shapes].filter(([, shape]) => !isUnreadIndex(shape)))
-
     /** A scope first seen: what it has now is its baseline. */
     const sightedScope = (key: string, checkout: string | null, projectId: string): Scope => {
       const scope: Scope = {
@@ -527,7 +520,7 @@ export const engineGitGuard = (
         projectId,
         baseline: new Map(),
       }
-      scope.baseline = sighted(fingerprintOf(scope))
+      scope.baseline = fingerprintOf(scope)
       scopes.set(key, scope)
       return scope
     }
@@ -560,7 +553,7 @@ export const engineGitGuard = (
         // A checkout first seen in a known repository: what it adds is taken as it is.
         scope.checkouts.add(checkout)
         const baseline = new Map(scope.baseline)
-        for (const [path, shape] of sighted(fingerprintOf(scope))) {
+        for (const [path, shape] of fingerprintOf(scope)) {
           if (!had.has(path)) baseline.set(path, shape)
         }
         scope.baseline = baseline
