@@ -32,7 +32,7 @@ import {
   type RepositoryPush,
 } from '@hemera/ipc'
 import { and, desc, eq } from 'drizzle-orm'
-import { Deferred, Effect, Predicate } from 'effect'
+import { Deferred, Effect, Option, Predicate, Schema } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { saveDeliveryRules } from '../src/engine/delivery-rules.ts'
@@ -46,6 +46,7 @@ import { createProject, getProject } from '../src/engine/projects.ts'
 import { Review } from '../src/engine/review/feedback.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { buildingLaunches, workspaceRepositories } from '../src/engine/storage/schema.ts'
+import { listActions } from '../src/engine/tools/actions.ts'
 import { mutate } from '../src/engine/transaction.ts'
 import { builderAgents, launched } from './builder-world.ts'
 import { INVOICES, PACKAGE } from './building-world.ts'
@@ -526,6 +527,17 @@ const assetOf = (bytes: Buffer) =>
 const NO_LONGER_CHOSEN =
   'No longer chosen for publication (unmarked, or its feedback withdrawn): its file name is listed.'
 
+const readCommand = Schema.decodeUnknownOption(Schema.Struct({ command: Schema.String }))
+
+/**
+ * The command line of the pull request's create, as its intent was recorded (CT-09): what Hemera
+ * handed the CLI, before a `.cmd` shim's `cmd.exe` read it.
+ */
+const createCommand = Effect.map(listActions(), (actions) => {
+  const create = actions.find((action) => action.kind === 'forge.pr.create')
+  return Option.getOrNull(Option.map(readCommand(create?.details), (one) => one.command))
+})
+
 const setPublishable = (evidenceId: string, publishable: boolean) =>
   Pushes.use((pushes) => pushes.setPublishable(evidenceId, publishable))
 
@@ -908,16 +920,18 @@ describe('A forge that cannot host images gets the file names', () => {
             const mission = yield* inReview(BODY, [GREY, LABELS])
             yield* pushed(mission.missionId)
             yield* untilApi(mission.missionId, 'done')
-            return apiOf(yield* pushesOf(mission.missionId))
+            return { api: apiOf(yield* pushesOf(mission.missionId)), command: yield* createCommand }
           }),
         ),
       )
-      expect(pullRequests()[0]?.body).toBe(
-        'What changed.\n\n- grey-button.png\n- labels-overflow.png\n\nThe end.',
-      )
+      const listed = 'What changed.\n\n- grey-button.png\n- labels-overflow.png\n\nThe end.'
+      // bkt is given the description as an argument, which `cmd.exe` cuts at its first line break
+      // when the fake runs as a `.cmd` shim on Windows: what Hemera handed it is read from its intent.
+      if (forge.forge === 'github') expect(pullRequests()[0]?.body).toBe(listed)
+      else expect(seen.command).toContain(` --description ${listed}`)
       expect(fake.calls().some((one) => one.args.includes('--attach'))).toBe(false)
-      expect(seen?.imagesReason).toBe(reason)
-      expect(seen?.images.map((one) => one.state)).toEqual(['listed', 'listed'])
+      expect(seen.api?.imagesReason).toBe(reason)
+      expect(seen.api?.images.map((one) => one.state)).toEqual(['listed', 'listed'])
     },
     SLOW,
   )
