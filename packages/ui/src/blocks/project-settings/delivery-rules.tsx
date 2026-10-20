@@ -128,20 +128,21 @@ export function CliGlyph({
 }
 
 /** The repositories a repository waits for, accepted dependencies only. */
-function upstreamOf(path: string, dependencies: readonly Dependency[]): string[] {
+export function upstreamOf(path: string, dependencies: readonly Dependency[]): string[] {
   return dependencies.filter((one) => !one.proposed && one.repository === path).map((one) => one.on)
 }
 
-const FRAME_BAND =
+export const FRAME_BAND =
   'flex h-control-sm items-center gap-2 border-b border-border bg-surface-rim px-4 text-xs font-medium'
 
-const QUIET_BAND = 'font-normal text-muted-foreground'
+export const QUIET_BAND = 'font-normal text-muted-foreground'
 
-const ITEM = 'border-b border-border bg-surface-body last:border-b-0'
+export const ITEM = 'border-b border-border bg-surface-body last:border-b-0'
 
-const CELLS = 'flex min-h-control-lg min-w-0 flex-1 items-center gap-3 py-2 pr-4 pl-4 text-sm'
+export const CELLS =
+  'flex min-h-control-lg min-w-0 flex-1 items-center gap-3 py-2 pr-4 pl-4 text-sm'
 
-const OPEN = cn(
+export const OPEN = cn(
   CELLS,
   'w-full rounded-md text-left outline-none hover:tinted focus-ring hover-motion',
 )
@@ -150,27 +151,28 @@ const LABEL = 'min-w-0 shrink-0 truncate font-medium md:w-settings-name'
 
 const VALUE = 'min-w-0 flex-1 truncate text-muted-foreground'
 
-const MONO = 'min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground'
+export const MONO = 'min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground'
 
-const CHEVRON = 'flex shrink-0 text-muted-foreground'
+export const CHEVRON = 'flex shrink-0 text-muted-foreground'
 
-const FOLD_CHEVRON = 'flex shrink-0 text-muted-foreground chevron-motion aria-expanded:rotate-90'
+export const FOLD_CHEVRON =
+  'flex shrink-0 text-muted-foreground chevron-motion aria-expanded:rotate-90'
 
-const GLYPH = 'flex size-icon-md shrink-0 items-center justify-center text-muted-foreground'
+export const GLYPH = 'flex size-icon-md shrink-0 items-center justify-center text-muted-foreground'
 
-const ROOM = 'flex size-icon-md shrink-0 items-center justify-center'
+export const ROOM = 'flex size-icon-md shrink-0 items-center justify-center'
 
 const MARK = 'flex text-foreground'
 
 const REFUSED = 'flex items-start gap-2 pr-4 pb-2 text-sm text-destructive-muted-foreground'
 
 /** The room at the end of a step's line, for its way back to the preset, on every line alike. */
-const TRAILING = 'flex size-control-sm shrink-0 items-center justify-center'
+export const TRAILING = 'flex size-control-sm shrink-0 items-center justify-center'
 
 const NOTE = 'max-w-measure text-xs text-muted-foreground'
 
 /** A line that opens a dialog: its name, its value, its chevron. */
-function OpenLine({
+export function OpenLine({
   label,
   value,
   mono = false,
@@ -203,7 +205,7 @@ function OpenLine({
 }
 
 /** What a refusal says at its place: its glyph and its words. */
-function Refused({
+export function Refused({
   words,
   inset = false,
 }: {
@@ -243,7 +245,7 @@ function firstLine(template: string): string {
   return rest === 0 ? (lines[0] ?? '') : `${lines[0] ?? ''} … ${String(rest)} more lines`
 }
 
-function PullRequests({
+export function PullRequests({
   rules,
   refusals,
   onOpen,
@@ -314,7 +316,7 @@ function PullRequests({
   )
 }
 
-function StepRow({
+export function StepRow({
   recipe,
   repository,
   onOpen,
@@ -427,7 +429,7 @@ function StepRow({
 }
 
 /** The head of a recipe's columns: the marks named by their legends. */
-function RecipeHead({ label }: { label: string }): ReactNode {
+export function RecipeHead({ label }: { label: string }): ReactNode {
   return (
     <div className="flex h-control-sm min-w-0 items-center gap-1 border-b border-border bg-surface-rim pr-2 text-xs text-muted-foreground">
       <div className="flex min-w-0 flex-1 items-center gap-3 pr-4 pl-10">
@@ -510,17 +512,17 @@ export interface RepositoryRowProps {
   onCopy: (line: string) => void
 }
 
-const MOMENTS_SHOWN: readonly Moment[] = ['tasks', 'review', 'waves']
+export const MOMENTS_SHOWN: readonly Moment[] = ['tasks', 'review', 'waves']
 
 /** How each moment's list is named after the repository's: its waves are its steps. */
-const STEPS_OF: Record<Moment, string> = {
+export const STEPS_OF: Record<Moment, string> = {
   tasks: ' after each task',
   review: ' in Review',
   waves: '',
 }
 
 /** What an empty moment says: nothing runs there, and what follows. */
-const NOTHING: Record<Moment, string> = {
+export const NOTHING: Record<Moment, string> = {
   tasks: 'Nothing after each task: the work waits in the Workspace until Review.',
   review: 'Nothing when Review starts: the work waits in the Workspace until Ship.',
   waves: 'Nothing after Ship: Ship records the delivery, then the End runs.',
@@ -712,7 +714,7 @@ function LineSkeleton({ label }: { label: string }): ReactNode {
   )
 }
 
-function ProposedDependency({
+export function ProposedDependency({
   dependency,
   onAccept,
 }: {
@@ -745,7 +747,7 @@ function ProposedDependency({
   )
 }
 
-function Waves({
+export function Waves({
   rules,
   refusals,
   checking,
@@ -850,7 +852,7 @@ function Waves({
   )
 }
 
-function CleanupRow({
+export function CleanupRow({
   step,
   onOpen,
   onRemove,
@@ -916,7 +918,7 @@ function CleanupRow({
   )
 }
 
-function End({
+export function End({
   cleanup,
   onOpen,
   onRemoveCleanup,

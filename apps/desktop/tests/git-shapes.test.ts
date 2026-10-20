@@ -9,8 +9,10 @@
 
 import { execFileSync } from 'node:child_process'
 import {
+  type BigIntStats,
   chmodSync,
   lstatSync,
+  readdirSync,
   renameSync,
   readFileSync,
   mkdirSync,
@@ -26,6 +28,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import {
   SHAPE_CAP,
   type ShapeHome,
+  type ShapeStat,
+  type StatOf,
   includesOf,
   shapeChanges,
   shapesOf,
@@ -274,6 +278,124 @@ describe('A submodule’s own Git folder is part of what shapes Git (#470)', () 
     git(vendor, 'commit', '-q', '--allow-empty', '-m', 'base')
     git(main, 'add', 'vendor')
     expect(paths([main])).toContain(join(vendor, '.git', 'config'))
+  })
+})
+
+describe('An index that cannot be read for its submodules is said, never read as naming none (#474)', () => {
+  /** Acme with a file and an embedded repository in its index, and the path of that index. */
+  const indexed = () => {
+    const main = repository(join(work, 'acme'))
+    writeFileSync(join(main, 'a.txt'), 'a\n')
+    repository(join(main, 'vendor'))
+    git(main, 'add', 'a.txt', 'vendor')
+    return { main, index: join(main, '.git', 'index') }
+  }
+
+  /** Every path's stat as it is, but the index's, changed by `as`. */
+  const statsWith =
+    (index: string, as: (real: BigIntStats) => Partial<ShapeStat>) =>
+    (path: string): ShapeStat => {
+      const real = lstatSync(path, { bigint: true })
+      const stat: ShapeStat = {
+        isSymbolicLink: () => real.isSymbolicLink(),
+        isDirectory: () => real.isDirectory(),
+        isFile: () => real.isFile(),
+        size: real.size,
+        ino: real.ino,
+        dev: real.dev,
+        mode: real.mode,
+        mtimeNs: real.mtimeNs,
+        ctimeNs: real.ctimeNs,
+      }
+      return path === index ? { ...stat, ...as(real) } : stat
+    }
+
+  /** What the fingerprint says of the index: present only when it could not be read. */
+  const saidOf = (main: string, statOf?: StatOf) =>
+    shapesOf([main], home, [], statOf).get(join(main, '.git', 'index'))
+
+  test('an index past the read cap (about 600,000 files) is said, its stat alone read', () => {
+    const { main, index } = indexed()
+    const said = saidOf(
+      main,
+      statsWith(index, () => ({ size: 64n * 1024n * 1024n + 1n })),
+    )
+    expect(said?.kind).toBe('other')
+    expect(said?.text).toContain('larger than')
+  })
+
+  test('a linked index is said: it is never followed', () => {
+    const { main, index } = indexed()
+    renameSync(index, join(work, 'index'))
+    symlinkSync(join(work, 'index'), index)
+    expect(saidOf(main)?.text).toContain('a link, never followed')
+  })
+
+  test.each([
+    ['cut in half', (bytes: Buffer) => bytes.subarray(0, Math.floor(bytes.length / 2))],
+    ['empty', () => Buffer.alloc(0)],
+    [
+      'of an unknown version',
+      (bytes: Buffer) =>
+        Buffer.concat([bytes.subarray(0, 4), Buffer.from([0, 0, 0, 9]), bytes.subarray(8)]),
+    ],
+    ['not an index at all', () => Buffer.from('not an index\n')],
+  ])('an index %s is said', (_, written) => {
+    const { main, index } = indexed()
+    writeFileSync(index, written(readFileSync(index)))
+    expect(saidOf(main)?.text).toContain('does not know')
+  })
+
+  test('a split index whose shared part is gone is said', () => {
+    const { main } = indexed()
+    git(main, 'update-index', '--split-index')
+    for (const name of readdirSync(join(main, '.git'))) {
+      if (name.startsWith('sharedindex.')) rmSync(join(main, '.git', name))
+    }
+    expect(saidOf(main)?.text).toContain('shared')
+  })
+
+  test('a folder in place of the index is said', () => {
+    const { main, index } = indexed()
+    rmSync(index)
+    mkdirSync(index)
+    expect(saidOf(main)?.text).toContain('not a regular file, never opened')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'a pipe in place of the index is said, never waited on',
+    () => {
+      const { main, index } = indexed()
+      rmSync(index)
+      execFileSync('mkfifo', [index])
+      expect(saidOf(main)?.text).toContain('not a regular file, never opened')
+    },
+  )
+
+  test('a locked index, its stat refused (a sharing violation on Windows), is said', () => {
+    const { main, index } = indexed()
+    const locked: StatOf = (path) => {
+      if (path === index) throw Object.assign(new Error('locked'), { code: 'EBUSY' })
+      return lstatSync(path, { bigint: true })
+    }
+    expect(saidOf(main, locked)?.text).toContain('EBUSY')
+  })
+
+  test('an unreadable index is said the same way each time, so it asks once', () => {
+    const { main, index } = indexed()
+    writeFileSync(index, 'not an index\n')
+    const before = shapesOf([main], home)
+    writeFileSync(index, 'still not an index, longer\n')
+    expect(shapeChanges(before, shapesOf([main], home))).toEqual([])
+  })
+
+  test('an index that reads, or none at all as in a repository just made, is not said: Git reads no submodule from a missing one', () => {
+    const { main } = indexed()
+    expect(saidOf(main)).toBeUndefined()
+    const made = join(work, 'made')
+    mkdirSync(made)
+    git(made, 'init', '-q')
+    expect(saidOf(made)).toBeUndefined()
   })
 })
 
