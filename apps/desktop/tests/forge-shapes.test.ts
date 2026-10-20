@@ -193,6 +193,53 @@ describe('Every write shape is closed', () => {
   })
 })
 
+describe('Images are attached one file per --attach, and a repository read names one repository (R7)', () => {
+  const REPO = ['--repo', 'github.com/acme/shop']
+  const CREATE = [
+    'pr',
+    'create',
+    ...REPO,
+    '--base',
+    'main',
+    '--head',
+    'feat/x',
+    '--title',
+    'X',
+    '--body-file',
+    '-',
+  ]
+
+  test('a create and an edit take as many --attach as there are files', () => {
+    expect(
+      shapeOf('gh', [...CREATE, '--attach', 'a.png#A', '--attach', 'b.png#B'])?.operation,
+    ).toBe('pr.create')
+    const edit = ['pr', 'edit', '7', ...REPO, '--attach', 'a.png#A', '--attach', 'b.png#B']
+    expect(shapeOf('gh', edit)?.operation).toBe('pr.attach')
+    expect(shapeOf('gh', [...edit, '--body-file', '-'])?.operation).toBe('pr.attach')
+  })
+
+  test('an attachment is never a flag, and only the description from the standard input goes with it', () => {
+    expect(shapeOf('gh', [...CREATE, '--attach', '--title'])).toBeNull()
+    expect(
+      shapeOf('gh', ['pr', 'edit', '7', ...REPO, '--attach', 'a.png', '--title', 'X']),
+    ).toBeNull()
+    expect(
+      shapeOf('gh', ['pr', 'edit', '7', ...REPO, '--attach', 'a.png', '--body-file', 'notes.md']),
+    ).toBeNull()
+  })
+
+  test('a repository read names one repository on its host, never a path walking out of it', () => {
+    const read = (path: string) => shapeOf('gh', ['api', '--hostname', 'github.com', path])
+    expect(read('repos/acme/shop')?.class).toBe('read')
+    for (const bad of ['repos/acme/..', 'repos/../shop', 'repos/acme/shop/collaborators', 'user']) {
+      expect(read(bad), bad).toBeNull()
+    }
+    expect(
+      aimsAt('gh', ['api', '--hostname', 'github.com', 'repos/acme/shop'], 'git.acme.test'),
+    ).toBe(false)
+  })
+})
+
 describe('A write names its forge: the bkt context, the gh host', () => {
   const BKT_CREATE = ['pr', 'create', '--source', 'feat/x', '--target', 'main', '--title', 'X']
 

@@ -49,8 +49,8 @@ export interface ForgeSettings {
    */
   readonly cut?: ((call: ForgeCall) => Effect.Effect<void> | undefined) | undefined
   /**
-   * The real path of the screenshot of Hemera's a path names, or null: the only files attached.
-   * None otherwise, and nothing is attached.
+   * The real path of the image of Hemera's a path names (a screenshot, an image of a mission's
+   * evidence), or null: the only files attached. None otherwise, and nothing is attached.
    */
   readonly attachable?: ((path: string) => string | null) | undefined
   /**
@@ -126,25 +126,26 @@ export class ForgeRunner extends Context.Service<
 >()('ForgeRunner') {}
 
 /**
- * The arguments to run, an attachment named by the real path checked; null when the command
- * attaches anything but one of Hemera's own screenshots (`ForgeSettings.attachable`), which would
- * read and upload a file of the user's. `path#caption` holds one `#` at most: the CLI might split
- * on another one than the check did.
+ * The arguments to run, each attachment named by the real path checked; null when the command
+ * attaches anything but Hemera's own images (`ForgeSettings.attachable`), which would read and
+ * upload a file of the user's. `path#caption` holds one `#` at most: the CLI might split on
+ * another one than the check did.
  */
 const withOwnAttachment = (
   args: ReadonlyArray<string>,
   parsed: ParsedCommand,
   attachable: ((path: string) => string | null) | undefined,
 ): ReadonlyArray<string> | null => {
-  const value = parsed.flags.get('--attach')
-  if (value === undefined) return args
-  if (value === null || attachable === undefined) return null
-  const [path = '', caption, ...more] = value.split('#')
-  if (more.length > 0) return null
-  const real = attachable(path)
-  if (real === null) return null
-  const at = args.indexOf('--attach', parsed.shape.words.length) + 1
-  return args.with(at, caption === undefined ? real : `${real}#${caption}`)
+  let checked: ReadonlyArray<string> | null = args
+  for (const at of parsed.positions.get('--attach') ?? []) {
+    if (checked === null || attachable === undefined) return null
+    const [path = '', caption, ...more] = (args[at] ?? '').split('#')
+    if (more.length > 0) return null
+    const real = attachable(path)
+    if (real === null) return null
+    checked = checked.with(at, caption === undefined ? real : `${real}#${caption}`)
+  }
+  return checked
 }
 
 /** Whether a bkt write names the context its call carries, the one chosen for the host. */
@@ -353,7 +354,7 @@ export const forgeRunnerLayer = (settings: ForgeSettings = {}) =>
           const parsed = parseCommand(call.cli, call.args)
           // A command for another host than its call's would reach a forge it was not meant for,
           // and so would a bkt write through another context than the one chosen for the host; an
-          // image from anywhere but Hemera's screenshots would upload a file of the user's.
+          // image from anywhere but Hemera's own would upload a file of the user's.
           const args =
             parsed === null ? null : withOwnAttachment(call.args, parsed, settings.attachable)
           if (

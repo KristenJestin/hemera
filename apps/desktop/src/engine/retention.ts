@@ -178,6 +178,7 @@ export const TABLE_CLASSES = {
   review_feedback_versions: 'permanent',
   review_feedback_images: 'permanent',
   delivery_pushes: 'permanent',
+  delivery_images: 'permanent',
   // Ship's frozen trees (R9): what S3 checks every later change against.
   mission_ships: 'permanent',
   // A round of Review (#468): its points, scenarios, tasks and decisions, kept like its feedback.

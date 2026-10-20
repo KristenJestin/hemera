@@ -135,6 +135,7 @@ import {
   SlotWaits,
   memoryLayer,
 } from './memory/index.ts'
+import { MISSIONS_FOLDER } from './memory/files.ts'
 import type { HemeraEndpoint } from './agents/endpoint.ts'
 import { assignKeyPrefixes, listProjects } from './projects.ts'
 import { LaunchFailed } from '@hemera/ipc'
@@ -159,7 +160,7 @@ import { Setup, setupLayer } from './setup/service.ts'
 import type { TicketSearch } from './start/tickets.ts'
 import { type GhCli, type GhSettings, ghCliLayer } from './tickets/gh.ts'
 import { FORGE_NEEDS, type ForgePort, forgePort } from './forges/port.ts'
-import { screenshotIn, screenshotsFolder } from './screenshots.ts'
+import { evidenceIn, screenshotIn, screenshotsFolder } from './screenshots.ts'
 import { type ForgeRunner, type ForgeSettings, forgeRunnerLayer } from './forges/runner.ts'
 import { deliverReadTickets } from './tickets/deliver.ts'
 import { type JiraLink, type JiraSettings, jiraLinkLayer } from './tickets/jira-link.ts'
@@ -893,10 +894,13 @@ export const startProfile = (
       Layer.provideMerge(missionsLayer(missionParts)),
       Layer.provideMerge(parts.tickets ?? ticketSearchLayer),
       Layer.provideMerge(parts.ticketProviders ?? ticketProvidersLayer),
-      // Images are attached from Hemera's own screenshot folder only (#253).
+      // Images are attached from Hemera's own screenshot folder (#253) and the missions' evidence
+      // (R7) only.
       Layer.provideMerge(
         forgeRunnerLayer({
-          attachable: screenshotIn(screenshotsFolder(dataFolder)),
+          attachable: (path) =>
+            screenshotIn(screenshotsFolder(dataFolder))(path) ??
+            evidenceIn(join(dataFolder, MISSIONS_FOLDER))(path),
           ...parts.forge,
         }),
       ),

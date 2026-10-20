@@ -8,6 +8,11 @@
  * and Data Center through bkt's `pr list`, `pr view` and `pr create`, whose flags and answers are
  * read from bkt's source and the Bitbucket API, to confirm on a real forge. A forge's message is
  * kept verbatim, masked by the runner already.
+ *
+ * GitHub also hosts the mission's images (R7): `--attach <path>#<alt>` on `gh pr create` and
+ * `gh pr edit` uploads each file and rewrites its reference `![alt](./<file>)` in the description
+ * to the uploaded copy; the description is read back to know which were. Whether the account may
+ * push to the repository, and whether it is public, come from `gh api repos/<owner>/<repo>`.
  */
 
 import type { PullRequestState, PullRequestStatus } from '@hemera/ipc'
@@ -31,6 +36,14 @@ export interface PullRequestAsked {
   readonly title: string
   readonly body: string
   readonly reviewers: ReadonlyArray<string>
+  /** Files gh uploads into the description, `<path>#<alt>`; none for bkt. */
+  readonly attachments: ReadonlyArray<string>
+}
+
+/** What hosting an image on a repository depends on: who may see it, and whether one may push. */
+export interface RepositoryAccess {
+  readonly visibility: string
+  readonly push: boolean
 }
 
 const GH_LIST_FIELDS = 'number,url,state,headRefOid'
@@ -43,6 +56,14 @@ const GhPullRequest = Schema.Struct({
   headRefOid: Schema.String,
 })
 const GhList = Schema.fromJsonString(Schema.Array(GhPullRequest))
+const GhBody = Schema.fromJsonString(Schema.Struct({ body: Schema.String }))
+const GhRepository = Schema.fromJsonString(
+  Schema.Struct({
+    visibility: Schema.optionalKey(Schema.String),
+    private: Schema.Boolean,
+    permissions: Schema.optionalKey(Schema.Struct({ push: Schema.Boolean })),
+  }),
+)
 const GhView = Schema.fromJsonString(
   Schema.Struct({
     ...GhPullRequest.fields,
@@ -83,6 +104,8 @@ const BktView = Schema.fromJsonString(BktPullRequest)
 
 const readGhList = Schema.decodeUnknownOption(GhList)
 const readGhView = Schema.decodeUnknownOption(GhView)
+const readGhBody = Schema.decodeUnknownOption(GhBody)
+const readGhRepository = Schema.decodeUnknownOption(GhRepository)
 const readBktList = (printed: string) =>
   Option.orElse(Schema.decodeUnknownOption(BktList)(printed), () =>
     Option.map(Schema.decodeUnknownOption(BktPage)(printed), (page) => page.values),
@@ -189,6 +212,7 @@ export const createPullRequest = (repositoryId: string, asked: PullRequestAsked)
                   '--body-file',
                   '-',
                   ...reviewers,
+                  ...asked.attachments.flatMap((one) => ['--attach', one]),
                 ],
                 asked.body,
               )
@@ -255,6 +279,75 @@ export const pullRequestStatus = (repositoryId: string, number: number) =>
             .filter((one) => one.approved)
             .map((one) => ({ login: one.user.nickname ?? one.user.display_name ?? '' })),
         } satisfies PullRequestStatus
+      }),
+    ),
+  )
+
+/**
+ * Uploads files into an open pull request's description (gh only), the description first replaced
+ * when one is given: answers what gh answered, its exit code and message, since a partial failure
+ * still edits the pull request and only reading the description back says which files made it.
+ */
+export const attachToPullRequest = (
+  repositoryId: string,
+  number: number,
+  attachments: ReadonlyArray<string>,
+  body: string | null,
+) =>
+  ForgePort.use((port) =>
+    port.operate(repositoryId, (target, run) =>
+      run(
+        [
+          'pr',
+          'edit',
+          String(number),
+          ...target.place,
+          ...attachments.flatMap((one) => ['--attach', one]),
+          ...(body === null ? [] : ['--body-file', '-']),
+        ],
+        body ?? undefined,
+      ),
+    ),
+  )
+
+/** A pull request's description as the forge holds it now (gh only). */
+export const pullRequestBody = (repositoryId: string, number: number) =>
+  ForgePort.use((port) =>
+    port.operate(repositoryId, (target, run) =>
+      Effect.gen(function* () {
+        const answer = yield* answered(
+          target,
+          yield* run(['pr', 'view', String(number), ...target.place, '--json', 'body']),
+        )
+        const read = readGhBody(answer.stdout)
+        if (Option.isNone(read)) return yield* unreadable(target, answer)
+        return read.value.body
+      }),
+    ),
+  )
+
+/** Whether a GitHub repository is public, and whether the signed-in account may push to it. */
+export const repositoryAccess = (repositoryId: string) =>
+  ForgePort.use((port) =>
+    port.operate(repositoryId, (target, run) =>
+      Effect.gen(function* () {
+        const { owner, slug } = target.identity
+        const answer = yield* answered(
+          target,
+          yield* run([
+            'api',
+            '--hostname',
+            target.identity.host,
+            `repos/${owner ?? ''}/${slug ?? ''}`,
+          ]),
+        )
+        const read = readGhRepository(answer.stdout)
+        if (Option.isNone(read)) return yield* unreadable(target, answer)
+        const one = read.value
+        return {
+          visibility: one.visibility ?? (one.private ? 'private' : 'public'),
+          push: one.permissions?.push ?? false,
+        } satisfies RepositoryAccess
       }),
     ),
   )
