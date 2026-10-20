@@ -1564,6 +1564,48 @@ describe('The Git guard’s follow-ups after #499 (#500)', () => {
     expect(result.status).toContain('Hemera stopped its Git')
     expect(shown(result.needs[0])).toContain('~/acme/.git/worktrees/acme-other/index (added)')
   })
+
+  test('4. with submodule.recurse=true, a worktree the engine adds on a commit with a submodule enters it in no call: the submodule’s filter never runs', async () => {
+    const main = repository(join(work, 'acme'))
+    const shared = repository(join(work, 'shared'))
+    writeFileSync(join(shared, 'f.txt'), 'f\n')
+    writeFileSync(join(shared, '.gitattributes'), '* filter=x\n')
+    git(shared, 'add', '.')
+    git(shared, 'commit', '-q', '-m', 'f')
+    git(main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', shared, 'shared')
+    git(main, 'commit', '-q', '-m', 'shared')
+    // A filter of the submodule's own Git folder, taken in the baseline: only where Git goes counts.
+    const entered = join(work, 'entered')
+    const mark = join(work, 'mark.sh')
+    writeFileSync(mark, `#!/bin/sh\n: > "${entered.replaceAll('\\', '/')}"\ncat\n`)
+    const config = join(main, '.git', 'modules', 'shared', 'config')
+    for (const kind of ['smudge', 'clean']) {
+      git(main, 'config', '-f', config, `filter.x.${kind}`, `sh "${mark.replaceAll('\\', '/')}"`)
+    }
+    git(main, 'config', 'submodule.recurse', 'true')
+    const other = join(work, 'acme-other')
+    const result = await reopen(
+      Effect.gen(function* () {
+        yield* createProject({ name: 'Acme', mainCheckout: main, repositories: [] })
+        yield* sighted(main)
+        const added = yield* Git.use((service) =>
+          service.worktreeAdd(main, 'mission/other', other, 'HEAD'),
+        ).pipe(
+          Effect.as('ran'),
+          Effect.catchTag('GitFailed', (refused) => Effect.succeed(String(refused.stderr))),
+        )
+        return { added, status: yield* engineStatus(other) }
+      }),
+    )
+    const enteredByEngine = existsSync(entered)
+    // The control: Git does run that filter once it works in the submodule's checkout.
+    rmSync(join(main, 'shared', 'f.txt'))
+    git(join(main, 'shared'), 'checkout', '--', 'f.txt')
+    expect(result).toEqual({ added: 'ran', status: 'ran' })
+    expect(enteredByEngine).toBe(false)
+    expect(existsSync(join(other, 'shared', '.git'))).toBe(false)
+    expect(existsSync(entered)).toBe(true)
+  })
 })
 
 describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
