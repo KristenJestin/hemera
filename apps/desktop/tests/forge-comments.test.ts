@@ -528,6 +528,33 @@ describe('My own comment is known by the forge account, never by a name anyone c
   })
 })
 
+describe('The GitHub threads are read for any owner and repository name', () => {
+  test('owner and name go to GraphQL as strings, the number as a number: a numeric owner or name still reads', async () => {
+    const fake = fakeForge(ALL_READY)
+    await withForge(fake, (repository) => readComments(repository('shop'), 7))
+    const call = fake.calls().find((one) => one.args.includes('graphql'))
+    const pairs = (call?.args ?? []).flatMap((arg, at, all) =>
+      arg === '-f' || arg === '-F' ? [`${arg} ${all[at + 1] ?? ''}`] : [],
+    )
+    expect(pairs.slice(1)).toEqual(['-f owner=acme', '-f name=shop', '-F number=7'])
+    const numeric = [
+      'api',
+      '--hostname',
+      'github.com',
+      'graphql',
+      '-f',
+      `query=${THREADS_QUERY}`,
+      '-f',
+      'owner=1234',
+      '-f',
+      'name=2048',
+      '-F',
+      'number=7',
+    ]
+    expect(parseCommand('gh', numeric)?.shape.class).toBe('read')
+  })
+})
+
 describe('No call to the forge CLI for comments is a write', () => {
   test('every call the reads make matches a read shape, with the place of its repository', async () => {
     const fake = fakeForge(ALL_READY)
@@ -563,9 +590,9 @@ describe('No call to the forge CLI for comments is a write', () => {
       'graphql',
       '-f',
       `query=${query}`,
-      '-F',
+      '-f',
       'owner=acme',
-      '-F',
+      '-f',
       'name=shop',
       '-F',
       'number=7',

@@ -113,12 +113,12 @@ const COMMENTS_PATH = new RegExp(
  */
 export const THREADS_QUERY =
   'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { databaseId } } } } } } }'
-/** The query given whole and nothing else: `query=` and its exact text. */
-const ONLY_THREADS_QUERY = new RegExp(
-  `^query=${THREADS_QUERY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+/** What `-f` sends as a string: the one query given whole, the owner, the repository's name. */
+const THREADS_STRING = new RegExp(
+  String.raw`^(query=${THREADS_QUERY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|owner=${NAME}|name=${NAME})$`,
 )
-/** A variable of that query: the repository's owner and name, the pull request's number. */
-const THREADS_VARIABLE = new RegExp(String.raw`^(owner=${NAME}|name=${NAME}|number=\d+)$`)
+/** What `-F` sends typed: the pull request's number only. */
+const THREADS_NUMBER = /^number=\d+$/
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
@@ -214,8 +214,8 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     'comments.threads',
     ['api', '--hostname', '<host>', 'graphql'],
     [
-      ['-f', valueFlag(true, ONLY_THREADS_QUERY)],
-      ['-F', { value: true, pattern: THREADS_VARIABLE, required: true, repeat: true }],
+      ['-f', { value: true, pattern: THREADS_STRING, required: true, repeat: true }],
+      ['-F', valueFlag(true, THREADS_NUMBER)],
     ],
   ),
   // bkt's own list of a pull request's comments, as read in its source at `5068ddc`: Cloud's API

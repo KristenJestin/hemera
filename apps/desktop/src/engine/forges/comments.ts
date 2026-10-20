@@ -254,9 +254,10 @@ const fromGithub = (
         'graphql',
         '-f',
         `query=${THREADS_QUERY}`,
-        '-F',
+        // Strings, whatever they look like: `-F` would send a numeric owner or name as a number.
+        '-f',
         `owner=${owner ?? ''}`,
-        '-F',
+        '-f',
         `name=${slug ?? ''}`,
         '-F',
         `number=${String(number)}`,
