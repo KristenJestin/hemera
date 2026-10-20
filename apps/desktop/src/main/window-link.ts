@@ -191,6 +191,16 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           closedAs(gone),
           observed('repositories.setBaseBranch', log),
         ),
+      'repositories.testGuess': (request) =>
+        engine['repositories.testGuess'](request).pipe(
+          closedAs(gone),
+          observed('repositories.testGuess', log),
+        ),
+      'repositories.setTestReporting': (request) =>
+        engine['repositories.setTestReporting'](request).pipe(
+          closedAs(gone),
+          observed('repositories.setTestReporting', log),
+        ),
       'repositories.upToDateBase': (request) =>
         engine['repositories.upToDateBase'](request).pipe(
           closedAs(gone),

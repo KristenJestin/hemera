@@ -83,6 +83,8 @@ const projectHandlers = {
   'repositories.remotes': unused,
   'repositories.setRemote': unused,
   'repositories.setBaseBranch': unused,
+  'repositories.testGuess': unused,
+  'repositories.setTestReporting': unused,
   'repositories.upToDateBase': () =>
     Effect.fail(new BaseUnavailable({ remote: 'origin', branch: 'dev', reason: 'offline' })),
   'repositories.changes': () => Stream.die('not asked of this engine'),

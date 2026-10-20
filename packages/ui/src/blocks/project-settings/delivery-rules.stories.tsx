@@ -370,6 +370,8 @@ export const AddAStep: Story = {
     ])
     await userEvent.click(await body().findByRole('option', { name: 'Confirm' }))
     expect(await within(dialog).findByRole('textbox', { name: 'What you confirm' })).toBeVisible()
+    // The Kind list leaves on an exit motion: the accessibility check runs once it has gone.
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
   },
 }
 

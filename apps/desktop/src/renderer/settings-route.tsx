@@ -1,9 +1,11 @@
+import { testsProblem } from '@hemera/ui'
 import { type ReactNode, useCallback, useState } from 'react'
 
 import { AgentSection } from './agent-sections.tsx'
 import type { Link } from './link.ts'
 import { SettingsPage, type SettingsTools } from './settings-page.tsx'
 import { type SetupLaunches, useSetupOffer } from './setup-task.tsx'
+import { TestsPart, useTests } from './tests-section.tsx'
 import { TicketSection } from './ticket-sections.tsx'
 import { useTicketProblem } from './ticket-providers.tsx'
 import { useSettings } from './use-settings.ts'
@@ -39,6 +41,8 @@ export function ProjectSettingsRoute({
     [],
   )
   const [settingsData, settings] = useSettings(link, engineReady, projectId)
+  const project = settingsData.project.kind === 'ready' ? settingsData.project.project : null
+  const tests = useTests(link, engineReady, project)
   /** How many times the Project's models by role were changed in its settings. */
   const [roleChanges, setRoleChanges] = useState(0)
   // Read each time the settings show, change Project or models by role.
@@ -47,6 +51,8 @@ export function ProjectSettingsRoute({
   const problems = new Map<string, string>()
   if (ticketProblem !== undefined) problems.set('tickets', ticketProblem)
   if (deliveryProblem !== undefined) problems.set('delivery', deliveryProblem)
+  const testsProblemNow = testsProblem(tests.rows)
+  if (testsProblemNow !== undefined) problems.set('tests', testsProblemNow)
   const catalogue = settingsData.catalogue.kind === 'ready' ? settingsData.catalogue.value : []
   return (
     <SettingsPage
@@ -55,21 +61,25 @@ export function ProjectSettingsRoute({
       tools={tools}
       section={section}
       problems={problems}
-      ticketSection={(id, showForm) => (
-        <TicketSection
-          section={id}
-          link={link}
-          engineReady={engineReady}
-          projectId={projectId}
-          project={settingsData.project.kind === 'ready' ? settingsData.project.project : null}
-          catalogue={catalogue}
-          show={showForm}
-          copy={tools.copy}
-          // A section the route names was opened by a link: a need's, a notification's.
-          linked={section === id}
-          onProblem={onDeliveryProblem}
-        />
-      )}
+      ticketSection={(id, showForm) =>
+        id === 'tests' ? (
+          <TestsPart link={link} project={project} tests={tests} show={showForm} />
+        ) : (
+          <TicketSection
+            section={id}
+            link={link}
+            engineReady={engineReady}
+            projectId={projectId}
+            project={project}
+            catalogue={catalogue}
+            show={showForm}
+            copy={tools.copy}
+            // A section the route names was opened by a link: a need's, a notification's.
+            linked={section === id}
+            onProblem={onDeliveryProblem}
+          />
+        )
+      }
       setUp={{
         // Launched, the setup is a task on the Project's page: the window goes there.
         onStart: () => {

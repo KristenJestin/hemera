@@ -39,6 +39,7 @@ const repository = (id: string, path: string, more: Partial<Repository> = {}): R
   remote: 'origin',
   baseBranch: 'main',
   lastFetchedAt: null,
+  testReporting: null,
   ...more,
 })
 

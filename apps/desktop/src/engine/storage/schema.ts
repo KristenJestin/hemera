@@ -144,6 +144,11 @@ export const projectRepositories = sqliteTable(
     remote: text('remote'),
     baseBranch: text('base_branch').notNull(),
     lastFetchedAt: text('last_fetched_at'),
+    /**
+     * Its test runner and report written by hand in Project settings (#421), a `TestReporting` as
+     * JSON; null while the guess read from its files holds.
+     */
+    testReporting: text('test_reporting'),
   },
   (table) => [unique('repository_once_in_project').on(table.projectId, table.path)],
 )

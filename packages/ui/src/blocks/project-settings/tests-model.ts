@@ -1,8 +1,10 @@
+import type { MarkIcon } from '../../components/project-mark/mark-icons.tsx'
+
 /**
- * What every variant of the test runner draws: a repository's guess and the rule that made it, the
- * value written by hand that replaces it, and the check of that value on save. The runners and the
- * formats are a short copy of `TEST_RUNNERS` and `REPORT_FORMATS` in `@hemera/core`, which the
- * design system does not import.
+ * What the Tests of a Project's settings draw (#421): a repository's guess and the rule that made
+ * it, the value written by hand that replaces it, and the fields that value is written in. The
+ * runners and the formats are a short copy of `TEST_RUNNERS` and `REPORT_FORMATS` in
+ * `@hemera/core`, which the design system does not import.
  */
 
 export const RUNNERS = [
@@ -33,9 +35,6 @@ export const RUNNER_WORDS: Readonly<Record<Runner, string>> = {
 /** The runners Hemera asks for a report itself, at each run (`withReporting` in the core). */
 const ASKED = new Set<Runner>(['vitest', 'pytest', 'node'])
 
-/** The runners whose JSON report the reader reads: jest's shape, which vitest writes too. */
-const JSON_READ = new Set<Runner>(['vitest', 'jest'])
-
 export type ReportFormat = 'junit' | 'json'
 
 export const FORMAT_WORDS: Readonly<Record<ReportFormat, string>> = {
@@ -46,11 +45,11 @@ export const FORMAT_WORDS: Readonly<Record<ReportFormat, string>> = {
 /** What a guess found: the runner, and the file that named it. Its report is Hemera's own. */
 export interface Guess {
   runner: Runner
-  /** The file of the repository the rule read: `vite.config.ts`, `go.mod`. */
+  /** The file at the repository's root the rule read: `vite.config.ts`, `go.mod`. */
   from: string
 }
 
-/** A value written by hand: the runner, and the report it writes, at a path of the repository. */
+/** A value written by hand: the runner, and the report it writes at a path of the repository. */
 export interface Custom {
   runner: Runner
   report: { format: ReportFormat; path: string } | null
@@ -59,6 +58,8 @@ export interface Custom {
 /** One repository's tests: its guess (null when no rule found one) and its own value, if any. */
 export interface RepositoryTests {
   repository: string
+  /** The icon it wears before its path; a folder until one is chosen. */
+  icon?: MarkIcon | undefined
   guess: Guess | null
   custom: Custom | null
 }
@@ -73,14 +74,8 @@ export interface TestsDraft {
   path: string
 }
 
-/** A draft, opened on a repository. */
-export interface Opened {
-  repository: string
-  draft?: TestsDraft | undefined
-}
-
 /** What a save refused, and the field it belongs under. */
-export interface Refusal {
+export interface TestsRefusal {
   field: 'runner' | 'report' | 'path'
   words: string
 }
@@ -103,20 +98,20 @@ export function reportWords(tests: RepositoryTests): string {
 }
 
 /** The runner in use: the value written by hand, else the guess, else none. */
-export function runnerOf(tests: RepositoryTests): Runner | null {
+export function runnerInUse(tests: RepositoryTests): Runner | null {
   return tests.custom?.runner ?? tests.guess?.runner ?? null
 }
 
 /** The whole line, as a reader hears it: `web, vitest, guessed from vite.config.ts, …`. */
 export function testsWords(tests: RepositoryTests): string {
-  const runner = runnerOf(tests)
+  const runner = runnerInUse(tests)
   if (runner === null) return `${tests.repository}, no runner found`
   const where = tests.custom === null ? `guessed from ${tests.guess?.from ?? ''}` : 'your own value'
   return `${tests.repository}, ${RUNNER_WORDS[runner]}, ${where}, ${reportWords(tests)}`
 }
 
 /** The fields filled from what is in use: the value written by hand, or the guess. */
-export function draftOf(tests: RepositoryTests): TestsDraft {
+export function draftOfTests(tests: RepositoryTests): TestsDraft {
   const { custom } = tests
   if (custom === null) return { runner: tests.guess?.runner ?? null, report: 'hemera', path: '' }
   return {
@@ -126,53 +121,11 @@ export function draftOf(tests: RepositoryTests): TestsDraft {
   }
 }
 
-/** Whether a path, from the root of the repository, stays inside it. */
-function inside(path: string): boolean {
-  if (/^(?:[/\\~]|[A-Za-z]:)/.test(path)) return false
-  let depth = 0
-  for (const part of path.split(/[/\\]/)) {
-    if (part === '..') depth -= 1
-    else if (part !== '' && part !== '.') depth += 1
-    if (depth < 0) return false
-  }
-  return true
-}
-
-/** Why a draft is refused on save, under the field it belongs to; undefined when it is kept. */
-export function refusalOf(repository: string, draft: TestsDraft): Refusal | undefined {
-  const { runner, report, path } = draft
-  if (runner === null) return { field: 'runner', words: `Choose the runner of ${repository}.` }
-  if (report === 'hemera') return undefined
-  if (report === 'json' && !JSON_READ.has(runner)) {
-    return {
-      field: 'report',
-      words: `Hemera reads no JSON report from ${RUNNER_WORDS[runner]}: choose JUnit XML.`,
-    }
-  }
-  const written = path.trim()
-  if (written === '') {
-    return { field: 'path', words: `Where the runner writes it, from the root of ${repository}.` }
-  }
-  if (!inside(written)) {
-    return {
-      field: 'path',
-      words: `${written} is outside ${repository}: the report must be written inside it.`,
-    }
-  }
-  return undefined
-}
-
-/**
- * What a kept draft becomes: no value of its own when it says what the guess says, the value
- * written by hand otherwise.
- */
-export function savedOf(tests: RepositoryTests, draft: TestsDraft): RepositoryTests {
-  const { runner } = draft
-  if (runner === null) return tests
-  const report =
-    draft.report === 'hemera' ? null : { format: draft.report, path: draft.path.trim() }
-  const guessed = tests.guess !== null && tests.guess.runner === runner && report === null
-  return { ...tests, custom: guessed ? null : { runner, report } }
+/** A draft saved with no runner chosen: the only refusal said before the engine is asked. */
+export function unchosen(repository: string, draft: TestsDraft): TestsRefusal | undefined {
+  return draft.runner === null
+    ? { field: 'runner', words: `Choose the runner of ${repository}.` }
+    : undefined
 }
 
 /** The report choices offered for a runner: Hemera's own first, then a file at a path. */
@@ -188,4 +141,12 @@ export function reportChoices(runner: Runner | null): { value: ReportChoice; lab
     { value: 'junit', label: 'JUnit XML, at a path' },
     { value: 'json', label: 'JSON, at a path' },
   ]
+}
+
+/** The repositories whose runner no rule found, as the section's problem in the list. */
+export function testsProblem(rows: readonly RepositoryTests[] | null): string | undefined {
+  const none = (rows ?? []).filter((one) => one.guess === null && one.custom === null)
+  return none.length === 0
+    ? undefined
+    : `no runner found for ${none.map((one) => one.repository).join(', ')}`
 }
