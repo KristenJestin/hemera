@@ -33,15 +33,17 @@ export const taskViewId = (taskId: string): string => `task:${taskId}`
 /**
  * The page of a Building mission (#151): the spine of requirements with their tasks and proofs in
  * the middle; the rail with the stage card (what happens, the chips of the agents beside the
- * Builder), the services, the checks, the changes, the journal and the mission's own things; a
- * task opened as a view over it (`ACME-12 › Building › T8`). The mission's needs stand above the
- * page; the head draws the ball without the face, the page's stage card drawing it.
+ * Builder, and of an agent kept from before a restart), the services, the checks, the changes,
+ * the journal and the mission's own things; a task opened as a view over it
+ * (`ACME-12 › Building › T8`). The mission's needs stand above the page; the head draws the ball
+ * without the face, the page's stage card drawing it.
  */
 export function BuildingStage({
   link,
   engineReady,
   mission,
   open,
+  kept,
   frame,
 }: StagePageProps): ReactNode {
   const [view, act] = useBuilding(link, engineReady, mission)
@@ -84,6 +86,7 @@ export function BuildingStage({
         moment={shown}
         loading={moment === null}
         chosenTask={chosen}
+        kept={kept}
         onOpenTask={(id) => {
           setChosen(id)
           open(taskViewId(id))

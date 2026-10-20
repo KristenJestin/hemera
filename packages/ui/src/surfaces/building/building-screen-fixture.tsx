@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from 'react'
 
+import type { KeptAgentView } from '../../blocks/mission/kept-agent-chip.tsx'
 import type { MissionMarkView } from '../../blocks/mission/vocabulary.ts'
 import { Button } from '../../components/button/button.tsx'
 import type { ModelChoice } from '../../components/model-picker/model-picker.tsx'
@@ -141,6 +142,8 @@ export interface BuildingScreenProps extends BuildingHandlers {
   title?: string | undefined
   /** The views open as the story starts. */
   initial?: MissionFrameState | undefined
+  /** The agents Hemera started before its last restart and could not stop. */
+  kept?: readonly KeptAgentView[] | undefined
 }
 
 /** The Building page of ACME-12 in its frame, the needs above it, its views over it. */
@@ -150,6 +153,7 @@ export function BuildingScreen({
   title = TITLE,
   initial = AT_BASE,
   journalMore = false,
+  kept,
   ...handlers
 }: BuildingScreenProps): ReactNode {
   const moment = { ...MOMENTS[name](), journalMore }
@@ -216,6 +220,7 @@ export function BuildingScreen({
             moment={moment}
             chosenTask={chosen}
             loading={loading}
+            kept={kept}
             onOpenTask={(id) => {
               setChosen(id)
               handlers.onOpenTask(id)

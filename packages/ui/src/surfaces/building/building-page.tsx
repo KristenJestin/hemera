@@ -1,6 +1,7 @@
 import { cn } from 'cn'
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
 
+import { type KeptAgentView, KeptAgentChips } from '../../blocks/mission/kept-agent-chip.tsx'
 import { StageCard, type StageCardProps } from '../../blocks/mission/stage-card.tsx'
 import { Button, IconButton } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
@@ -80,7 +81,12 @@ export interface BuildingPageProps extends BuildingHandlers {
   chosenTask?: string | undefined
   /** Whether the page waits for its first read: its rows are skeletons. */
   loading?: boolean | undefined
+  /** The agents Hemera started before its last restart and could not stop: a chip each (#320). */
+  kept?: readonly KeptAgentView[] | undefined
 }
+
+/** No kept agent: one array for every card, so the default does not redraw a child that compares it. */
+const NO_KEPT: readonly KeptAgentView[] = []
 
 const COLUMNS = 'flex min-w-0 flex-col gap-8 px-8 pt-2 pb-10 lg:flex-row-reverse lg:items-start'
 
@@ -183,9 +189,11 @@ export function progressOf(moment: BuildingMoment): StageCardProps['progress'] {
 export function BuildingCard({
   moment,
   loading = false,
+  kept = NO_KEPT,
 }: {
   moment: BuildingMoment
   loading?: boolean | undefined
+  kept?: readonly KeptAgentView[] | undefined
 }): ReactNode {
   const names = moment.helpers.map((helper) => helper.name)
   return (
@@ -195,7 +203,7 @@ export function BuildingCard({
       line={loading ? 'Reading where Building stands' : moment.now}
       progress={loading ? { step: 'Building', detail: 'counting the tasks' } : progressOf(moment)}
       running={
-        moment.helpers.length > 0 ? (
+        moment.helpers.length > 0 || kept.length > 0 ? (
           <>
             {moment.helpers.map((helper) => (
               <LiveChip
@@ -208,6 +216,7 @@ export function BuildingCard({
                 glance={{ kind: 'helper', type: HELPER_TYPE[helper.kind], step: helper.step }}
               />
             ))}
+            <KeptAgentChips kept={kept} />
           </>
         ) : undefined
       }
@@ -944,6 +953,7 @@ export function BuildingPage({
   moment,
   chosenTask,
   loading = false,
+  kept,
   onOpenTask,
   onOpenDiff,
   onService,
@@ -953,7 +963,7 @@ export function BuildingPage({
   return (
     <div className={COLUMNS} data-stage="building">
       <aside aria-label="What happens" className={RAIL}>
-        <BuildingCard moment={moment} loading={loading} />
+        <BuildingCard moment={moment} loading={loading} kept={kept} />
         {!loading && (
           <div className="flex flex-col">
             <Services moment={moment} onService={onService} />

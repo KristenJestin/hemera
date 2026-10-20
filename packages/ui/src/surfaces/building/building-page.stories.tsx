@@ -301,6 +301,24 @@ export const HelperStuck: Story = {
 }
 
 /**
+ * An agent Hemera started before its last restart, still running: one chip per agent beside the
+ * helpers, the way the stage card shows it at every stage (#320).
+ */
+export const KeptAgents: Story = {
+  args: {
+    kept: [
+      { program: 'claude', pid: 48213 },
+      { program: 'codex', pid: 48377 },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(cardOf(canvasElement))
+    await expect(card.getByText('claude · pid 48213')).toBeVisible()
+    await expect(card.getByText('codex · pid 48377')).toBeVisible()
+  },
+}
+
+/**
  * The end phases: the tasks done, the documentation written, the final checks in full, the
  * reviewers at work, and the special tasks `RV1…` apart, counted apart.
  */
