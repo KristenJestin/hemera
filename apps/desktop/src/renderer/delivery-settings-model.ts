@@ -18,6 +18,7 @@ import {
   DeliveryAction,
   ROOT_REPOSITORY,
   effectiveRepositories,
+  movedIds,
   type DeliveryDependency,
   type DeliveryMoment,
   type DeliveryPreset,
@@ -39,6 +40,7 @@ import {
 import { Schema } from 'effect'
 import {
   STEP_WORDS,
+  kindsOn,
   type CleanupStep,
   type DeliveryDependencyShown,
   type DeliveryRecipeStep,
@@ -46,6 +48,7 @@ import {
   type DeliveryRepositoryShown,
   type DeliveryRulesShown,
   type DeliveryStep,
+  type DeliveryStepKind,
   type ForgeKind,
   type ForgeView,
   type Moment,
@@ -186,11 +189,17 @@ export function configOf(action: DeliveryAction, commands: ReadonlyArray<Command
       const { action: remote } = action
       switch (remote.type) {
         case 'run-workflow':
-          return { kind: 'remote-action', action: remote.workflow }
+          return {
+            kind: 'remote-action',
+            action: remote.workflow,
+            inputs: Object.entries(remote.inputs)
+              .map(([name, value]) => `${name}=${value}`)
+              .join('\n'),
+          }
         case 'run-pipeline':
           return { kind: 'remote-action', action: remote.pipeline }
         case 'approve-deployment':
-          return { kind: 'remote-action', action: remote.environment }
+          return { kind: 'approve-deployment', environment: remote.environment }
       }
       break
     }
@@ -216,6 +225,23 @@ export function configOf(action: DeliveryAction, commands: ReadonlyArray<Command
       return { kind: action.kind }
   }
 }
+
+/** A workflow's inputs as a form writes them, one `name=value` a line; a line without `=` is none. */
+function inputsOf(lines: string): Record<string, string> {
+  return Object.fromEntries(
+    lines.split('\n').flatMap((line) => {
+      const at = line.indexOf('=')
+      const name = line.slice(0, at).trim()
+      return at === -1 || name === '' ? [] : [[name, line.slice(at + 1).trim()]]
+    }),
+  )
+}
+
+/**
+ * The kinds a step of a repository may be on its forge: the approval of a deployment only where
+ * the forge can approve one.
+ */
+export const stepKindsOn = (forge: ForgeName): DeliveryStepKind[] => kindsOn(FORGE_KINDS[forge])
 
 /** What an action is written as, from what a form holds. */
 export interface ActionContext {
@@ -248,32 +274,21 @@ export function actionOf(
       return { ...fields, kind: 'merge', method: config.method }
     case 'local-merge':
       return { ...fields, kind: 'merge', method: 'local' }
+    case 'approve-deployment':
+      return {
+        ...fields,
+        kind: 'remote-action',
+        action: { type: 'approve-deployment', environment: config.environment },
+      }
     case 'remote-action': {
       const { before } = context
-      if (before?.kind === 'remote-action') {
-        const { action } = before
-        switch (action.type) {
-          case 'run-workflow':
-            return {
-              ...fields,
-              kind: 'remote-action',
-              action: { ...action, workflow: config.action },
-            }
-          case 'run-pipeline':
-            return {
-              ...fields,
-              kind: 'remote-action',
-              action: { ...action, pipeline: config.action },
-            }
-          case 'approve-deployment':
-            return {
-              ...fields,
-              kind: 'remote-action',
-              action: { ...action, environment: config.action },
-            }
-        }
-      }
-      return context.forge === 'bitbucket-cloud'
+      const inputs = inputsOf(config.inputs ?? '')
+      // A pipeline stays a pipeline, wherever it runs now; anything else is its forge's own.
+      const pipeline =
+        before?.kind === 'remote-action'
+          ? before.action.type === 'run-pipeline'
+          : context.forge === 'bitbucket-cloud'
+      return pipeline
         ? {
             ...fields,
             kind: 'remote-action',
@@ -282,7 +297,7 @@ export function actionOf(
         : {
             ...fields,
             kind: 'remote-action',
-            action: { type: 'run-workflow', workflow: config.action, inputs: {} },
+            action: { type: 'run-workflow', workflow: config.action, inputs },
           }
     }
     case 'published':
@@ -334,21 +349,29 @@ interface Placed {
  * and the steps left out in their place.
  */
 function placedIn(
-  base: ReadonlyArray<DeliveryAction>,
+  allBase: ReadonlyArray<DeliveryAction>,
   overrides: Overrides,
   moment: DeliveryMoment,
+  away: ReadonlySet<string> = movedIds([overrides]),
 ): Placed[] {
-  const known = new Set([
-    ...base.map((step) => step.id),
-    ...overrides.added.map((one) => one.step.id),
-  ])
+  // A preset's step moved stands where it was moved, as a change of the repository's.
+  const base = allBase.filter((step) => !away.has(step.id))
+  const placedSteps = [
+    ...overrides.added.map(({ after, step }) => ({ after, step, origin: 'added' as const })),
+    ...(overrides.moved ?? []).map(({ after, step }) => ({
+      after,
+      step,
+      origin: 'changed' as const,
+    })),
+  ]
+  const known = new Set([...base.map((step) => step.id), ...placedSteps.map((one) => one.step.id)])
   const placed = new Set<number>()
   const after = (anchor: string | null): Placed[] => {
     const steps: Placed[] = []
-    for (const [index, one] of overrides.added.entries()) {
+    for (const [index, one] of placedSteps.entries()) {
       if (one.after !== anchor || placed.has(index)) continue
       placed.add(index)
-      steps.push({ action: one.step, origin: 'added', moment }, ...after(one.step.id))
+      steps.push({ action: one.step, origin: one.origin, moment }, ...after(one.step.id))
     }
     return steps
   }
@@ -362,7 +385,7 @@ function placedIn(
     else steps.push({ action: changed, origin: 'changed', moment })
     steps.push(...after(step.id))
   }
-  for (const one of overrides.added) {
+  for (const one of placedSteps) {
     if (one.after !== null && !known.has(one.after)) steps.push(...after(one.after))
   }
   return steps
@@ -374,12 +397,16 @@ function placedOf(
   effective: EffectiveRepository,
   fed: boolean,
 ): Placed[] {
+  const away = movedIds(
+    DELIVERY_MOMENTS.map((moment) => overridesIn(draft, moment, effective.repositoryId)),
+  )
   return DELIVERY_MOMENTS.flatMap((moment) => {
     const kept = new Set(effective.stacks[moment].map((step) => step.id))
     return placedIn(
       draft[moment].presets[effective.preset],
       overridesIn(draft, moment, effective.repositoryId),
       moment,
+      away,
     ).filter((one) =>
       // A preset's bump left out stays out of sight where nothing upstream publishes, as it does
       // when it is kept.
@@ -516,7 +543,25 @@ export function shownOf(world: DeliveryWorld): DeliveryShown {
   const of = (code: DeliveryProblem['code']) => problems.filter((one) => one.code === code)
   const cycle = of('dependency-cycle')
   const approval = of('approval-after-ship')
-  for (const problem of [...cycle, ...approval]) placedRefusals.add(problem)
+  const template = (field: DeliveryProblem['field']) =>
+    of('unknown-template-variable').filter((one) => one.field === field)
+  const templates = {
+    commit: template('commitTemplate'),
+    title: template('pullRequestTitle'),
+    body: template('pullRequestBody'),
+  }
+  const cleanupRefused = (id: string) =>
+    problems.filter((one) => one.repositoryId === null && one.stepId === id)
+  for (const problem of [
+    ...cycle,
+    ...approval,
+    ...templates.commit,
+    ...templates.title,
+    ...templates.body,
+    ...draft.end.cleanup.flatMap((one) => cleanupRefused(one.id)),
+  ]) {
+    placedRefusals.add(problem)
+  }
   return {
     rules: {
       pullRequests: {
@@ -541,12 +586,20 @@ export function shownOf(world: DeliveryWorld): DeliveryShown {
           id: action.id,
           label: STEP_WORDS[config.kind],
           config: CLEANUP_KINDS.some((kind) => kind === action.kind) ? undefined : config,
+          refused: joined(cleanupRefused(action.id).map((one) => one.sentence)),
         }
       }),
     },
     refusals: {
       dependencies: joined(cycle.map((one) => one.sentence)),
       approval: joined(approval.map((one) => one.sentence)),
+      templates: Object.values(templates).some((found) => found.length > 0)
+        ? {
+            commit: joined(templates.commit.map((one) => one.sentence)),
+            title: joined(templates.title.map((one) => one.sentence)),
+            body: joined(templates.body.map((one) => one.sentence)),
+          }
+        : undefined,
     },
     elsewhere: joined(
       problems.filter((one) => !placedRefusals.has(one)).map((one) => one.sentence),
@@ -634,10 +687,45 @@ function momentOf(
   stepId: string,
 ): DeliveryMoment | undefined {
   const { preset } = wavesIn(draft, project, repositoryId)
-  return DELIVERY_MOMENTS.find(
-    (moment) =>
-      draft[moment].presets[preset].some((step) => step.id === stepId) ||
-      overridesIn(draft, moment, repositoryId).added.some((one) => one.step.id === stepId),
+  return (
+    movedMomentOf(draft, repositoryId, stepId) ??
+    DELIVERY_MOMENTS.find(
+      (moment) =>
+        draft[moment].presets[preset].some((step) => step.id === stepId) ||
+        overridesIn(draft, moment, repositoryId).added.some((one) => one.step.id === stepId),
+    )
+  )
+}
+
+/** The moment a preset's step of a repository was moved to, if it was. */
+const movedMomentOf = (
+  draft: DeliveryRulesDraft,
+  repositoryId: string,
+  stepId: string,
+): DeliveryMoment | undefined =>
+  DELIVERY_MOMENTS.find((moment) =>
+    (overridesIn(draft, moment, repositoryId).moved ?? []).some((one) => one.step.id === stepId),
+  )
+
+/** The preset's steps of a repository moved out of their place, whatever moment they went to. */
+const awayIn = (draft: DeliveryRulesDraft, repositoryId: string): Set<string> =>
+  movedIds(DELIVERY_MOMENTS.map((moment) => overridesIn(draft, moment, repositoryId)))
+
+/** The last step of a moment of a repository, as it is drawn; null when it has none. */
+function lastIn(
+  draft: DeliveryRulesDraft,
+  project: DeliveryProject,
+  repositoryId: string,
+  moment: DeliveryMoment,
+): string | null {
+  const { preset } = wavesIn(draft, project, repositoryId)
+  return (
+    placedIn(
+      draft[moment].presets[preset],
+      overridesIn(draft, moment, repositoryId),
+      moment,
+      awayIn(draft, repositoryId),
+    ).at(-1)?.action.id ?? null
   )
 }
 
@@ -652,6 +740,7 @@ export function actionIn(
   if (moment === undefined) return undefined
   const overrides = overridesIn(draft, moment, repositoryId)
   return (
+    overrides.moved?.find((one) => one.step.id === stepId)?.step ??
     overrides.added.find((one) => one.step.id === stepId)?.step ??
     overrides.changed.find((one) => one.id === stepId) ??
     draft[moment].presets[wavesIn(draft, project, repositoryId).preset].find(
@@ -697,10 +786,31 @@ export const withStepReset = (
   repositoryId: string,
   stepId: string,
 ): DeliveryRulesDraft =>
-  withEveryPart(draft, repositoryId, (overrides) => ({
-    ...overrides,
-    changed: overrides.changed.filter((one) => one.id !== stepId),
-  }))
+  withEveryPart(draft, repositoryId, (overrides) =>
+    withoutMoved(
+      { ...overrides, changed: overrides.changed.filter((one) => one.id !== stepId) },
+      stepId,
+    ),
+  )
+
+/**
+ * A repository's part of a moment without a preset's step it moved there: what stood after it
+ * keeps its place, after what it stood after.
+ */
+function withoutMoved(overrides: Overrides, stepId: string): Overrides {
+  const moved = overrides.moved ?? []
+  const gone = moved.find((one) => one.step.id === stepId)
+  if (gone === undefined) return overrides
+  const anchored = <P extends { readonly after: string | null }>(one: P): P =>
+    one.after === stepId ? Object.assign({}, one, { after: gone.after }) : one
+  const kept = moved.filter((one) => one !== gone).map(anchored)
+  const rest = {
+    off: overrides.off,
+    changed: overrides.changed,
+    added: overrides.added.map(anchored),
+  }
+  return kept.length === 0 ? rest : { ...rest, moved: kept }
+}
 
 /** A step written: a step of its own replaced, a preset's kept as a change only where it differs. */
 export function withStepSaved(
@@ -714,6 +824,12 @@ export function withStepSaved(
   const { preset } = wavesIn(draft, project, repositoryId)
   const base = draft[moment].presets[preset].find((one) => one.id === step.id)
   return withRepository(draft, project, moment, repositoryId, (overrides) => {
+    if (overrides.moved?.some((one) => one.step.id === step.id) === true) {
+      return {
+        ...overrides,
+        moved: overrides.moved.map((one) => (one.step.id === step.id ? { ...one, step } : one)),
+      }
+    }
     if (base === undefined) {
       return {
         ...overrides,
@@ -732,9 +848,17 @@ export function withStepRemoved(
   repositoryId: string,
   stepId: string,
 ): DeliveryRulesDraft {
-  const moment = momentOf(draft, project, repositoryId, stepId)
+  const there = movedMomentOf(draft, repositoryId, stepId)
+  // A preset's step moved is left out where its preset has it, the move forgotten.
+  const back =
+    there === undefined
+      ? draft
+      : withRepository(draft, project, there, repositoryId, (overrides) =>
+          withoutMoved(overrides, stepId),
+        )
+  const moment = momentOf(back, project, repositoryId, stepId)
   if (moment === undefined) return draft
-  return withRepository(draft, project, moment, repositoryId, (overrides) => {
+  return withRepository(back, project, moment, repositoryId, (overrides) => {
     const own = overrides.added.find((one) => one.step.id === stepId)
     if (own === undefined) {
       return {
@@ -782,9 +906,7 @@ export function withStepAdded(
     ),
   )
   const id = step.id !== '' && !taken.has(step.id) ? step.id : freshId(step.kind, taken)
-  const last =
-    placedIn(draft[moment].presets[preset], overridesIn(draft, moment, repositoryId), moment).at(-1)
-      ?.action.id ?? null
+  const last = lastIn(draft, project, repositoryId, moment)
   return withRepository(draft, project, moment, repositoryId, (overrides) => ({
     ...overrides,
     added: [
@@ -792,6 +914,105 @@ export function withStepAdded(
       { after: after === undefined ? last : after, step: { ...step, id } },
     ],
   }))
+}
+
+/**
+ * A placed step moved to a moment, after a step (null: first), or last when no place is named,
+ * with its settings. A preset's step is moved there as a change of the repository's; a step of
+ * its own is added there instead. What stood after it keeps its place.
+ */
+export function withStepMoved(
+  draft: DeliveryRulesDraft,
+  project: DeliveryProject,
+  repositoryId: string,
+  stepId: string,
+  moment: DeliveryMoment,
+  after: string | null | undefined,
+): DeliveryRulesDraft {
+  const step = actionIn(draft, project, repositoryId, stepId)
+  const from = momentOf(draft, project, repositoryId, stepId)
+  if (step === undefined || from === undefined) return draft
+  const own = overridesIn(draft, from, repositoryId).added.find((one) => one.step.id === stepId)
+  const lifted =
+    own === undefined
+      ? withEveryPart(
+          withFollowersKept(draft, project, repositoryId, stepId, from),
+          repositoryId,
+          (overrides) =>
+            withoutMoved(
+              {
+                ...overrides,
+                off: overrides.off.filter((id) => id !== stepId),
+                changed: overrides.changed.filter((one) => one.id !== stepId),
+              },
+              stepId,
+            ),
+        )
+      : withRepository(draft, project, from, repositoryId, (overrides) => ({
+          ...overrides,
+          added: overrides.added
+            .filter((one) => one !== own)
+            .map((one) =>
+              one.after === stepId ? Object.assign({}, one, { after: own.after }) : one,
+            ),
+        }))
+  const placed = {
+    after: after === undefined ? lastIn(lifted, project, repositoryId, moment) : after,
+    step,
+  }
+  return withRepository(lifted, project, moment, repositoryId, (overrides) =>
+    own === undefined
+      ? { ...overrides, moved: [...(overrides.moved ?? []), placed] }
+      : { ...overrides, added: [...overrides.added, placed] },
+  )
+}
+
+/**
+ * A preset's step about to leave its place, never moved before: the steps placed after it keep
+ * their place, after the step it followed (null: first).
+ */
+function withFollowersKept(
+  draft: DeliveryRulesDraft,
+  project: DeliveryProject,
+  repositoryId: string,
+  stepId: string,
+  from: DeliveryMoment,
+): DeliveryRulesDraft {
+  if (movedMomentOf(draft, repositoryId, stepId) !== undefined) return draft
+  const { preset } = wavesIn(draft, project, repositoryId)
+  const drawn = placedIn(
+    draft[from].presets[preset],
+    overridesIn(draft, from, repositoryId),
+    from,
+    awayIn(draft, repositoryId),
+  ).map((one) => one.action.id)
+  const followed = drawn[drawn.indexOf(stepId) - 1] ?? null
+  const anchored = <P extends { readonly after: string | null }>(one: P): P =>
+    one.after === stepId ? Object.assign({}, one, { after: followed }) : one
+  return withRepository(draft, project, from, repositoryId, (overrides) => {
+    const rest = { ...overrides, added: overrides.added.map(anchored) }
+    return overrides.moved === undefined ? rest : { ...rest, moved: overrides.moved.map(anchored) }
+  })
+}
+
+/** A dependency accepted taken back: the repository no longer waits for the other. */
+export function withDependencyRemoved(
+  draft: DeliveryRulesDraft,
+  project: DeliveryProject,
+  repositoryId: string,
+  on: string,
+): DeliveryRulesDraft {
+  const before = wavesIn(draft, project, repositoryId)
+  const waves = { ...before, deliversAfter: before.deliversAfter.filter((id) => id !== on) }
+  return {
+    ...draft,
+    waves: {
+      ...draft.waves,
+      repositories: draft.waves.repositories.some((one) => one.repositoryId === repositoryId)
+        ? draft.waves.repositories.map((one) => (one.repositoryId === repositoryId ? waves : one))
+        : [...draft.waves.repositories, waves],
+    },
+  }
 }
 
 /** The templates, the reviewers or the approval, the same for every repository. */
@@ -853,14 +1074,14 @@ export function withPushIn(
     step.kind === 'push' || step.kind === 'pull-request' ? { ...step, mode: start } : step
   const leaving: Record<DeliveryPreset, ReadonlyArray<DeliveryAction>> = { ...draft[from].presets }
   const arriving: Record<DeliveryPreset, ReadonlyArray<DeliveryAction>> = { ...draft[to].presets }
-  const movedIds = new Set<string>()
+  const pushedIds = new Set<string>()
   for (const preset of PUSHING_PRESETS) {
     const moving = leaving[preset].filter((step) => PUSHED_KINDS.has(step.kind))
     const there = arriving[preset].map(started)
     leaving[preset] = leaving[preset].filter((step) => !PUSHED_KINDS.has(step.kind))
     arriving[preset] =
       to === 'waves' ? moving.map(started).concat(there) : there.concat(moving.map(started))
-    for (const step of moving) movedIds.add(step.id)
+    for (const step of moving) pushedIds.add(step.id)
   }
   let next: DeliveryRulesDraft = {
     ...draft,
@@ -871,7 +1092,7 @@ export function withPushIn(
     const { preset } = wavesIn(next, project, repository.id)
     if (!PUSHING_PRESETS.includes(preset)) continue
     const left = overridesIn(next, from, repository.id)
-    const moves = (id: string) => movedIds.has(id)
+    const moves = (id: string) => pushedIds.has(id)
     const carried: Overrides = {
       off: left.off.filter(moves),
       changed: left.changed.filter((step) => moves(step.id)).map(started),
@@ -880,11 +1101,13 @@ export function withPushIn(
     if (carried.off.length + carried.changed.length + carried.added.length === 0) continue
     const carriedAdded = new Set(carried.added)
     next = withRepository(next, project, from, repository.id, (overrides) => ({
+      ...overrides,
       off: overrides.off.filter((id) => !moves(id)),
       changed: overrides.changed.filter((step) => !moves(step.id)),
       added: overrides.added.filter((one) => !carriedAdded.has(one)),
     }))
     next = withRepository(next, project, to, repository.id, (overrides) => ({
+      ...overrides,
       off: [...overrides.off, ...carried.off],
       changed: [...overrides.changed, ...carried.changed],
       added: [...overrides.added, ...carried.added],

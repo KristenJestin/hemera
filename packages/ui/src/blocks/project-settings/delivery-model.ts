@@ -58,8 +58,17 @@ export type StepConfig =
   | { readonly kind: 'merge'; readonly method: MergeMethod }
   /** The pull request's checks, on the commit Hemera pushed. */
   | { readonly kind: 'ci' }
-  /** A workflow or a pipeline the forge's command line starts. */
-  | { readonly kind: 'remote-action'; readonly action: string }
+  /**
+   * A workflow or a pipeline the forge's command line starts, with a workflow's inputs, one
+   * `name=value` a line.
+   */
+  | {
+      readonly kind: 'remote-action'
+      readonly action: string
+      readonly inputs?: string | undefined
+    }
+  /** The deployment waiting on an environment, approved as the user, on a forge that can (#502). */
+  | { readonly kind: 'approve-deployment'; readonly environment: string }
   | { readonly kind: 'published'; readonly by: PublishedBy; readonly pattern: string }
   /** A command of the catalogue: it may write to the network. */
   | { readonly kind: 'command'; readonly command: string }
@@ -175,6 +184,8 @@ export interface CleanupStep {
   readonly label: string
   /** For a step the Project added: what it runs. */
   readonly config?: StepConfig | undefined
+  /** Why the rules refuse this step, in words, at its place. */
+  readonly refused?: string | undefined
 }
 
 export interface DeliveryRules {
@@ -192,6 +203,10 @@ export interface DeliveryRefusals {
   readonly approval?: string | undefined
   /** A cycle among the repositories. */
   readonly dependencies?: string | undefined
+  /** A template the rules refuse, each said under its line. */
+  readonly templates?:
+    | Readonly<Partial<Record<'commit' | 'title' | 'body', string | undefined>>>
+    | undefined
 }
 
 /** What a step is called on its line. */
@@ -205,6 +220,7 @@ export const STEP_WORDS: Record<StepKind, string> = {
   merge: 'Merge',
   ci: 'CI',
   'remote-action': 'Action on the remote',
+  'approve-deployment': 'Approve a deployment',
   published: 'Published version',
   command: 'Command',
   agent: 'Agent',
@@ -228,6 +244,7 @@ export const CATALOGUE: readonly StepKind[] = [
   'local-merge',
   'ci',
   'remote-action',
+  'approve-deployment',
   'published',
   'command',
   'agent',
@@ -262,6 +279,8 @@ export function detailOf(
       return 'checks of the pushed commit'
     case 'remote-action':
       return config.action
+    case 'approve-deployment':
+      return config.environment
     case 'published':
       if (config.by === 'confirm') return 'your confirmation'
       return config.by === 'tag' ? `tag ${config.pattern}` : config.pattern
@@ -281,6 +300,14 @@ export function detailOf(
     case 'remove-workspace':
       return 'once its work is merged'
   }
+}
+
+/**
+ * The kinds a repository's step may be on its forge: every one of the catalogue, but the approval
+ * of a deployment only where the forge can approve one (GitHub, as the engine's forge port says).
+ */
+export function kindsOn(forge: ForgeKind): StepKind[] {
+  return CATALOGUE.filter((kind) => kind !== 'approve-deployment' || forge === 'github')
 }
 
 /** Whether a step may write to the network on the Project's say: a command, an agent. */

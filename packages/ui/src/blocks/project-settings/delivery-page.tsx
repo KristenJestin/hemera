@@ -9,8 +9,20 @@ import { ProjectSettings } from '../../surfaces/project-settings/project-setting
 import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
 import { dialogFor } from './delivery-dialogs.tsx'
 import { type Drafts, seed } from './delivery-drafts.ts'
-import { withAccepted, withoutCleanup, withPreset, withPutBack } from './delivery-edits.ts'
-import type { DeliveryRefusals, DeliveryRules, PullRequestRules } from './delivery-model.ts'
+import {
+  withAccepted,
+  withDependencyRemoved,
+  withoutCleanup,
+  withPreset,
+  withPutBack,
+} from './delivery-edits.ts'
+import type { ReviewersListing } from './delivery-forms.tsx'
+import type {
+  Dependency,
+  DeliveryRefusals,
+  DeliveryRules,
+  PullRequestRules,
+} from './delivery-model.ts'
 import { DeliveryRulesSection, type DeliveryTarget } from './delivery-rules.tsx'
 import { FormFoot, type FormFootProps } from './parts.tsx'
 
@@ -28,9 +40,32 @@ export interface DeliveryPageProps {
   form?: DeliveryTarget | undefined
   /** Why every save is refused, in words, as one meeting a newer version is. */
   refused?: string | undefined
+  /** Where the forge's list of who reviews stands: read unless said. */
+  reviewers?: 'ready' | 'reading' | 'cannot' | undefined
+  /** The dependencies the manifests name: one removed comes back as proposed. */
+  manifests?: readonly Dependency[] | undefined
   onSave: (what: string) => void
   onCopy: (line: string) => void
   onCheckAgain: (repository: string) => void
+}
+
+/** The forge's list of who reviews, as a story asks for it. */
+function listingOf(props: DeliveryPageProps): ReviewersListing {
+  switch (props.reviewers ?? 'ready') {
+    case 'ready':
+      return { state: 'ready' }
+    case 'reading':
+      return { state: 'reading' }
+    case 'cannot':
+      return {
+        state: 'cannot',
+        sentence:
+          'gh is signed out of github.com: Hemera cannot list who reviews. A handle typed below is added as it is.',
+        fix: 'gh auth login --hostname github.com',
+        onCheckAgain: () => props.onCheckAgain('reviewers'),
+        onCopy: props.onCopy,
+      }
+  }
 }
 
 /** A page of Acme's settings around the delivery rules, holding what the renderer will hold. */
@@ -81,6 +116,7 @@ export function DeliveryPage(props: DeliveryPageProps): ReactNode {
       ? dialogFor(form, {
           rules,
           drafts,
+          reviewers: listingOf(props),
           foot,
           onTemplate: draft('template'),
           onPush: draft('push'),
@@ -130,6 +166,9 @@ export function DeliveryPage(props: DeliveryPageProps): ReactNode {
           onPutBack={(path, id) => edit((before) => withPutBack(before, path, id))}
           onReset={() => {}}
           onAcceptDependency={(dependency) => edit((before) => withAccepted(before, dependency))}
+          onRemoveDependency={(dependency) =>
+            edit((before) => withDependencyRemoved(before, dependency, props.manifests ?? []))
+          }
           onRemoveCleanup={(id) => edit((before) => withoutCleanup(before, id))}
           onCheckAgain={(path) => {
             props.onCheckAgain(path)

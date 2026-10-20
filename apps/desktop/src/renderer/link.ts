@@ -87,6 +87,7 @@ import {
   type DeliveryProblem,
   type DeliveryRulesDraft,
   type DeliveryRulesView,
+  type ReviewersListed,
   type ForcedForge,
   type ForgeRepositoryStatus,
   type ProjectCheck,
@@ -294,6 +295,8 @@ export interface Link {
     projectId: string,
     edges: ReadonlyArray<DeliveryDependency>,
   ) => Promise<DeliveryRulesView>
+  /** Who can review the Project's pull requests, read from its forge at each call. */
+  readonly reviewers: (projectId: string) => Promise<ReviewersListed>
   /** Each repository's forge, forced or detected, and the state of its CLI. */
   readonly forgeStatus: (projectId: string) => Promise<ReadonlyArray<ForgeRepositoryStatus>>
   /** Checks one repository's CLI again, or every one with null; answers the Project's states. */
@@ -923,6 +926,7 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['deliveryRules.save']({ projectId, draft, version })),
     acceptDependencies: (projectId, edges) =>
       call((ready) => ready['deliveryRules.acceptDependencies']({ projectId, edges })),
+    reviewers: (projectId) => call((ready) => ready['deliveryRules.reviewers']({ projectId })),
     forgeStatus: (projectId) => call((ready) => ready['forge.status']({ projectId })),
     checkForgeAgain: (projectId, repositoryId) =>
       call((ready) => ready['forge.checkAgain']({ projectId, repositoryId })),

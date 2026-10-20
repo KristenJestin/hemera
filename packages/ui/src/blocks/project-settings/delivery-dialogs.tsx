@@ -2,9 +2,9 @@ import type { ReactNode } from 'react'
 
 import { IconGitMerge } from '../../icons.ts'
 import type { SettingsForm } from '../../surfaces/project-settings/project-settings.tsx'
-import { CLEANUP_KINDS, RECIPE_KINDS } from './delivery-form-options.ts'
-import type { Drafts } from './delivery-drafts.ts'
-import { withCleanup, withPushIn } from './delivery-edits.ts'
+import { CLEANUP_KINDS } from './delivery-form-options.ts'
+import { type Drafts, placeOf } from './delivery-drafts.ts'
+import { withCleanup, withPushIn, withStepPlaced } from './delivery-edits.ts'
 import { CANDIDATES, DELIVERY_COMMANDS } from './delivery-fixtures.ts'
 import {
   PushForm,
@@ -12,6 +12,8 @@ import {
   type RepositoryDraft,
   RepositoryForm,
   ReviewersForm,
+  type ReviewersListing,
+  type StepAnchor,
   type StepDraft,
   StepForm,
   TemplateForm,
@@ -19,9 +21,11 @@ import {
 import {
   type DeliveryRules,
   type PullRequestRules,
+  type RecipeStep,
   type Reviewer,
   STEP_WORDS,
   MOMENT_WORDS,
+  kindsOn,
 } from './delivery-model.ts'
 import type { DeliveryTarget } from './delivery-rules.tsx'
 import { filled, templateRefusal } from './delivery-words.ts'
@@ -44,6 +48,8 @@ const TEMPLATE_LABELS: Record<Template, string> = {
 export interface DialogContext {
   rules: DeliveryRules
   drafts: Drafts
+  /** Where the forge's list of who reviews stands. */
+  reviewers: ReviewersListing
   /** Whether a story's save is refused, and what the page does on a save. */
   foot: (
     what: string,
@@ -110,11 +116,26 @@ function repositoryDialog(form: Of<'repository'>, context: DialogContext): Setti
   }
 }
 
+/** The steps of a recipe a step may come after, each in its moment, the step itself apart. */
+export function anchorsOf(steps: readonly RecipeStep[], apart?: string): StepAnchor[] {
+  return steps
+    .filter((one) => one.origin !== 'omitted' && one.step.id !== apart)
+    .map((one) => ({
+      id: one.step.id,
+      label: STEP_WORDS[one.step.config.kind],
+      moment: one.moment,
+    }))
+}
+
 function stepDialog(form: Of<'step'> | Of<'add-step'>, context: DialogContext): SettingsForm {
-  const { rules, drafts, foot, onStep, onClose } = context
+  const { rules, drafts, foot, onStep, onClose, edit } = context
   const found = rules.repositories.find((one) => one.path === form.repository)
   const existing =
     form.kind === 'step' ? found?.steps.find((one) => one.step.id === form.id) : undefined
+  const { moment, after } = drafts.step
+  const moved =
+    existing !== undefined &&
+    (moment !== existing.moment || placeOf(found?.steps ?? [], existing).after !== after)
   const name = existing === undefined ? 'New step' : STEP_WORDS[existing.step.config.kind]
   const when = existing === undefined ? '' : ` · ${MOMENT_WORDS[existing.moment]}`
   return {
@@ -126,31 +147,40 @@ function stepDialog(form: Of<'step'> | Of<'add-step'>, context: DialogContext): 
         onChange={onStep}
         commands={DELIVERY_COMMANDS}
         refused={existing?.refused}
+        placing={
+          existing === undefined ? undefined : anchorsOf(found?.steps ?? [], existing.step.id)
+        }
         adding={
           form.kind === 'add-step'
             ? {
-                kinds: RECIPE_KINDS,
+                kinds: kindsOn(found?.forge.kind ?? 'github'),
                 moments: true,
-                after: (found?.steps ?? []).map((one) => ({
-                  id: one.step.id,
-                  label: STEP_WORDS[one.step.config.kind],
-                  moment: one.moment,
-                })),
+                after: anchorsOf(found?.steps ?? []),
               }
             : undefined
         }
       />
     ),
-    footer: foot('step', () => {}, undefined, {
-      save: existing === undefined ? 'Add' : 'Save',
-      remove:
-        existing === undefined
-          ? undefined
-          : existing.origin === 'added'
-            ? `Remove ${name}`
-            : `Leave out ${name} in ${form.repository}`,
-      onRemove: onClose,
-    }),
+    footer: foot(
+      'step',
+      () => {
+        if (existing === undefined || !moved) return
+        edit((before) =>
+          withStepPlaced(before, form.repository, existing.step.id, moment ?? 'waves', after),
+        )
+      },
+      undefined,
+      {
+        save: existing === undefined ? 'Add' : 'Save',
+        remove:
+          existing === undefined
+            ? undefined
+            : existing.origin === 'added'
+              ? `Remove ${name}`
+              : `Leave out ${name} in ${form.repository}`,
+        onRemove: onClose,
+      },
+    ),
   }
 }
 
@@ -208,7 +238,12 @@ export function dialogFor(form: DeliveryTarget, context: DialogContext): Setting
         title: 'Reviewers',
         icon: <IconGitMerge size="sm" />,
         body: (
-          <ReviewersForm chosen={drafts.reviewers} candidates={CANDIDATES} onChange={onReviewers} />
+          <ReviewersForm
+            chosen={drafts.reviewers}
+            candidates={CANDIDATES}
+            listing={context.reviewers}
+            onChange={onReviewers}
+          />
         ),
         footer: foot('reviewers', () => setPullRequests({ reviewers: drafts.reviewers })),
       }

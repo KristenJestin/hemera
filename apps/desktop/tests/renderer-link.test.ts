@@ -38,6 +38,7 @@ import {
   type SincePage,
   NeedTarget,
   OpenTarget,
+  type ReviewersListed,
 } from '@hemera/ipc'
 import { defaultDeliveryRules } from '@hemera/core/domain'
 import { Deferred, Effect, Layer, Stream } from 'effect'
@@ -65,6 +66,12 @@ const RULES_VIEW: DeliveryRulesView = {
   rules: { ...defaultDeliveryRules(), version: 0, savedAt: null },
   repositories: [],
   proposedDependencies: [{ repositoryId: 'r-web', deliversAfter: 'r-shared' }],
+}
+
+/** Who reviews Acme's pull requests, as its forge answered. */
+const LISTED: ReviewersListed = {
+  kind: 'listed',
+  reviewers: [{ handle: 'acme/platform', name: 'Platform' }],
 }
 
 const NO_PUSH: DeliveryProblem = {
@@ -602,6 +609,7 @@ const main = async (engine: 'answers' | 'gone') => {
       'deliveryRules.validate': () => Effect.succeed([NO_PUSH]),
       'deliveryRules.save': () => Effect.fail(new DeliveryRulesRefused({ problems: [NO_PUSH] })),
       'deliveryRules.acceptDependencies': () => Effect.succeed(RULES_VIEW),
+      'deliveryRules.reviewers': () => Effect.succeed(LISTED),
       'deliveryRules.missionCopies': unused,
       'deliveryRules.preparationChangedSinceCopy': unused,
     }),
@@ -786,6 +794,7 @@ describe('The window’s link, for components and hooks', () => {
     await expect(
       link.acceptDependencies('acme', [{ repositoryId: 'r-web', deliversAfter: 'r-shared' }]),
     ).resolves.toEqual(RULES_VIEW)
+    await expect(link.reviewers('acme')).resolves.toEqual(LISTED)
   })
 
   test('the forges are read, checked again, and followed as they change', async () => {
