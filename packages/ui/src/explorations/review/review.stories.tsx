@@ -441,7 +441,7 @@ export const ShipConfirmationInFull: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Ship' }))
     const dialog = within(await waitFor(() => within(document.body).getByRole('dialog')))
     const outside = within(dialog.getByRole('region', { name: 'Changed outside Hemera' }))
-    await expect(outside.getByText('web/src/billing/export-row.tsx')).toBeVisible()
+    await waitFor(() => expect(outside.getByText('web/src/billing/export-row.tsx')).toBeVisible())
     await expect(outside.getByText(/web · unit tests/)).toBeVisible()
     const hand = within(dialog.getByRole('region', { name: 'Not validated by you' }))
     await expect(hand.getByText(/S13/)).toBeVisible()
@@ -494,7 +494,9 @@ export const LocalMarkAsDelivered: Story = {
     await expect(canvas.queryByRole('button', { name: /^Pull requests/ })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Mark as delivered' }))
     const dialog = within(await waitFor(() => within(document.body).getByRole('dialog')))
-    await expect(dialog.getByRole('heading', { name: 'Mark ACME-12 as delivered?' })).toBeVisible()
+    await waitFor(() =>
+      expect(dialog.getByRole('heading', { name: 'Mark ACME-12 as delivered?' })).toBeVisible(),
+    )
     await expect(dialog.getAllByText(/into develop, here/).length).toBe(5)
     await userEvent.click(dialog.getByRole('button', { name: 'Mark as delivered' }))
     await expect(args.onShip).toHaveBeenCalled()
