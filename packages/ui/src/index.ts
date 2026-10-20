@@ -160,6 +160,18 @@ export { WindowShell, type WindowShellProps } from './shell/window-shell.tsx'
 export { ContentHeader, type ContentHeaderProps, type Crumb } from './shell/content-header.tsx'
 export * from './surfaces/home/home-page.tsx'
 export * from './surfaces/mission/mission-frame.tsx'
+/** The values the diff view draws, by their own names: `Diff.DiffFile`, `Diff.DiffComment`. */
+export * as Diff from './surfaces/diff/diff-types.ts'
+export {
+  CommentedVersion,
+  DiffActions,
+  DiffView,
+  type DiffViewHandlers,
+  type DiffViewProps,
+} from './surfaces/diff/diff-view.tsx'
+export type { CommentAction, CommentHandlers, NewComment } from './surfaces/diff/diff-comments.tsx'
+export type { DiffLayout, StageTarget } from './surfaces/diff/diff-stage.tsx'
+export { idOf as diffFileId } from './surfaces/diff/diff-tree.tsx'
 // The mission frame's own `MissionStage` (a stage chip) gives way to the vocabulary's.
 export { type MissionStage } from './blocks/mission/vocabulary.ts'
 export * from './blocks/mission/vocabulary.ts'

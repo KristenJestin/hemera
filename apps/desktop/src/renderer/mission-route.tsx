@@ -13,6 +13,7 @@ import {
   type MissionFrameState,
   type MissionView,
 } from '@hemera/ui'
+import { IconGitCompare } from '@hemera/ui/icons'
 import { createElement, useEffect, useState, type ReactNode } from 'react'
 
 import type { Link } from './link.ts'
@@ -35,6 +36,7 @@ import {
   STAGE_PAGES,
   type MissionViewEntry,
   type StageFrame,
+  type ViewContext,
 } from './stage-pages.tsx'
 import { useMissions } from './use-missions.ts'
 
@@ -87,15 +89,20 @@ export interface MissionPageProps extends Omit<MissionRouteProps, 'projectId' | 
 function viewsOf(
   registry: Readonly<Record<string, MissionViewEntry>>,
   mission: Mission,
+  context: ViewContext,
 ): MissionView[] {
   return Object.entries(registry).map(([id, view]) => ({
     id,
     title: view.title,
     icon: view.icon,
     width: view.width,
-    body: view.body(mission),
+    actions: view.actions?.(mission),
+    body: view.body(mission, context),
   }))
 }
+
+/** The stages a mission has a diff on: from its Workspace, then from its last checkpoint. */
+const DIFFED: ReadonlySet<string> = new Set(['Building', 'Review', 'Shipping', 'Done'])
 
 const NONE_KEPT: ReadonlyArray<KeptAgent> = []
 
@@ -120,7 +127,7 @@ export function MissionPage({
 }: MissionPageProps): ReactNode {
   const line = lineOf(mission, repositoryNamer(project))
   const header = headerOf(line)
-  const sheets = viewsOf(views, mission)
+  const sheets = viewsOf(views, mission, { link, open: actions.open })
   const Page = pageOf(pages, line.stage)
   const rows = needRowsOfMission(mission, project?.name ?? 'Project', now)
   const answering = needHandlersOf(mission, {
@@ -161,6 +168,17 @@ export function MissionPage({
               }
         }
         onOpenSpec={'spec' in views ? () => actions.open('spec') : undefined}
+        more={
+          'diff' in views && DIFFED.has(line.stage)
+            ? [
+                {
+                  label: 'Diff',
+                  icon: createElement(IconGitCompare, { size: 'sm' }),
+                  onSelect: () => actions.open('diff'),
+                },
+              ]
+            : undefined
+        }
         action={parts.action}
         actionNote={parts.actionNote}
         onCancel={header.cancel ? cancel : undefined}
