@@ -176,6 +176,15 @@ describe('A mission launched from its Ready page', () => {
     )
   })
 
+  it('opens the diff of the mission from its `…`, over the page, and goes back', async () => {
+    await $(`button[aria-label="More for ${key}"]`).click()
+    await $('[role="menuitem"]*=Diff').click()
+    const close = $('button[aria-label="Close Diff"]')
+    await expect(close).toBeDisplayed({ wait: 30_000 })
+    await close.click()
+    await expect(close).not.toBeDisplayed({ wait: 30_000 })
+  })
+
   it('starts a service of the catalogue for the mission, and stops it', async () => {
     await buildingRail().$('button*=Services').click()
     await buildingRail().$('button=Start a service from the catalogue…').click()
