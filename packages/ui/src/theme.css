@@ -330,6 +330,12 @@
      for: a task or a round beside the base, a diff or the Spec over most of it. */
   --spacing-view-narrow: 28rem;
   --spacing-view-wide: 46rem;
+  /* The diff view's tree of what changed: a repository's root with its totals, and a file's name
+     with its letter and counts, beside the diff it leads to. */
+  --spacing-diff-tree: 16rem;
+  /* A file's head in the diff: the height `@pierre/diffs` reserves for it before it is drawn
+     (44 of its pixels), so the head it is given fills it exactly and nothing moves once drawn. */
+  --spacing-diff-head: 2.75rem;
 
   /* How wide the list of a settings page's sections is drawn beside the section it shows: the
      longest name of a section on one line, and no wider, so the section keeps the page. */
