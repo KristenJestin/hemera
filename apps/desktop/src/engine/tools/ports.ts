@@ -50,6 +50,8 @@ export interface CallSession {
 /** A path a call acts on, resolved. */
 export interface JudgedPath {
   readonly named: string
+  /** The folder `named` starts from when the call named a repository; the place's root otherwise. */
+  readonly from?: string | undefined
   readonly resolved: string
   readonly inside: boolean
   readonly certain: boolean

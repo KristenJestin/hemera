@@ -99,12 +99,14 @@ import { missionsList, specCreateDraft } from '../chat/tools.ts'
 import type { MissionActivity } from '../missions.ts'
 import type { MissionStarts } from '../start/started.ts'
 import { Git } from '../git.ts'
+import { GitGuard, actionIn } from '../git-guard.ts'
 import type { SpecBoard } from '../planning/board.ts'
 import { BuildDesk } from '../building/desk.ts'
 import { HelperDesk } from '../building/helper-desk.ts'
 import { STOPPED_AT_THE_END } from '../building/helper-store.ts'
 import { DocsDesk } from '../building/docs-desk.ts'
 import { ReviewDesk } from '../building/review-desk.ts'
+import { RoundDesk } from '../review/round-desk.ts'
 import { ProbeDesk } from '../planning/probe-desk.ts'
 import type { AgentOffers } from '../planning/offers.ts'
 import { modelRecommend, proofWrite, tasksWrite } from '../planning/plan-tools.ts'
@@ -219,12 +221,14 @@ export type GateServices =
   | MissionStarts
   | SpecBoard
   | Git
+  | GitGuard
   | ProfileHome
   | ProbeDesk
   | BuildDesk
   | HelperDesk
   | DocsDesk
   | ReviewDesk
+  | RoundDesk
   | AgentOffers
   | RepositoryStatuses
   | GhCli
@@ -508,6 +512,18 @@ const decodeCall = (
       return decoder(tool, TOOLS.hemera_report.input)(raw)
     case 'hemera_reports':
       return decoder(tool, TOOLS.hemera_reports.input)(raw)
+    case 'round_point_write':
+      return decoder(tool, TOOLS.round_point_write.input)(raw)
+    case 'round_point_remove':
+      return decoder(tool, TOOLS.round_point_remove.input)(raw)
+    case 'round_tasks_write':
+      return decoder(tool, TOOLS.round_tasks_write.input)(raw)
+    case 'round_propose_mission':
+      return decoder(tool, TOOLS.round_propose_mission.input)(raw)
+    case 'round_ready':
+      return decoder(tool, TOOLS.round_ready.input)(raw)
+    case 'feedback_answer':
+      return decoder(tool, TOOLS.feedback_answer.input)(raw)
   }
 }
 
@@ -552,6 +568,7 @@ const targetOf = (grant: Grant, decoded: Decoded, home: string) =>
     )
     return Result.succeed<JudgedPath | null>({
       named: named.path,
+      from: base.success,
       resolved: resolved.path,
       inside: resolved.inside,
       certain: resolved.certain,
@@ -864,6 +881,19 @@ export const toolGateLayer = (settings: GateSettings) =>
               ),
             )
 
+      /**
+       * An agent's write, watched by the guard on the engine's Git (#457): what shapes Git in its
+       * place is compared before and after it.
+       */
+      const guarded = <A, E, R>(grant: Grant, write: Effect.Effect<A, E, R>) =>
+        Effect.flatMap(actionIn({ projectId: grant.projectId, root: grant.place.root }), (action) =>
+          Effect.acquireUseRelease(
+            GitGuard.use((guard) => guard.open(action)),
+            () => write,
+            (close) => close,
+          ),
+        )
+
       /** 9. The execution. */
       const execute = (grant: Grant, prepared: Prepared) =>
         Effect.gen(function* () {
@@ -901,13 +931,13 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* held(
                 grant,
                 pathOf(),
-                fsWrite(yield* fileCall(pathOf(), prepared.judged), call.args),
+                guarded(grant, fsWrite(yield* fileCall(pathOf(), prepared.judged), call.args)),
               )
             case 'fs_edit':
               return yield* held(
                 grant,
                 pathOf(),
-                fsEdit(yield* fileCall(pathOf(), prepared.judged), call.args),
+                guarded(grant, fsEdit(yield* fileCall(pathOf(), prepared.judged), call.args)),
               )
             case 'commands_list':
               return yield* commandsList(grant)
@@ -1040,6 +1070,18 @@ export const toolGateLayer = (settings: GateSettings) =>
               return yield* hemeraReport(grant, call.args)
             case 'hemera_reports':
               return yield* hemeraReports(call.args)
+            case 'round_point_write':
+              return yield* RoundDesk.use((desk) => desk.pointWrite(grant, call.args))
+            case 'round_point_remove':
+              return yield* RoundDesk.use((desk) => desk.pointRemove(grant, call.args))
+            case 'round_tasks_write':
+              return yield* RoundDesk.use((desk) => desk.tasksWrite(grant, call.args))
+            case 'round_propose_mission':
+              return yield* RoundDesk.use((desk) => desk.proposeMission(grant, call.args))
+            case 'round_ready':
+              return yield* RoundDesk.use((desk) => desk.ready(grant, call.args))
+            case 'feedback_answer':
+              return yield* RoundDesk.use((desk) => desk.answer(grant, call.args))
           }
         })
 

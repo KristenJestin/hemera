@@ -140,6 +140,11 @@ describe('The ticket and resource entries of a Project’s settings', () => {
     expect(drawn(ready, { section: 'nowhere' })).toContain('data-repository="api"')
   })
 
+  test('the list gains Delivery rules, after Documentation', () => {
+    expect(drawn(ready)).toMatch(/>Documentation<.*>Delivery rules</s)
+    expect(sectionChosen('delivery')).toBe('delivery')
+  })
+
   test('an entry of the list is a section; a name the page does not have is none', () => {
     expect(sectionChosen('tickets')).toBe('tickets')
     expect(sectionChosen('repositories')).toBe('repositories')
@@ -165,10 +170,12 @@ describe('The ticket sections, composed', () => {
     catalogue: [],
     show: () => undefined,
     copy: () => undefined,
+    linked: false,
+    onProblem: () => undefined,
   })
 
   test('Tickets and Specs holds the providers, then the Spec settings; resources hold theirs', () => {
-    expect(TICKET_SECTIONS).toEqual(['tickets', 'resources', 'checks', 'documentation'])
+    expect(TICKET_SECTIONS).toEqual(['tickets', 'resources', 'checks', 'documentation', 'delivery'])
     expect(isTicketSection('tickets')).toBe(true)
     expect(isTicketSection('resources')).toBe(true)
     expect(isTicketSection('models')).toBe(false)
@@ -179,6 +186,13 @@ describe('The ticket sections, composed', () => {
     expect(resources).toContain('<section aria-label="Exclusive resources"')
     expect(resources).toContain('<ul aria-label="Exclusive resources" aria-busy="true"')
     expect(resources).not.toContain('aria-label="Ticket providers"')
+  })
+
+  test('Delivery rules show their frames in their rows’ shape while the rules are on their way', () => {
+    expect(isTicketSection('delivery')).toBe(true)
+    const delivery = renderToStaticMarkup(createElement(TicketSection, props('delivery')))
+    expect(delivery).toContain('<section aria-label="Delivery rules"')
+    expect(delivery).toContain('<ul aria-label="Repositories" aria-busy="true"')
   })
 
   test('Checks and Documentation show skeleton rows while their lists are on their way', () => {

@@ -33,7 +33,12 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 
-import { DEFAULT_BASE_BRANCH, LIVE_RUN_STATES, type ProbeReport } from '@hemera/core/domain'
+import {
+  DEFAULT_BASE_BRANCH,
+  LIVE_RUN_STATES,
+  PermissionAnswer,
+  type ProbeReport,
+} from '@hemera/core/domain'
 import type { CommandDraft, ResourceDraft } from '@hemera/ipc'
 import { and, eq } from 'drizzle-orm'
 import {
@@ -74,6 +79,7 @@ import { listWorkspaces } from '../src/engine/workspaces.ts'
 import { REPORTED_TURN_BOUND, RESTORED_PROBES, readFound } from '../src/engine/planning/probes.ts'
 import { THROUGH_A_LINK } from '../src/engine/tools/judged.ts'
 import { Git } from '../src/engine/git.ts'
+import { answerNeed, listNeeds } from '../src/engine/needs.ts'
 import { Withholding } from '../src/engine/tools/withholding.ts'
 import { openSession, sessionsIn, sessionsOfLineage } from '../src/engine/sessions/store.ts'
 import { threadOf } from '../src/engine/sessions/thread.ts'
@@ -209,7 +215,7 @@ const IMPORTER = 'export const importName = (name: string) => name.normalize("NF
  */
 const acme = (
   steps: ReadonlyArray<{ readonly line: string }> = [],
-  options: { readonly remoteGone?: boolean } = {},
+  options: { readonly remoteGone?: boolean; readonly relativePaths?: boolean } = {},
 ) =>
   Effect.gen(function* () {
     const main = join(work, 'acme')
@@ -222,6 +228,7 @@ const acme = (
     const ahead = commitOnRemote(bare, DEFAULT_BASE_BRANCH, work)
     writeFileSync(join(api, '.env'), 'DATABASE_PASSWORD=hunter2-acme\n')
     if (options.remoteGone === true) git(api, 'remote', 'set-url', 'origin', join(work, 'nowhere'))
+    if (options.relativePaths === true) git(api, 'config', 'worktree.useRelativePaths', 'true')
     const created = yield* createProject({
       name: 'Acme',
       mainCheckout: main,
@@ -819,14 +826,26 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
       },
     )
     expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
-    // The path as written is read from the Probe's folder, as it leads from its repository.
+    // The path as written is read from the Probe's repository, where it leads (#480).
     expect(asked.map((one) => one.reason)).toEqual([
-      expect.stringMatching(/sensitive place: .*[\\/]ACME-1[\\/]1[\\/](?:api[\\/])?\.git$/),
+      expect.stringMatching(/sensitive place: .*[\\/]ACME-1[\\/]1[\\/]api[\\/]\.git$/),
     ])
     expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
     expect(seen.before).toBe(false)
     expect(seen.afterEngine).toBe(false)
     expect(seen.afterPlain).toBe(true)
+  })
+
+  test('a Probe’s write of .git/config naming its repository is asked as that repository’s Git folder, not the probe folder’s (#480)', async () => {
+    const { tree } = places()
+    const seen = await probeWrites(
+      join(work, 'never-written'),
+      [{ repository: 'api', path: '.git/config', content: '[core]\n\tfsmonitor = true\n' }],
+      {},
+    )
+    expect(seen.answers).toEqual([expect.stringMatching(/^refused/)])
+    expect(asked.map((one) => one.reason)).toEqual([`sensitive place: ${join(tree, '.git')}`])
+    expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
   })
 
   test('a Probe that writes a core.fsmonitor or a filter into the repository’s Git folder, or its worktree’s, is asked as a sensitive place, never written', async () => {
@@ -906,7 +925,7 @@ describe('A Probe never shapes the engine’s Git through a Git folder (#448)', 
       expect.stringMatching(/^refused/),
     ])
     expect(asked.map((one) => one.reason)).toEqual([
-      expect.stringMatching(/sensitive place: .*[\\/]1[\\/](?:api[\\/])?\.GIT$/),
+      expect.stringMatching(/sensitive place: .*[\\/]1[\\/]api[\\/]\.GIT$/),
       expect.stringMatching(/sensitive place: .*[\\/]api[\\/]\.git$/),
     ])
     expect(seen.gitFile).toMatch(/^gitdir: .*worktrees/)
@@ -1241,6 +1260,7 @@ describe('probe_report ends the Probe', () => {
     steps: ReadonlyArray<{ readonly line: string }>,
     leave: (tree: string) => void,
     options: Parameters<typeof sessionsEngine>[2] = {},
+    guard: 'allowed' | 'none' = 'none',
   ) => {
     const hold = held()
     const { run } = probing(
@@ -1256,16 +1276,44 @@ describe('probe_report ends the Probe', () => {
           yield* launch(grantId, 'does the importer keep accents?')
           const row = yield* probeIn(mission.id, 1, ['running'])
           leave(join(row.folder, 'api'))
+          // What the guard on the engine's Git asks first (#457), allowed: what follows is the
+          // Probe's own refusal.
+          const guardAsked = guard === 'allowed' ? yield* allowedGuard(join(main, 'api')) : ''
           const [session] = yield* sessionsOfLineage(row.lineage)
           const token = yield* HemeraEndpoint.use((endpoint) => endpoint.mint(session?.id ?? ''))
           const probeGrant = yield* ToolAccess.use((access) => access.byToken(token))
           const answer = yield* callTool(probeGrant?.id ?? '', 'probe_report', reported())
           hold.release()
-          return { answer, detail: yield* readProbe(row.id), kept: yield* keptContents }
+          return {
+            answer,
+            guardAsked,
+            detail: yield* readProbe(row.id),
+            kept: yield* keptContents,
+          }
         }),
       ),
     )
   }
+
+  /** The guard's question on a repository, raised by an engine call there, then allowed. */
+  const allowedGuard = (checkout: string) =>
+    Effect.gen(function* () {
+      yield* Git.use((service) => service.status(checkout)).pipe(Effect.ignore)
+      const pending = Effect.map(listNeeds, (groups) =>
+        groups
+          .flatMap((group) => group.needs)
+          .filter((need) => Predicate.isTagged(need.fields, 'Permission')),
+      )
+      yield* until(Effect.map(pending, (needs) => needs.length > 0))
+      const [need] = yield* pending
+      if (need === undefined) return yield* Effect.die(new Error('the guard asked nothing'))
+      yield* answerNeed({
+        id: need.id,
+        answer: PermissionAnswer.make({ choice: 'allow-once' }),
+        key: crypto.randomUUID(),
+      })
+      return Predicate.isTagged(need.fields, 'Permission') ? need.fields.call : ''
+    })
 
   test('a probe file hard-linked to a file outside the worktree is not saved, and the probe names it', async () => {
     const secret = join(work, 'outside.txt')
@@ -1449,13 +1497,20 @@ utimesSync('.env', 1000000000, 1000000000)
     'refused: your worktree of api no longer leads to the repository Hemera made it from (its .git was changed), so nothing of it can be kept: put its .git back and report again'
 
   test('a .git that leads to another worktree of the same repository refuses the report', async () => {
-    const seen = await reportedAfter([], (tree) => {
-      const other = join(work, 'other-tree')
-      git(tree, 'worktree', 'add', '-q', '--detach', other, 'HEAD')
-      const admin = git(other, 'rev-parse', '--path-format=absolute', '--git-dir')
-      writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
-      pointGitAt(tree, `gitdir: ${admin}\n`)
-    })
+    const seen = await reportedAfter(
+      [],
+      (tree) => {
+        const other = join(work, 'other-tree')
+        git(tree, 'worktree', 'add', '-q', '--detach', other, 'HEAD')
+        const admin = git(other, 'rev-parse', '--path-format=absolute', '--git-dir')
+        writeFileSync(join(tree, 'fixture.csv'), 'name\nÉloïse\n')
+        pointGitAt(tree, `gitdir: ${admin}\n`)
+      },
+      {},
+      'allowed',
+    )
+    // A worktree added to the repository by another than the engine is a change the guard asks.
+    expect(seen.guardAsked).toContain('other-tree')
     expect(seen.answer.text).toBe(NOT_ITS_OWN)
     expect(seen.detail.state).toBe('running')
   })
@@ -1846,8 +1901,8 @@ ${STAYS_UP}`)
       within(
         profile,
         Effect.gen(function* () {
-          const { project, main, api } = yield* acme()
-          git(api, 'config', 'worktree.useRelativePaths', 'true')
+          // Set before Hemera first sees the repository: the user's own configuration.
+          const { project, main, api } = yield* acme([], { relativePaths: true })
           const { mission, grantId } = yield* planningMission(project.id, main)
           yield* launch(grantId, 'does the importer keep accents?')
           const row = yield* probeIn(mission.id, 1, ['running'])
