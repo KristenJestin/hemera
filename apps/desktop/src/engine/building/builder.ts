@@ -428,8 +428,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
        */
       const commitsLeft = (building: BuildingRow) =>
         loop.commitLeft(building).pipe(
-          // Every step done: the end, which waits for them, is judged again (#477).
-          Effect.flatMap((state) => (state === 'done' ? endIfReady(building) : Effect.void)),
+          // Every step done: an end that waited for them is judged again (#477), and only such
+          // an end: judged from every pass, it would run ahead of the proofs' own turns.
+          Effect.flatMap((state) =>
+            state === 'done' && heldBySteps.delete(building.id)
+              ? endIfReady(building)
+              : Effect.void,
+          ),
           provided,
           Effect.catchCause((cause) => said(`the commits were not made: ${String(cause)}`)),
           Effect.forkIn(layerScope),
@@ -905,6 +910,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
 
       // One end called at a time: a green and a task done together never call it twice.
       const endTurn = Semaphore.makeUnsafe(1)
+      /** The Buildings whose end last waited for an After each task step (#477). */
+      const heldBySteps = new Set<string>()
       /** What each Building's end was last said to wait on: said again only when it changes. */
       const endWaits = new Map<string, string>()
       /**
@@ -928,6 +935,8 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             // The last task's After each task steps are done before the end (#477): the pass runs
             // here, and once a step it waits on is done, its own pass judges the end again.
             if (!refreshing) {
+              // Marked before the pass: a pass of its own that ends meanwhile judges it again.
+              heldBySteps.add(row.id)
               const stacks = yield* loop
                 .commitLeft(row)
                 .pipe(
@@ -936,6 +945,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   ),
                 )
               if (stacks !== 'done') return
+              heldBySteps.delete(row.id)
             }
             const red = yield* proofs.unproven(row, refreshing)
             const stuck =
