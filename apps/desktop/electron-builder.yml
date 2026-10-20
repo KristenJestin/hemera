@@ -34,6 +34,14 @@ extraResources:
   - from: adapters/node_modules
     to: adapters/node_modules
 
+# Hemera's licence, the AGPL-3.0-only, at the root of the package; Electron's own is renamed
+# `LICENSE.electron.txt` beside it. `tools/package-desktop.ts` copies it here from the repository
+# root first, since a `from` above the project matches nothing, silently. The deb names the
+# licence too, from `license` in package.json.
+extraFiles:
+  - from: LICENSE
+    to: LICENSE
+
 # The sounds are played by the system's own player, another program, which cannot read inside the
 # archive: they are kept beside it.
 asarUnpack:

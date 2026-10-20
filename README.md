@@ -16,3 +16,7 @@ pnpm check        # typecheck, lint, fmt:check and test
 ```
 
 See [`AGENTS.md`](AGENTS.md) for the working rules.
+
+## Licence
+
+Free software under the [AGPL-3.0](LICENSE). The oxlint rules vendored under `tools/oxlint` come from [anti-slop](https://github.com/dmmulroy/anti-slop) (MIT, with its licence beside them).

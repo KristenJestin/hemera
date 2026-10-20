@@ -119,11 +119,17 @@ function sha256sumOf(pkgbuild: string): string {
 
 /**
  * The .SRCINFO of a PKGBUILD, from the one makepkg wrote for its previous version: only what a
- * new version changes is written again. The verification of `packaging/aur/` compares the
+ * new version changes is written again, and the licence the PKGBUILD declares. The verification of `packaging/aur/` compares the
  * result with `makepkg --printsrcinfo`, so a PKGBUILD that changes anything else is caught there.
  */
 export function renderSrcinfo(srcinfo: string, pkgbuild: string): string {
   return srcinfo
+    .replace(
+      /^(\tlicense = .*\n)+/m,
+      arrayOf(pkgbuild, 'license')
+        .map((it) => `\tlicense = ${it}\n`)
+        .join(''),
+    )
     .replace(/^\tpkgver = .*$/m, `\tpkgver = ${scalarOf(pkgbuild, 'pkgver')}`)
     .replace(/^\tpkgrel = .*$/m, `\tpkgrel = ${scalarOf(pkgbuild, 'pkgrel')}`)
     .replace(/^\tsource = .*$/m, `\tsource = ${expandedSource(pkgbuild)}`)
