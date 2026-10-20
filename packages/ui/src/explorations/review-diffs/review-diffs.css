@@ -1,0 +1,109 @@
+/* What the two libraries of the diff view are drawn with (exploration of #264).
+
+   Both draw inside a shadow root, which no class of the design system reaches: what they read
+   from outside are CSS variables, which cross the shadow boundary by inheritance. So this is the
+   one place the roles of the design system meet the libraries' own variables; nothing here is a
+   colour or a size of its own. Once the design is chosen, these blocks move into `theme.css`. */
+
+/* The code itself: the css-variables theme of `diff-theme.ts` writes each token as one of these. */
+[data-diff-stage] {
+  --shiki-foreground: var(--foreground);
+  --shiki-background: var(--card);
+  --shiki-token-keyword: var(--primary-strong);
+  --shiki-token-string: var(--success-muted-foreground);
+  --shiki-token-string-expression: var(--success-muted-foreground);
+  --shiki-token-comment: var(--muted-foreground);
+  --shiki-token-function: var(--info-muted-foreground);
+  --shiki-token-constant: var(--warning-muted-foreground);
+  --shiki-token-parameter: var(--foreground);
+  --shiki-token-punctuation: var(--muted-foreground);
+  --shiki-token-link: var(--primary);
+}
+
+/* The dark `primary-strong` is made for a fill, not for text: on the card it falls far under the
+   contrast a line of code needs. The keywords take the primary's text role there. */
+.dark [data-diff-stage] {
+  --shiki-token-keyword: var(--primary-muted-foreground);
+}
+
+/* The diff: the code font, the colours of a change, the selection and the gutter. */
+[data-diff-stage] {
+  --diffs-font-family: var(--font-mono);
+  --diffs-header-font-family: var(--font-sans);
+  --diffs-font-size: var(--text-xs);
+  --diffs-line-height: 1.7;
+  --diffs-tab-size: 2;
+  --diffs-light-bg: var(--card);
+  --diffs-dark-bg: var(--card);
+  --diffs-addition-color-override: var(--success-muted-foreground);
+  --diffs-deletion-color-override: var(--destructive-muted-foreground);
+  --diffs-modified-color-override: var(--warning-muted-foreground);
+  --diffs-bg-addition-override: var(--success-muted);
+  --diffs-bg-addition-number-override: var(--success-muted);
+  --diffs-bg-addition-emphasis-override: var(--success-muted);
+  --diffs-bg-deletion-override: var(--destructive-muted);
+  --diffs-bg-deletion-number-override: var(--destructive-muted);
+  --diffs-bg-deletion-emphasis-override: var(--destructive-muted);
+  --diffs-selection-color-override: var(--primary);
+  --diffs-bg-selection-override: var(--selection);
+  --diffs-bg-selection-number-override: var(--selection);
+  --diffs-bg-context-override: var(--card);
+  --diffs-bg-separator-override: var(--muted);
+  --diffs-bg-hover-override: var(--accent);
+  --diffs-fg-number-override: var(--muted-foreground);
+  --diffs-gap-inline: calc(var(--spacing) * 2);
+  --diffs-gap-block: calc(var(--spacing) * 2);
+}
+
+/* The tree: the surface it sits on, the hand over a row, the row chosen, and each Git letter. */
+[data-diff-tree] {
+  --trees-bg-override: transparent;
+  --trees-fg-override: var(--foreground);
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-bg-muted-override: var(--accent);
+  --trees-border-color-override: var(--border);
+  --trees-accent-override: var(--primary);
+  --trees-selected-bg-override: var(--primary-muted);
+  --trees-selected-fg-override: var(--foreground);
+  --trees-selected-focused-border-color-override: var(--ring);
+  --trees-focus-ring-color-override: var(--ring);
+  --trees-input-bg-override: var(--card);
+  --trees-search-bg-override: var(--card);
+  --trees-search-fg-override: var(--foreground);
+  --trees-indent-guide-bg-override: var(--border);
+  --trees-scrollbar-thumb-override: var(--border);
+  --trees-font-family-override: var(--font-sans);
+  --trees-font-size-override: var(--text-sm);
+  --trees-git-added-color-override: var(--success-muted-foreground);
+  --trees-git-modified-color-override: var(--warning-muted-foreground);
+  --trees-git-deleted-color-override: var(--destructive-muted-foreground);
+  --trees-git-renamed-color-override: var(--info-muted-foreground);
+  --trees-git-untracked-color-override: var(--muted-foreground);
+  --trees-git-ignored-color-override: var(--muted-foreground);
+  --trees-status-added-override: var(--success-muted-foreground);
+  --trees-status-modified-override: var(--warning-muted-foreground);
+  --trees-status-deleted-override: var(--destructive-muted-foreground);
+  --trees-status-renamed-override: var(--info-muted-foreground);
+  --trees-status-untracked-override: var(--muted-foreground);
+  --trees-status-ignored-override: var(--muted-foreground);
+}
+
+/* The focus ring of the diff's scroll: drawn by the stage around it, since a ring drawn inside a
+   box that scrolls would scroll away with its content. The same ring as `focus-ring`. */
+[data-diff-stage] {
+  position: relative;
+}
+
+[data-diff-stage]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 calc(var(--spacing) * 0.5) var(--color-ring);
+  opacity: 0;
+}
+
+[data-diff-stage]:has([data-diff-scroller]:focus-visible)::after {
+  opacity: 1;
+}

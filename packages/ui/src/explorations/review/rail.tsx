@@ -504,6 +504,7 @@ const PULL_LEGEND: Record<PullRequest['state'], string> = {
 
 const CI_WORDS: Record<MarkState, string> = {
   done: 'green',
+  unverified: 'green, not verified',
   running: 'running',
   failed: 'red',
   todo: 'not started',
@@ -511,7 +512,6 @@ const CI_WORDS: Record<MarkState, string> = {
   blocked: 'blocked',
   skipped: 'skipped',
   idle: 'not started',
-  unverified: 'green, not verified',
 }
 
 /** What a pull request's line says beside its name, where it stands. */
