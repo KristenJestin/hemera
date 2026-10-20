@@ -28,6 +28,8 @@ import {
   normalisedOutput,
   redPassed,
   reportedTests,
+  runnerChange,
+  runnerReads,
   shellSyntaxIn,
   validRed,
   withReporting,
@@ -5586,5 +5588,463 @@ describe('A Go red is read against the module its go.mod names (#462)', () => {
     expect(goModulePath('module\n')).toBeNull()
     expect(goModulePath('modules example.com/m\n')).toBeNull()
     expect(goModulePath('/* module example.com/m */\n')).toBeNull()
+  })
+})
+
+/** A tree of a red's repository: its files and its links, by path. */
+const treeOf = (files: ReadonlyArray<string>, links: Readonly<Record<string, string>> = {}) => ({
+  files: [...files, ...Object.keys(links)],
+  links: new Map(Object.entries(links)),
+})
+
+/** A red's patch (#479): what changed since the base, and the texts of the runner files read. */
+const patchOf = (
+  changed: ReadonlyArray<readonly [string, string | null, string | null] | string>,
+  more: {
+    readonly files?: ReadonlyArray<string>
+    readonly links?: Readonly<Record<string, string>>
+    readonly read?: Readonly<Record<string, string>>
+    readonly testPath?: string
+    readonly command?: string
+  } = {},
+) => {
+  const sides = changed.map((one) =>
+    Predicate.isString(one)
+      ? { path: one, before: null, after: null }
+      : { path: one[0], before: one[1], after: one[2] },
+  )
+  return {
+    tree: treeOf([...(more.files ?? []), ...sides.map((one) => one.path)], more.links),
+    changed: sides,
+    read: new Map(Object.entries(more.read ?? {})),
+    testPath: more.testPath ?? 'tests/test_a.py',
+    command: more.command ?? 'pytest tests/test_a.py',
+  }
+}
+
+const HOOK = 'def pytest_runtest_makereport(item, call):\n    pass\n'
+
+describe('A red whose patch changes how the runner judges (#479)', () => {
+  const PYTEST_CODE =
+    'def test_other():\n    assert 1 == 1\n\n\ndef test_saves():\n    assert "md" == "md"\n'
+  const pytestRed = (name: string, code: string) =>
+    reported(
+      fixture(`${name}.txt`),
+      'tests/test_a.py',
+      PYTEST_REPORT,
+      { kind: 'read', text: fixture(`${name}.junit.xml`) },
+      code,
+    )
+
+  test('a conftest.py whose pytest_runtest_makereport turns the added passing test into a failed assertion: a red by its run, refused by its patch', () => {
+    // pytest 9.1.1: the listing and the report agree that the added test failed on an assertion.
+    expect(
+      validRed(
+        pytestRed('pytest-makereport', PYTEST_CODE),
+        'tests/test_a.py',
+        addedAt(PYTEST_CODE, 5, 6),
+        true,
+      ),
+    ).toBe(true)
+    expect(runnerChange(patchOf([['conftest.py', null, HOOK], 'tests/test_a.py']))).toEqual({
+      path: 'conftest.py',
+      why: 'a conftest.py',
+    })
+  })
+
+  test('a vitest setup file whose afterEach throws an AssertionError for the added test: a red by its run, refused by its patch', () => {
+    const code =
+      "import { describe, expect, test } from 'vitest'\n\ndescribe('export', () => {\n  test('keeps', () => {\n    expect(1).toBe(1)\n  })\n  test('saves', () => {\n    expect('md').toBe('md')\n  })\n})\n"
+    // vitest 5.0.1: the listing and the JSON report agree that `saves` failed on an assertion.
+    const classified = reported(
+      fixture('vitest-setup-after-each.txt'),
+      'tests/export.test.mjs',
+      VITEST_REPORT,
+      { kind: 'read', text: fixture('vitest-setup-after-each.json') },
+      code,
+    )
+    expect(validRed(classified, 'tests/export.test.mjs', addedAt(code, 7, 9), true)).toBe(true)
+    // Its configuration did not change: the setup file it names did.
+    const config = "export default defineConfig({ test: { setupFiles: ['./tests/setup.mjs'] } })\n"
+    expect(
+      runnerChange(
+        patchOf(['tests/setup.mjs', 'tests/export.test.mjs'], {
+          files: ['vitest.config.mjs'],
+          read: { 'vitest.config.mjs': config },
+          testPath: 'tests/export.test.mjs',
+          command: 'pnpm exec vitest run tests/export.test.mjs',
+        }),
+      ),
+    ).toEqual({ path: 'tests/setup.mjs', why: 'named by vitest.config.mjs' })
+  })
+
+  test('a collection hook that swaps the added test’s name with an old failing one: a red by its run and its key line, refused by its patch', () => {
+    const code =
+      'def test_other():\n    assert 1 == 2\n\n\ndef test_saves():\n    assert "md" == "md"\n'
+    expect(
+      validRed(
+        pytestRed('pytest-collection-swap', code),
+        'tests/test_a.py',
+        addedAt(code, 5, 6),
+        true,
+      ),
+    ).toBe(true)
+    const hook = 'def pytest_collection_modifyitems(items):\n    pass\n'
+    expect(runnerChange(patchOf([['conftest.py', null, hook]]))).toEqual({
+      path: 'conftest.py',
+      why: 'a conftest.py',
+    })
+  })
+
+  test('a red whose patch touches none of these files has no runner change', () => {
+    const pyproject = '[project]\nname = "api"\n\n[tool.pytest.ini_options]\naddopts = "-q"\n'
+    expect(
+      runnerChange(
+        patchOf(['tests/test_a.py', 'api/invoices.py', 'README.md', 'src/export.ts'], {
+          files: ['conftest.py', 'pyproject.toml', 'vitest.config.ts', 'tests/setup.ts'],
+          read: {
+            'conftest.py': 'import pytest\n',
+            'pyproject.toml': pyproject,
+            'vitest.config.ts': "export default { test: { setupFiles: ['tests/setup.ts'] } }\n",
+          },
+          command: 'NODE_OPTIONS="--require ./tests/register.cjs" pytest tests/test_a.py',
+        }),
+      ),
+    ).toBeNull()
+    expect(runnerChange(patchOf([]))).toBeNull()
+  })
+
+  test('a conftest.py at any level, in a folder above the test or beside it, in any case', () => {
+    for (const path of [
+      'conftest.py',
+      'tests/conftest.py',
+      'other/deep/conftest.py',
+      'tests/Conftest.py',
+      'CONFTEST.PY',
+    ]) {
+      expect([path, runnerChange(patchOf([[path, null, HOOK]]))]).toEqual([
+        path,
+        { path, why: 'a conftest.py' },
+      ])
+    }
+    // Removed, it changes the verdict too.
+    expect(runnerChange(patchOf([['tests/conftest.py', HOOK, null]]))?.path).toBe(
+      'tests/conftest.py',
+    )
+  })
+
+  test('a runner file renamed or moved changed on both sides: the name it left and the name it took', () => {
+    const ini = '[pytest]\naddopts = -p no:randomly\n'
+    // A rename is given as the file removed at its old path and added at its new one.
+    expect(
+      runnerChange(
+        patchOf([
+          ['pytest.ini', ini, null],
+          ['pytest.ini.bak', null, ini],
+        ]),
+      ),
+    ).toEqual({
+      path: 'pytest.ini',
+      why: 'pytest’s configuration',
+    })
+    expect(
+      runnerChange(
+        patchOf([
+          ['vitest.config.ts', 'export default {}\n', null],
+          ['config/vitest.config.mts', null, 'export default {}\n'],
+        ]),
+      ),
+    ).toEqual({ path: 'vitest.config.ts', why: 'vitest’s configuration' })
+    expect(
+      runnerChange(
+        patchOf([
+          ['old/conftest.py', HOOK, null],
+          ['tests/conftest.py', null, HOOK],
+        ]),
+      )?.path,
+    ).toBe('old/conftest.py')
+  })
+
+  test('a runner file reached through a link: the file it leads to changed', () => {
+    expect(
+      runnerChange(
+        patchOf(['shared/hooks.py'], {
+          links: { 'tests/conftest.py': '../shared/hooks.py' },
+          read: { 'tests/conftest.py': HOOK },
+        }),
+      ),
+    ).toEqual({ path: 'shared/hooks.py', why: 'through the link tests/conftest.py' })
+    // A folder of the path that is a link, and a setup file named through one.
+    expect(
+      runnerChange(
+        patchOf(['support/setup.ts'], {
+          files: ['vitest.config.ts'],
+          links: { setup: 'support' },
+          read: {
+            'vitest.config.ts': "export default { test: { setupFiles: ['./setup/setup.ts'] } }\n",
+          },
+          testPath: 'tests/export.test.ts',
+          command: 'vitest run tests/export.test.ts',
+        }),
+      ),
+    ).toEqual({ path: 'support/setup.ts', why: 'named by vitest.config.ts' })
+    // A link that leaves the repository leads nowhere Hemera judges.
+    expect(
+      runnerChange(
+        patchOf(['shared/hooks.py'], { links: { 'conftest.py': '../../elsewhere/hooks.py' } }),
+      ),
+    ).toBeNull()
+  })
+
+  test('pyproject.toml changed outside its [tool.pytest] table is no runner change; inside it, or the table added or removed, it is', () => {
+    const before =
+      '[project]\nname = "api"\nversion = "1.0"\n\n[tool.pytest.ini_options]\naddopts = "-q"\n'
+    const outside = before.replace('1.0', '1.1').concat('\n[tool.black]\nline-length = 100\n')
+    const at = (after: string | null, from: string | null = before) =>
+      runnerChange(patchOf([['pyproject.toml', from, after]]))
+    expect(at(outside)).toBeNull()
+    // The same table written otherwise reads the same.
+    expect(
+      at(
+        '[project]\nname = "api"\nversion = "1.0"\n\n[tool.pytest]\nini_options = { addopts = "-q" }\n',
+      ),
+    ).toBeNull()
+    const changed = { path: 'pyproject.toml', why: 'its [tool.pytest] table' }
+    expect(at(before.replace('"-q"', '"-q -p tests.plugin"'))).toEqual(changed)
+    expect(at('[project]\nname = "api"\n')).toEqual(changed)
+    expect(at(`${outside}`, '[project]\nname = "api"\n')).toEqual(changed)
+    // pytest 9's own table, a dotted key at the top, and a table whose name is quoted.
+    expect(at(`${before}\n[tool.pytest]\nminversion = "9.0"\n`)).toEqual(changed)
+    expect(
+      at(`tool.pytest.ini_options.addopts = "-q -x"\n${before.replace(/\[tool[^]*$/, '')}`),
+    ).toEqual(changed)
+    expect(
+      at(
+        before
+          .replace('[tool.pytest.ini_options]', '[tool."pytest".ini_options]')
+          .replace('"-q"', '"-x"'),
+      ),
+    ).toEqual(changed)
+    // A table hidden in a multi-line string is no table: the file read as TOML says so.
+    expect(
+      at(
+        before.replace(
+          'version = "1.0"',
+          'version = "1.0"\ndescription = """\n[tool.pytest.ini_options]\naddopts = "-x"\n"""',
+        ),
+      ),
+    ).toBeNull()
+    expect(
+      at(before.replace('addopts = "-q"', 'addopts = """\n[project]\n-p tests.plugin\n"""')),
+    ).toEqual(changed)
+    // A file that does not read as TOML is judged whole.
+    expect(at('[project\nname = "api"\n')).toEqual(changed)
+  })
+
+  test('setup.cfg and tox.ini: only their pytest section; pytest.ini and pytest.toml whole', () => {
+    const cfg = '[metadata]\nname = api\n\n[tool:pytest]\naddopts = -q\n'
+    expect(
+      runnerChange(patchOf([['setup.cfg', cfg, cfg.replace('name = api', 'name = acme')]])),
+    ).toBeNull()
+    expect(
+      runnerChange(patchOf([['setup.cfg', cfg, cfg.replace('-q', '-q -p tests.plugin')]])),
+    ).toEqual({
+      path: 'setup.cfg',
+      why: 'its [tool:pytest] section',
+    })
+    // A continuation line that looks like a header stays in its section.
+    expect(
+      runnerChange(
+        patchOf([
+          [
+            'setup.cfg',
+            cfg,
+            cfg.replace('addopts = -q', 'addopts = -q\n  [metadata]\n  -p tests.plugin'),
+          ],
+        ]),
+      )?.path,
+    ).toBe('setup.cfg')
+    const tox = '[tox]\nenvlist = py313\n\n[pytest]\naddopts = -q\n'
+    expect(runnerChange(patchOf([['tox.ini', tox, tox.replace('py313', 'py314')]]))).toBeNull()
+    expect(runnerChange(patchOf([['tox.ini', tox, tox.replace('-q', '-x')]]))).toEqual({
+      path: 'tox.ini',
+      why: 'its [pytest] section',
+    })
+    for (const path of ['pytest.ini', 'tests/.pytest.ini', 'pytest.toml', '.pytest.toml']) {
+      expect([
+        path,
+        runnerChange(patchOf([[path, '[pytest]\n', '[pytest]\n# a comment\n']]))?.path,
+      ]).toEqual([path, path])
+    }
+  })
+
+  test('line endings alone change no runner file; a change under them does', () => {
+    const crlf = (text: string) => text.replaceAll('\n', '\r\n')
+    expect(runnerChange(patchOf([['conftest.py', HOOK, crlf(HOOK)]]))).toBeNull()
+    const pyproject = '[tool.pytest.ini_options]\naddopts = "-q"\n'
+    expect(runnerChange(patchOf([['pyproject.toml', pyproject, crlf(pyproject)]]))).toBeNull()
+    const tox = '[pytest]\naddopts = -q\n'
+    expect(runnerChange(patchOf([['tox.ini', crlf(tox), tox]]))).toBeNull()
+    expect(runnerChange(patchOf([['conftest.py', HOOK, crlf(`${HOOK}x = 1\n`)]]))?.path).toBe(
+      'conftest.py',
+    )
+    expect(runnerChange(patchOf([['tox.ini', tox, crlf(tox.replace('-q', '-x'))]]))?.path).toBe(
+      'tox.ini',
+    )
+  })
+
+  test('vitest’s configuration at any level, its workspace, and a setup file it names that the patch changed', () => {
+    for (const path of [
+      'vitest.config.ts',
+      'packages/web/vite.config.mjs',
+      'vitest.workspace.json',
+      'Vitest.Config.CTS',
+    ]) {
+      expect([path, runnerChange(patchOf([[path, null, 'export default {}\n']]))?.why]).toEqual([
+        path,
+        'vitest’s configuration',
+      ])
+    }
+    const config =
+      'export default defineConfig({ test: { globalSetup: \'tests/global\', setupFiles: ["./setup.ts"] } })\n'
+    const named = (changed: string) =>
+      runnerChange(
+        patchOf([changed], {
+          files: ['packages/web/vitest.config.ts'],
+          read: { 'packages/web/vitest.config.ts': config },
+          testPath: 'packages/web/tests/export.test.ts',
+          command: 'pnpm --filter web exec vitest run tests/export.test.ts',
+        }),
+      )
+    expect(named('packages/web/setup.ts')).toEqual({
+      path: 'packages/web/setup.ts',
+      why: 'named by packages/web/vitest.config.ts',
+    })
+    // Named without its extension, and resolved from the configuration's folder or the root.
+    expect(named('packages/web/tests/global.ts')?.path).toBe('packages/web/tests/global.ts')
+    expect(named('tests/global.mjs')?.path).toBe('tests/global.mjs')
+    expect(named('packages/web/src/export.ts')).toBeNull()
+  })
+
+  test('a file the proof’s command names, NODE_OPTIONS’ requires and imports included, changed', () => {
+    const named = (command: string, changed: string) =>
+      runnerChange(
+        patchOf([changed, 'tests/export.test.mjs'], { command, testPath: 'tests/export.test.mjs' }),
+      )
+    const why = 'named by the proof’s command'
+    expect(
+      named(
+        'node --test --import ./tests/register.mjs tests/export.test.mjs',
+        'tests/register.mjs',
+      ),
+    ).toEqual({
+      path: 'tests/register.mjs',
+      why,
+    })
+    expect(
+      named(
+        "NODE_OPTIONS='--require ./tests/hooks' node --test tests/export.test.mjs",
+        'tests/hooks.cjs',
+      )?.path,
+    ).toBe('tests/hooks.cjs')
+    expect(
+      named('node --test --require=tests\\hooks.js tests/export.test.mjs', 'tests/hooks.js')?.path,
+    ).toBe('tests/hooks.js')
+    expect(
+      named('node --test --test-reporter=./reporter.mjs tests/export.test.mjs', 'reporter.mjs')
+        ?.path,
+    ).toBe('reporter.mjs')
+    expect(
+      named('vitest run --config vitest.ci.ts tests/export.test.mjs', 'vitest.ci.ts')?.path,
+    ).toBe('vitest.ci.ts')
+    expect(named('pytest -p tests.plugin tests/export.test.mjs', 'tests/plugin.py')?.path).toBe(
+      'tests/plugin.py',
+    )
+    // The proof's own test file, which the command names, is the red's own change.
+    expect(named('node --test tests/export.test.mjs', 'tests/export.test.mjs')).toBeNull()
+    expect(named('node --test tests/export.test.mjs', 'tests/register.mjs')).toBeNull()
+  })
+
+  test('a pytest plugin named by an unchanged conftest.py or by its configuration, changed', () => {
+    const named = (read: Readonly<Record<string, string>>, changed: string) =>
+      runnerChange(patchOf([changed], { files: Object.keys(read), read }))
+    expect(
+      named(
+        { 'tests/conftest.py': 'pytest_plugins = ["tests.helpers.hooks"]\n' },
+        'tests/helpers/hooks.py',
+      ),
+    ).toEqual({
+      path: 'tests/helpers/hooks.py',
+      why: 'named by tests/conftest.py',
+    })
+    expect(
+      named(
+        { 'tests/conftest.py': "pytest_plugins = ['tests.plugins']\n" },
+        'tests/plugins/__init__.py',
+      )?.path,
+    ).toBe('tests/plugins/__init__.py')
+    expect(
+      named(
+        { 'pyproject.toml': '[tool.pytest.ini_options]\naddopts = "-p tests.plugin"\n' },
+        'tests/plugin.py',
+      )?.path,
+    ).toBe('tests/plugin.py')
+    // What the rest of pyproject.toml names is not the runner's.
+    expect(named({ 'pyproject.toml': '[project]\nreadme = "README.md"\n' }, 'README.md')).toBeNull()
+  })
+
+  test('package.json: its scripts changed is a runner change, its dependencies are not; .npmrc whole', () => {
+    const json = (
+      scripts: Readonly<Record<string, string>>,
+      dependencies: Readonly<Record<string, string>> = {},
+    ) => JSON.stringify({ name: 'api', scripts, dependencies }, null, 2)
+    const before = json({ test: 'vitest run' })
+    expect(
+      runnerChange(
+        patchOf([['package.json', before, json({ test: 'vitest run' }, { acme: '1.0.0' })]]),
+      ),
+    ).toBeNull()
+    expect(
+      runnerChange(
+        patchOf([['package.json', before, json({ test: 'vitest run --setupFiles x.ts' })]]),
+      ),
+    ).toEqual({
+      path: 'package.json',
+      why: 'its scripts',
+    })
+    expect(
+      runnerChange(patchOf([['web/package.json', null, json({ test: 'vitest' })]]))?.path,
+    ).toBe('web/package.json')
+    expect(
+      runnerChange(patchOf([['.npmrc', null, 'node-options=--require ./hooks.cjs\n']])),
+    ).toEqual({
+      path: '.npmrc',
+      why: 'npm’s configuration',
+    })
+  })
+
+  test('the runner files read are those on the test’s path and the files its command names, each where its links lead', () => {
+    const tree = treeOf(
+      [
+        'conftest.py',
+        'tests/conftest.py',
+        'tests/unit/test_a.py',
+        'other/conftest.py',
+        'pyproject.toml',
+        'web/vitest.config.ts',
+        'vitest.ci.ts',
+        'README.md',
+      ],
+      { 'tests/unit/Conftest.py': '../../shared/hooks.py' },
+    )
+    expect(
+      runnerReads(tree, 'tests/unit/test_a.py', 'pytest -c vitest.ci.ts tests/unit/test_a.py'),
+    ).toEqual([
+      { path: 'conftest.py', real: 'conftest.py' },
+      { path: 'tests/conftest.py', real: 'tests/conftest.py' },
+      { path: 'pyproject.toml', real: 'pyproject.toml' },
+      { path: 'tests/unit/Conftest.py', real: 'shared/hooks.py' },
+      { path: 'vitest.ci.ts', real: 'vitest.ci.ts' },
+    ])
   })
 })

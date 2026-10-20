@@ -1,0 +1,38 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ✓ tests/export.test.mjs > export > keeps 2ms
+ × tests/export.test.mjs > export > saves 6ms
+   → expected "csv" to be "md"
+
+'csv' !== 'md'
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/export.test.mjs > export > saves
+AssertionError: expected "csv" to be "md"
+
+'csv' !== 'md'
+
+
+Expected: "md"
+Received: "csv"
+
+ ❯ tests/setup.mjs:6:11
+      4| afterEach(() => {
+      5|   if (expect.getState().currentTestName?.endsWith('saves')) {
+      6|     throw new AssertionError({ message: 'expected "csv" to be "md"', a…
+       |           ^
+      7|   }
+      8| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  16:58:29
+   Duration  198ms (transform 47%, setup 22%, tests 18%, worker 8%, import 5%)
+
+JSON report written to /tmp/hemera-report/report.json
