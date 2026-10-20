@@ -183,7 +183,7 @@ export const Services: Story = {
     )
     const body = within(document.body)
     const search = await waitFor(() => body.getByRole('combobox', { name: 'Search the catalogue' }))
-    await expect(search).toHaveFocus()
+    await waitFor(() => expect(search).toHaveFocus())
     await userEvent.type(search, 'mail')
     const list = body.getByRole('listbox', { name: 'The catalogue' })
     await expect(within(list).getAllByRole('option')).toHaveLength(2)
