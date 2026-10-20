@@ -32,11 +32,11 @@ import {
   type RepositoryPush,
 } from '@hemera/ipc'
 import { and, desc, eq } from 'drizzle-orm'
-import { Effect, Predicate } from 'effect'
+import { Deferred, Effect, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { saveDeliveryRules } from '../src/engine/delivery-rules.ts'
-import { Pushes } from '../src/engine/delivery/pushes.ts'
+import { type PushesHold, Pushes } from '../src/engine/delivery/pushes.ts'
 import { ForgePort } from '../src/engine/forges/port.ts'
 import { type EvidenceContent, putEvidence } from '../src/engine/memory/evidence.ts'
 import { missionFolder, missionKeyOf } from '../src/engine/memory/files.ts'
@@ -275,12 +275,13 @@ const attached = (args: ReadonlyArray<string>) =>
     return [`${basename(value.slice(0, cut))}#${value.slice(cut + 1)}`]
   })
 
-const engine = () =>
+const engine = (hold?: PushesHold) =>
   sessionsEngine(data, builderAgents, {
     roles: [HELPER],
     tools: { home: work },
     building: { outside: { compareEveryMillis: 3_600_000, baseEveryMillis: 3_600_000 } },
     forge: { env: fake.env },
+    delivery: { hold },
   })
 
 /** The push and the pull request on a click: the feedback is given in Review, before Push. */
@@ -924,6 +925,45 @@ describe('Partial failures and Retry', () => {
       expect(fake.calls().filter((one) => one.args.includes('--attach'))).toHaveLength(1)
       expect(prCalls('edit')).toEqual([])
       expect(seen.api?.images.map((one) => one.state)).toEqual(['published'])
+    },
+    SLOW,
+  )
+
+  test(
+    'a restart once the pull request opened, before its copies were recorded: they are read from the description, nothing is uploaded again',
+    async () => {
+      const reached = Effect.runSync(Deferred.make<void>())
+      const { run } = engine((at, name) =>
+        at === 'opened' && name === 'api'
+          ? Effect.andThen(Deferred.succeed(reached, undefined), Effect.never)
+          : Effect.void,
+      )
+      const missionId = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const mission = yield* inReview(BODY, [GREY, LABELS])
+            yield* pushed(mission.missionId)
+            yield* Deferred.await(reached)
+            return mission.missionId
+          }),
+        ),
+      )
+      const { run: again } = engine()
+      const seen = await again(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            yield* untilApi(missionId, 'done')
+            return apiOf(yield* pushesOf(missionId))
+          }),
+        ),
+      )
+      expect(fake.calls().filter((one) => one.args.includes('--attach'))).toHaveLength(1)
+      expect(seen?.images.map((one) => [one.state, one.url])).toEqual([
+        ['published', assetOf(GREY.bytes)],
+        ['published', assetOf(LABELS.bytes)],
+      ])
     },
     SLOW,
   )
