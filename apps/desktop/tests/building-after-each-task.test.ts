@@ -10,7 +10,7 @@
  * Workspace. A step the user takes is taken by the test, through the need Hemera raised.
  */
 
-import { realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -76,12 +76,16 @@ const judgedEngine = () => {
   })
 }
 
-/** Acme, its api set to the user's own identity before Hemera knows the repository (#457). */
-const userAcme = (folder: string) =>
+/**
+ * Acme, its api set to the user's own identity before Hemera knows the repository (#457), and to
+ * the hooks of `hooks` when it is given.
+ */
+const userAcme = (folder: string, hooks: string | null = null) =>
   acmeAt(folder, 'acme', (api) => {
     git(api, 'config', 'user.name', 'Ada Lovelace')
     git(api, 'config', 'user.email', 'ada@example.com')
     git(api, 'config', 'commit.gpgsign', 'false')
+    if (hooks !== null) git(api, 'config', 'core.hooksPath', hooks)
   })
 
 const HEMERA: DeliveryAction = { id: 'task-commit', kind: 'commit-by-hemera', mode: 'auto' }
@@ -134,9 +138,15 @@ const tasksStack = (
   })
 
 /** A Building of Acme with the stack set before its first task, the Builder's grant, and api. */
-const building = (steps: ReadonlyArray<DeliveryAction>, template: string | null = null) =>
+const building = (
+  steps: ReadonlyArray<DeliveryAction>,
+  template: string | null = null,
+  hooks: string | null = null,
+) =>
   Effect.gen(function* () {
-    const { project, mission } = yield* launched(work, undefined, undefined, undefined, userAcme)
+    const { project, mission } = yield* launched(work, undefined, undefined, undefined, (folder) =>
+      userAcme(folder, hooks),
+    )
     yield* tasksStack(project.id, steps, template)
     const { session, grantId } = yield* builderOf(mission.id)
     const api = join(session.folder, 'api')
@@ -315,6 +325,46 @@ describe('After each task: Hemera commits', () => {
     expect(seen.log).toBe('ACME-1: Export as CSV')
     expect(seen.needs).toHaveLength(1)
     expect(seen.needs[0]?.missing).toContain('T1')
+  })
+
+  test('a step that failed holds the next tasks of its repository back until it is done', async () => {
+    const seen = await engine().run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          // The repository's own hook refuses T1's file until the test lets it through.
+          const hooks = join(work, 'hooks')
+          // Outside the hooks: Hemera stops its Git when what shapes Git there changes.
+          const allowed = join(work, 'allowed')
+          mkdirSync(hooks)
+          writeFileSync(
+            join(hooks, 'pre-commit'),
+            `#!/bin/sh\ngit diff --cached --name-only | grep -q invoices.ts && test ! -e '${allowed.replaceAll('\\', '/')}' && exit 1\nexit 0\n`,
+            { mode: 0o755 },
+          )
+          const { mission, grantId, api, head } = yield* building([HEMERA], null, hooks)
+          yield* t1Done(mission.id, grantId)
+          yield* until(
+            Effect.map(actionsOf('git.commit'), (rows) =>
+              rows.some((row) => row.state === 'failed'),
+            ),
+          )
+          yield* t2Done(mission.id, grantId)
+          yield* until(
+            Effect.map(
+              actionsOf('git.commit'),
+              (rows) => rows.filter((row) => row.state === 'failed').length >= 2,
+            ),
+          )
+          writeFileSync(allowed, '')
+          // A command of no task runs the stacks again: T1 first, then T2.
+          yield* call(grantId, 'commands_run', { line: 'git status', repository: 'api' })
+          yield* committedTimes(mission.id, 2)
+          return { log: logOf(api, head) }
+        }),
+      ),
+    )
+    expect(seen.log.split('\n')).toEqual(['ACME-1: Export as Markdown', 'ACME-1: Export as CSV'])
   })
 
   test('a Cancel during a commit makes no commit', async () => {
