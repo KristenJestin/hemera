@@ -12,7 +12,9 @@ import { createElement, type ReactNode } from 'react'
 
 import type { Link } from './link.ts'
 import { differenceOf } from './mission-header-model.ts'
+import { BuildingStage } from './building-stage.tsx'
 import { PlanningStage } from './planning-stage.tsx'
+import { ReadyStage } from './ready-stage.tsx'
 
 /** What a stage's page puts in the mission's frame, beside what the frame draws itself. */
 export interface StageFrame {
@@ -69,6 +71,8 @@ export interface StagePageProps {
  */
 export const STAGE_PAGES: Partial<Record<MissionStage, (props: StagePageProps) => ReactNode>> = {
   Planning: PlanningStage,
+  Ready: ReadyStage,
+  Building: BuildingStage,
 }
 
 /** A view a mission can open over its base: the one contract of every view. */

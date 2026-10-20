@@ -16,6 +16,7 @@ import {
   WindowCoreRpcs,
   EngineApartRpcs,
   ChecksRpcs,
+  AutoReviewRpcs,
   DiffRpcs,
   DocRecipesRpcs,
   ForgeRpcs,
@@ -1030,6 +1031,16 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['diff.changes'](request).pipe(
           streamClosedAs(gone),
           observedStream('diff.changes', log),
+        ),
+    }),
+    // The automatic review (#147), which the Building page reads (#151), a layer of its own.
+    AutoReviewRpcs.toLayer({
+      'autoReview.read': (request) =>
+        engine['autoReview.read'](request).pipe(closedAs(gone), observed('autoReview.read', log)),
+      'autoReview.changed': (request) =>
+        engine['autoReview.changed'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('autoReview.changed', log),
         ),
     }),
   )
