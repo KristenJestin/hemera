@@ -34,6 +34,7 @@ import {
 import { cancelMissionIn, getMission } from '../src/engine/missions.ts'
 import { retryNeed } from '../src/engine/needs.ts'
 import { CommitRights, Judge, stepCommitRights } from '../src/engine/permissions/ports.ts'
+import { Secrets } from '../src/engine/secrets.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import { effectfulActions, sessionDeliveries } from '../src/engine/storage/schema.ts'
 import { mutate } from '../src/engine/transaction.ts'
@@ -663,5 +664,51 @@ describe('After each task: an agent commits', () => {
     )
     expect(seen.open).toBe(true)
     expect(seen.cancelled).toBe(false)
+  })
+})
+
+describe('After each task: the Building’s own steps', () => {
+  test('a step an earlier Building of the mission left open, or done, is not this Building’s', async () => {
+    const seen = await engine().run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission, grantId } = yield* building([ME])
+          // As a Building cancelled or ended before this one left them: T1's step done, and an
+          // agent's commit never made.
+          const before = '2000-01-01T00:00:00.000Z'
+          const secrets = yield* Secrets
+          const earlier = (id: string, kind: string, state: string) => ({
+            id,
+            kind,
+            ownerKind: 'mission',
+            ownerId: mission.id,
+            taskId: 'T1',
+            details: secrets.mask(JSON.stringify({ repository: 'api', step: 'mine', head: null })),
+            state,
+            startedAt: before,
+          })
+          yield* Effect.flatMap(Database, (database) =>
+            database
+              .insert(effectfulActions)
+              .values([
+                earlier('earlier-mine', 'delivery.commit_by_me', 'done'),
+                earlier('earlier-agent', 'delivery.commit_by_agent', 'started'),
+              ]),
+          )
+          const rights = yield* Effect.provide(
+            CommitRights.use((one) => one.agentsCommit(mission.id)),
+            stepCommitRights,
+          )
+          yield* t1Done(mission.id, grantId)
+          // T1's step of this Building is asked, as if the earlier one were not there.
+          yield* asked(mission.id)
+          return { rights, needs: yield* environments(mission.id) }
+        }),
+      ),
+    )
+    expect(seen.rights).toBe(false)
+    expect(seen.needs).toHaveLength(1)
+    expect(seen.needs[0]?.missing).toContain('T1')
   })
 })

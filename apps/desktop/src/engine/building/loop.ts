@@ -42,7 +42,7 @@ import {
   placeWords,
   renderTemplate,
 } from '@hemera/core/domain'
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNull } from 'drizzle-orm'
 import { Deferred, Effect, Exit, Option, Predicate, Result, Schema, Semaphore } from 'effect'
 
 import { getCommand } from '../catalogue.ts'
@@ -1912,7 +1912,7 @@ export const buildingLoop = (parts: LoopParts) => {
    * The repositories a task has its commit in: a `git.commit` of it there done, or perhaps done.
    * One that failed, or never began, is committed again.
    */
-  const committedIn = (missionId: string, taskId: string) =>
+  const committedIn = (building: BuildingRow, taskId: string) =>
     Effect.gen(function* () {
       const rows = yield* (yield* Database)
         .select({ details: effectfulActions.details })
@@ -1921,9 +1921,11 @@ export const buildingLoop = (parts: LoopParts) => {
           and(
             eq(effectfulActions.kind, 'git.commit'),
             eq(effectfulActions.ownerKind, 'mission'),
-            eq(effectfulActions.ownerId, missionId),
+            eq(effectfulActions.ownerId, building.missionId),
             eq(effectfulActions.taskId, taskId),
             inArray(effectfulActions.state, ['done', 'started', 'indeterminate']),
+            // An earlier Building's task of the same id is not this one (#477).
+            gte(effectfulActions.startedAt, building.startedAt),
           ),
         )
         .pipe(Effect.mapError(refusedWhile('reading the commits')))
@@ -1938,8 +1940,11 @@ export const buildingLoop = (parts: LoopParts) => {
   /** One pass at a time: a task's stack is never run twice at once. */
   const committing = Semaphore.makeUnsafe(1)
 
-  /** The records of every step of the mission's After each task stacks, by task. */
-  const stepRecordsOf = (missionId: string) =>
+  /**
+   * The records of every step of the Building's After each task stacks, by task: those an earlier
+   * Building of the mission left, done or open, are not its own.
+   */
+  const stepRecordsOf = (building: BuildingRow) =>
     Effect.gen(function* () {
       const rows = yield* (yield* Database)
         .select({
@@ -1954,7 +1959,8 @@ export const buildingLoop = (parts: LoopParts) => {
           and(
             inArray(effectfulActions.kind, [USER_COMMIT, AGENT_COMMIT, STEP_TAKEN]),
             eq(effectfulActions.ownerKind, 'mission'),
-            eq(effectfulActions.ownerId, missionId),
+            eq(effectfulActions.ownerId, building.missionId),
+            gte(effectfulActions.startedAt, building.startedAt),
           ),
         )
         .pipe(Effect.mapError(refusedWhile('reading the After each task steps')))
@@ -2001,7 +2007,7 @@ export const buildingLoop = (parts: LoopParts) => {
         )
         .pipe(Effect.mapError(refusedWhile('reading the After each task questions')))
       if (pending[0] !== undefined) return pending[0].question
-      const agent = (yield* stepRecordsOf(building.missionId)).find(
+      const agent = (yield* stepRecordsOf(building)).find(
         (one) =>
           one.kind === AGENT_COMMIT && (one.state === 'started' || one.state === 'indeterminate'),
       )
@@ -2151,7 +2157,7 @@ export const buildingLoop = (parts: LoopParts) => {
   ) =>
     Effect.gen(function* () {
       const key = `${task.id}\u0000${base.repository}\u0000${step.id}`
-      const records = (yield* stepRecordsOf(building.missionId)).filter(
+      const records = (yield* stepRecordsOf(building)).filter(
         (one) =>
           one.taskId === task.id && one.repository === base.repository && one.step === step.id,
       )
@@ -2180,7 +2186,7 @@ export const buildingLoop = (parts: LoopParts) => {
       }
       switch (step.kind) {
         case 'commit-by-hemera': {
-          if ((yield* committedIn(building.missionId, task.id)).has(base.repository)) return 'done'
+          if ((yield* committedIn(building, task.id)).has(base.repository)) return 'done'
           const message = yield* messageOf(building, task, base, template)
           return yield* commitTask(building, task, base, paths, message)
         }
