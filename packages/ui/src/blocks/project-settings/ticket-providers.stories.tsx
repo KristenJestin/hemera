@@ -8,7 +8,7 @@ import {
   ProjectSettings,
   type SettingsForm,
 } from '../../surfaces/project-settings/project-settings.tsx'
-import { SECTIONS } from '../../surfaces/project-settings/settings-fixtures.tsx'
+import { SECTIONS } from '../../surfaces/project-settings/settings-sections.tsx'
 import { FormFoot } from './parts.tsx'
 import {
   GithubForm,
@@ -17,14 +17,15 @@ import {
   type JiraDraft,
   type ProviderDeployment,
   ProviderDetails,
-  type ProviderKind,
-  ProviderMark,
-  type ProviderView,
-  TicketProviders,
   TokenField,
+} from './provider-forms.tsx'
+import { ProviderMark, TicketProviders } from './ticket-providers.tsx'
+import {
+  type ProviderKind,
+  type ProviderView,
   providerProblem,
   providerTitle,
-} from './ticket-providers.tsx'
+} from './provider-model.ts'
 
 const READY = { state: 'ready', sentence: 'Ready.', fix: null } as const
 

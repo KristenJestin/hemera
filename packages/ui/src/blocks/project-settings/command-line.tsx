@@ -1,3 +1,4 @@
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -55,14 +56,6 @@ export interface CommandLineFieldProps {
    * such a line cannot be kept yet.
    */
   systems?: boolean | undefined
-}
-
-/** A line with nothing in it yet. */
-export const EMPTY_LINE: CommandLineValue = {
-  command: null,
-  line: '',
-  lineLinux: null,
-  lineWindows: null,
 }
 
 /** The systems a line of its own may be written for, in the order the fold shows them. */

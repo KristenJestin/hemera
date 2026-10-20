@@ -223,6 +223,26 @@ describe('A Git read that hangs is cut at its limit and waited for', () => {
   })
 })
 
+describe('The engine’s Git runs no core.fsmonitor (#448)', () => {
+  test('the engine’s status runs no core.fsmonitor, even one the repository’s .git/config holds, written outside the tools', async () => {
+    const api = repository(join(folder, 'api'))
+    const marker = join(folder, 'fsmonitor-ran')
+    const watch = join(folder, 'watch.mjs')
+    writeFileSync(
+      watch,
+      `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'ran')\n`,
+    )
+    const command = [process.execPath, watch].map((word) => `"${word.replaceAll('\\', '/')}"`)
+    git(api, 'config', 'core.fsmonitor', command.join(' '))
+
+    await Effect.runPromise(spawnGit(SYSTEM_GIT)(api, ['status', '--porcelain'], 'read'))
+    expect(existsSync(marker)).toBe(false)
+    // The same status run as the machine's git alone runs the program.
+    git(api, 'status', '--porcelain')
+    expect(existsSync(marker)).toBe(true)
+  })
+})
+
 describe('Git can be handed an environment and an input, and its bytes read as they are', () => {
   test('a binary blob written into another object folder through stdin reads back byte for byte', async () => {
     const api = repository(join(folder, 'api'))
@@ -746,6 +766,23 @@ describe('A proof’s addition is merged three ways (#144)', () => {
   test('a repeated line after an addition inside a file with mixed line endings keeps its own ending', async () => {
     const merged = await mergedInto(REPEATED, 'one\r\nthree\r\n}\ntwo\r\n}\r\n', REPEATED)
     expect(merged.merged).toBe('one\r\nthree\r\n}\ntwo\r\n}\r\n')
+  })
+
+  /** A file with mixed line endings whose `}` and empty lines repeat with both endings. */
+  const SEVERAL = 'one\r\n}\ntwo\r\n}\r\n\nthree\r\n\r\nfour\r\n'
+
+  test('two separate additions around a repeated line of a file with mixed line endings keep every untouched line’s ending', async () => {
+    const merged = await mergedInto(SEVERAL, `zero\r\n${SEVERAL}five\r\n`, SEVERAL)
+    expect(merged.clean).toBe(true)
+    expect(merged.merged).toBe(`zero\r\n${SEVERAL}five\r\n`)
+  })
+
+  test('several additions inside a file with mixed line endings keep the ending of every repeated line', async () => {
+    const changed = 'one\r\nalpha\r\n}\ntwo\r\n}\r\n\nbeta\r\nthree\r\n\r\nfour\r\n'
+    const merged = await mergedInto(SEVERAL, changed, SEVERAL)
+    expect(merged.clean).toBe(true)
+    // `beta` follows an empty line that ends in LF: a new line takes the ending of the line above.
+    expect(merged.merged).toBe('one\r\nalpha\r\n}\ntwo\r\n}\r\n\nbeta\nthree\r\n\r\nfour\r\n')
   })
 
   test('a file with LF lines stays LF', async () => {

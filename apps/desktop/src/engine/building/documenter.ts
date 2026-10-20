@@ -28,7 +28,6 @@
  */
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -78,6 +77,7 @@ import {
 } from '../storage/schema.ts'
 import type { Grant } from '../tools/access.ts'
 import { answered, failure, refusal } from '../tools/files.ts'
+import { readOwnSync } from '../tools/judged.ts'
 import type { GuardedCall } from '../tools/ports.ts'
 import { mutate } from '../transaction.ts'
 import { type Preparations, getWorkspace } from '../workspaces.ts'
@@ -190,10 +190,16 @@ const fileSaid = (file: DocFile): string =>
 /** A cause in one line. */
 const said = (cause: Cause.Cause<unknown>): string => Cause.pretty(cause).split('\n')[0] ?? ''
 
-/** A file's content as a digest, or null when it does not exist. */
+/** The most of a file of the Workspace's root a digest reads. */
+const DIGEST_CAP = 256 * 1024 * 1024
+
+/**
+ * A file's content as a digest, or null when it does not exist or is not read: a pipe, a link or
+ * a file over the cap, refused without waiting (#434).
+ */
 const digestOf = (file: string): string | null => {
   try {
-    return createHash('sha256').update(readFileSync(file)).digest('hex')
+    return createHash('sha256').update(readOwnSync(file, DIGEST_CAP).bytes).digest('hex')
   } catch {
     return null
   }

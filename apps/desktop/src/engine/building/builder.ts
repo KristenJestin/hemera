@@ -20,6 +20,8 @@
  *   one the resume block. Cancel ends the Building as cancelled; the work stays.
  */
 
+import { readFile } from 'node:fs/promises'
+
 import {
   type Amendment,
   DOCUMENTATION,
@@ -30,9 +32,10 @@ import {
   amendmentProblems,
   amendmentSaid,
   readySet,
+  roundLabel,
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gt } from 'drizzle-orm'
 import {
   Cause,
   Context,
@@ -53,7 +56,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
-import { moveMission } from '../missions.ts'
+import { type CancelIn, type MissionCancels, cancelMissionIn, runStops } from '../missions.ts'
 import {
   DeliveryFailed,
   type NeedHandler,
@@ -64,7 +67,9 @@ import {
 import { basesAt, liveIn, placeOf, planRows, targetProblem } from '../planning/plan.ts'
 import { Secrets } from '../secrets.ts'
 import type { Git } from '../git.ts'
-import type { SessionPost } from '../sessions/post.ts'
+import { roundTasksIn } from '../review/round-store.ts'
+import { storeDeliveryIn } from '../sessions/deliveries.ts'
+import { SessionPost } from '../sessions/post.ts'
 import { Sessions } from '../sessions/service.ts'
 import { assignWorkIn } from '../sessions/leases.ts'
 import { type RoleSession, getSession, sessionsIn } from '../sessions/store.ts'
@@ -101,7 +106,13 @@ import { type TaskChecks, TaskVerdict } from './checks.ts'
 import { BuildDesk } from './desk.ts'
 import { type WriteInProgress, writeLocks } from './locks.ts'
 import { buildingLoop, fileOf, runningOf } from './loop.ts'
-import { PROOF_KINDS, type ProofNeeds, buildingProofs } from './proofs.ts'
+import {
+  CANCEL_MISSION,
+  END_WITHOUT,
+  PROOF_KINDS,
+  type ProofNeeds,
+  buildingProofs,
+} from './proofs.ts'
 import { checksOf, validationSettingsOf } from './validation.ts'
 import { BuildingStart } from './launch.ts'
 import { OutsideChanges } from './outside.ts'
@@ -111,9 +122,11 @@ import {
   attemptFiles,
   type BuildingBase,
   type BuildingRow,
+  type DecisionRow,
   NeedCause,
   type TaskNow,
   activeBuildingIn,
+  latestBuildingIn,
   activeBuildings,
   amendments,
   applyAmendmentIn,
@@ -175,6 +188,12 @@ export const tasksDoneEnd = Layer.effect(
 /** The service a Builder's requests for a need belong to. */
 export const BUILDER_NEEDS = needService('builder')
 
+/**
+ * The id the user's answer to three reds is delivered to the Builder under: the end reads when a
+ * turn of the Builder took it (#309).
+ */
+export const redsAnsweredId = (needId: string) => `answered-${needId}`
+
 /** How often the time a Building runs is written down (open question 28). */
 const HEARTBEAT = '15 seconds'
 
@@ -196,7 +215,8 @@ type Needs =
   | OutsideChanges
   | ProofNeeds
   | ToolAccess
-  | Effect.Services<ReturnType<typeof moveMission>>
+  | MissionCancels
+  | Effect.Services<ReturnType<typeof runStops>>
 
 const NO_MISSION = refusal('refused: this session works for no mission')
 const NO_BUILDING = refusal('refused: the mission has no Building under way')
@@ -265,9 +285,15 @@ const answerOf = (need: Need): string | null => {
 /**
  * Where a suite holds the Builder between a check and the transaction it guards: after a task's
  * start snapshot, after its end snapshot, after its verdict; before the proofs are written, between
- * a green run and its record, between the proofs written and a conflict handed over, between the
- * reds a start runs and its greens; once a start's resume read the end's step, before it brings
- * the Builder back; once it went past the Builder. Never held otherwise.
+ * a proof's files read and their write, right before and right after a proof's test file is read for its run, between a green run and its record, between the proofs
+ * written and a conflict handed over, between the reds a start runs and its greens; once a start's
+ * resume read the end's step, before it brings the Builder back; once it went past the Builder;
+ * where a Retry writes its proof back, in the transaction that withdraws its need; once a need
+ * ended, before what it held is released; as its event follower takes in an answer, before it acts
+ * on it; as a `proof_run` call begins to execute; as a file tool's write that changed its file is
+ * counted; as a write joins a settle whose window is open; as a settle's window closes, before it
+ * reads what came in it; as a settle of the writes begins, and once it is done; as its event
+ * follower takes in a change outside Hemera, before its settle. Never held otherwise.
  */
 export type BuilderHold = (
   at:
@@ -284,13 +310,62 @@ export type BuilderHold = (
     | 'bringing'
     | 'resumed'
     | 'proving'
+    | 'placed'
+    | 'test-reading'
+    | 'test-read'
+    | 'red-ran'
     | 'greening'
     | 'greens-due'
-    | 'handing',
+    | 'handing'
+    | 'retrying'
+    | 'proof-called'
+    | 'releasing'
+    | 'answering'
+    | 'telling'
+    | 'wrote'
+    | 'joined'
+    | 'queued'
+    | 'window'
+    | 'settling'
+    | 'settled'
+    | 'outside'
+    | 'beginning',
 ) => Effect.Effect<void>
+
+/**
+ * A cancelled mission's Building ends as cancelled, in the cancel's own transaction (#378): its
+ * claims released and its open attempts ended; the work stays. Nothing of it is active after the
+ * cancel commits, so no phase, need or session of the Building starts from it again.
+ */
+export const cancelBuildingIn: CancelIn = (transaction, missionId) =>
+  Effect.gen(function* () {
+    const building = yield* activeBuildingIn(transaction, missionId)
+    if (building === null) return []
+    yield* transaction
+      .update(buildings)
+      .set({ state: 'cancelled', endedAt: now() })
+      .where(eq(buildings.id, building.id))
+      .pipe(Effect.mapError(refusedWhile('cancelling the Building')))
+    yield* transaction
+      .delete(buildingClaims)
+      .where(eq(buildingClaims.buildingId, building.id))
+      .pipe(Effect.mapError(refusedWhile('releasing the claims')))
+    for (const task of yield* tasksIn(transaction, building.id)) {
+      if (task.state !== 'in_progress') continue
+      const attempt = yield* openAttemptIn(transaction, building.id, task.id)
+      if (attempt === null) continue
+      yield* transaction
+        .update(buildingAttempts)
+        .set({ endedAt: now(), outcome: 'cancelled' })
+        .where(eq(buildingAttempts.id, attempt.id))
+        .pipe(Effect.mapError(refusedWhile('ending the attempt')))
+    }
+    return []
+  })
 
 export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
+  let takeRetry: NonNullable<NeedHandler['retriedIn']> | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
       apply === null
@@ -298,6 +373,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         : apply(need, transaction),
     // An environment need holds until the user's Retry says it is fixed.
     recheck: (_need, retried) => Effect.succeed(!retried),
+    // Refused, like an answer, until the Builder runs: the need stays open for another Retry.
+    retriedIn: (need, transaction) =>
+      takeRetry === null
+        ? Effect.fail(new DeliveryFailed({ reason: 'the Builder is not running yet' }))
+        : takeRetry(need, transaction),
   }
   let takeCut: ((action: EffectfulAction) => Effect.Effect<boolean>) | null = null
   let takeRestart: Effect.Effect<void> | null = null
@@ -329,7 +409,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         locks: writeLocks(),
         said,
         hold,
-        deliver: (building, target, kind, body) => deliverTo(building, target, kind, body),
+        deliver: (building, target, kind, body, id) => deliverTo(building, target, kind, body, id),
         ran: (building) => Effect.suspend(() => commitsLeft(building)),
       })
       /**
@@ -355,10 +435,6 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         loop,
         said,
-        deliver: (building, target, kind, body) =>
-          deliverTo(building, target, kind, body).pipe(
-            Effect.catchCause((cause) => said(`a delivery was not kept: ${String(cause)}`)),
-          ),
         background: (effect) => effect.pipe(provided, Effect.forkIn(layerScope), Effect.asVoid),
       })
       /** The missions a Builder's write settled in, taken one by one outside its transaction. */
@@ -498,31 +574,54 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               Effect.catchTag('UnknownWorkspace', () => Effect.succeed(null)),
             )
 
+      /** Done once this engine's start brought back every Builder it resumes. */
+      const resumedAll = Deferred.makeUnsafe<void>()
+
+      /** Whether a session of the mission's Builder runs. */
+      const builderLive = (missionId: string) =>
+        Effect.map(
+          sessionsIn(['starting', 'working', 'idle', 'stuck'], { kind: 'mission', missionId }),
+          (live) => live.some((one) => one.role === 'builder'),
+        )
+
       /**
        * The mission's Builder: opened when it never had one, its lineage started again when it
        * stopped (#40's resume: its leases and the resume block pass to the fresh one). A stuck one
-       * is #40's to replace. The calls the user allowed run again from here.
+       * is #40's to replace. The calls the user allowed run again from here. Says whether a
+       * Builder was live already, was started here, or could not be.
        */
       const ensureBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
           yield* ToolAccess.use((access) => access.building(building.missionId))
           const owner = { kind: 'mission', missionId: building.missionId } as const
-          const live = yield* sessionsIn(['starting', 'working', 'idle', 'stuck'], owner)
-          if (live.some((one) => one.role === 'builder')) return
+          if (yield* builderLive(building.missionId)) return 'live' as const
+          // Only a lineage of this Building resumes: a round's Builder is a fresh session (#468).
           const last = (yield* sessionsIn(['ended', 'failed', 'replaced'], owner))
-            .filter((one) => one.role === 'builder')
+            .filter((one) => one.role === 'builder' && one.createdAt >= building.startedAt)
             .toSorted((a, b) => b.epoch - a.epoch)[0]
           if (last !== undefined) {
             const resumed = yield* Sessions.use((sessions) => sessions.resume(last.id))
-            if (resumed === null)
-              yield* said(`the Builder of ${building.missionId} was not resumed`)
-            return
+            if (resumed !== null) return 'started' as const
+            yield* said(`the Builder of ${building.missionId} was not resumed`)
+            // Started meanwhile by another hand: a resume finds its lineage live and does nothing.
+            return (yield* builderLive(building.missionId))
+              ? ('live' as const)
+              : ('stopped' as const)
           }
           const folder = yield* folderOf(building)
-          if (folder === null) return yield* said(`no Workspace for ${building.missionId}`)
-          yield* Sessions.use((sessions) => sessions.open({ owner, role: 'builder', folder })).pipe(
+          if (folder === null) {
+            yield* said(`no Workspace for ${building.missionId}`)
+            return 'no_workspace' as const
+          }
+          return yield* Sessions.use((sessions) =>
+            sessions.open({ owner, role: 'builder', folder }),
+          ).pipe(
+            Effect.as('started' as const),
             Effect.catchTag('SessionRefused', (refused) =>
-              said(`no Builder for ${building.missionId}: ${refused.message}`),
+              Effect.as(
+                said(`no Builder for ${building.missionId}: ${refused.message}`),
+                'stopped' as const,
+              ),
             ),
           )
         })
@@ -553,6 +652,13 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           return pending.length > 0
         })
 
+      /**
+       * Whether this engine's start still has the Builder to bring back: before the end's last
+       * step, its resume does, last of all (CT-09), and nothing brings it back before.
+       */
+      const startsIt = (building: BuildingRow) =>
+        Effect.map(Deferred.isDone(resumedAll), (done) => !done && building.phase !== 'refresh')
+
       /** The interval of this engine's time, opened for a Building. */
       const countIn = (transaction: EngineTransaction, buildingId: string) =>
         Effect.gen(function* () {
@@ -570,6 +676,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           const database = yield* Database
           const active = yield* activeBuildingIn(database, missionId)
           if (active !== null) return yield* ensureBuilder(active)
+          // "Building · round N" (#468): a Building of its own, once, while the mission builds it.
+          const mission = yield* missionRowOf(missionId)
+          const round = mission !== null && mission.round > 0 ? mission.round : null
+          if (round !== null) {
+            if (mission?.stage !== 'building') return
+            const [had] = yield* database
+              .select({ id: buildings.id })
+              .from(buildings)
+              .where(and(eq(buildings.missionId, missionId), eq(buildings.round, round)))
+              .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+            if (had !== undefined) return
+            yield* hold('beginning')
+          }
           const [launch] = yield* database
             .select()
             .from(buildingLaunches)
@@ -605,11 +724,20 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               if ((yield* activeBuildingIn(transaction, missionId)) !== null) {
                 return { result: null, events: [] }
               }
+              // Started meanwhile by another hand: one Building per round.
+              if (round !== null) {
+                const [had] = yield* transaction
+                  .select({ id: buildings.id })
+                  .from(buildings)
+                  .where(and(eq(buildings.missionId, missionId), eq(buildings.round, round)))
+                  .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+                if (had !== undefined) return { result: null, events: [] }
+              }
               const row: BuildingRow = {
                 id,
                 missionId,
-                label: 'Building',
-                round: null,
+                label: round === null ? 'Building' : roundLabel(round),
+                round,
                 workspaceId: workspace.id,
                 bases: bases.write(taken),
                 phase: 'tasks',
@@ -626,7 +754,19 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 .insert(buildings)
                 .values(row)
                 .pipe(Effect.mapError(refusedWhile('starting the Building')))
-              const { tasks } = yield* planRows(transaction, missionId)
+              // A round's tasks build its points, as the Spec's build its requirements.
+              const tasks =
+                round === null
+                  ? (yield* planRows(transaction, missionId)).tasks
+                  : (yield* roundTasksIn(transaction, missionId, round)).map((one) => ({
+                      id: one.id,
+                      title: one.title,
+                      result: one.result,
+                      requirements: one.points,
+                      scenarios: one.scenarios,
+                      targets: one.targets,
+                      dependsOn: one.dependsOn,
+                    }))
               for (const [rank, task] of tasks.entries()) {
                 yield* transaction
                   .insert(buildingTasks)
@@ -634,7 +774,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                     buildingId: id,
                     id: task.id,
                     rank,
-                    origin: 'spec',
+                    origin: round === null ? 'spec' : 'round',
                     title: secrets.mask(task.title),
                     result: secrets.mask(task.result),
                     requirements: writeStrings(task.requirements),
@@ -656,6 +796,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   buildingEvent(missionId, 'building.started', {
                     buildingId: id,
                     label: row.label,
+                    round,
                     tasks: tasks.length,
                   }),
                   ...settledNow.events,
@@ -735,7 +876,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 Effect.as({ result: undefined, events: [] }),
               ),
           )
-          const left = yield* proofs.notProven(building)
+          const left = yield* proofs.notProvenIn(yield* Database, building)
           yield* deliver(
             building,
             'done',
@@ -759,7 +900,9 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
        * The end called once every task is done and every automated proof is green (or stale, which
        * the end runs again, or not reproducible, or ended without by the user); while one is not,
        * the end waits and the Builder is told which proof keeps it, once for each set it waits on
-       * (#144). When only scenarios nothing moves any more keep it, the user is asked instead.
+       * (#144). When only scenarios nothing moves any more keep it, the user is asked instead. Once
+       * the end is called, a proof red again at its refresh is asked about the same way (#306): its
+       * red was told to the Builder with its attempt, and the end waits on the question.
        */
       const endIfReady = (building: BuildingRow) =>
         Semaphore.withPermits(
@@ -768,9 +911,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         )(
           Effect.gen(function* () {
             const row = yield* activeBuildingIn(yield* Database, building.missionId)
-            if (row?.id !== building.id || row.tasksDoneAt === null || row.endCalledAt !== null)
-              return
-            const red = yield* proofs.unproven(row)
+            if (row?.id !== building.id || row.tasksDoneAt === null) return
+            const refreshing = row.endCalledAt !== null
+            if (refreshing && row.phase !== 'refresh') return
+            const red = yield* proofs.unproven(row, refreshing)
             const stuck =
               red.length === 0 ? [] : yield* proofs.stuckOf(row, red, quiet.has(row.missionId))
             // A proof of the mission runs: the end is judged again once it ends (#258).
@@ -785,23 +929,27 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             }
             if (allStuck) {
               endWaits.delete(row.id)
-              yield* proofs.askUnproven(row, stuck)
+              yield* proofs.askUnproven(row, stuck, refreshing)
               return
             }
-            const waits = red.join('\u0000')
             if (red.length > 0) {
-              if (endWaits.get(row.id) !== waits) {
+              // A proof held on the user's need is not the Builder's to move (#306).
+              const held = yield* proofs.heldOnUser(row)
+              const told = red.filter((one) => !held.includes(one))
+              const waits = told.join('\u0000')
+              if (endWaits.get(row.id) !== waits && told.length > 0) {
                 endWaits.set(row.id, waits)
                 yield* deliver(
                   row,
                   'red',
-                  `The end waits: ${listed(red.map((one) => `${one}'s proof`))} ${red.length === 1 ? 'is' : 'are'} not green.`,
+                  `The end waits: ${listed(told.map((one) => `${one}'s proof`))} ${told.length === 1 ? 'is' : 'are'} not green.`,
                 )
               }
               yield* watchQuiet(row)
               return
             }
-            endWaits.set(row.id, waits)
+            if (refreshing) return
+            endWaits.set(row.id, '')
             yield* ended(row)
           }),
         )
@@ -1523,6 +1671,10 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ),
         )
 
+      /** What a file written holds, or null when it cannot be read, absent included (#310). */
+      const contentOf = (path: string) =>
+        Effect.tryPromise(() => readFile(path)).pipe(Effect.orElseSucceed(() => null))
+
       /** The repository a gate write lands in, compared before it (#148). */
       const compareBefore = (file: { readonly missionId: string; readonly path: string }) =>
         Effect.gen(function* () {
@@ -1559,12 +1711,28 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           summary: answering(summary),
           proofRun: answering(proofs.proofRun),
           refreshProofs: (missionId) => proofs.refresh(missionId).pipe(provided, Effect.orDie),
+          rerunning: proofs.rerunning,
           ensureBuilder: (missionId) =>
             Effect.gen(function* () {
               const building = yield* activeBuildingIn(yield* Database, missionId)
-              if (building === null || (yield* builderWaits(missionId))) return
-              yield* ensureBuilder(building)
+              if (building === null) return 'waits' as const
+              if (yield* builderWaits(missionId)) {
+                // Its Retry starts it through the sessions: the calls the user allowed run again
+                // from here, not from the next exit.
+                yield* ToolAccess.use((access) => access.building(missionId))
+                return 'waits' as const
+              }
+              if (yield* startsIt(building)) return 'waits' as const
+              return yield* ensureBuilder(building)
             }).pipe(provided, Effect.orDie),
+          builderNow: (missionId) =>
+            Effect.gen(function* () {
+              if (yield* builderLive(missionId)) return 'live' as const
+              const building = yield* activeBuildingIn(yield* Database, missionId)
+              if (building === null || (yield* builderWaits(missionId))) return 'waits' as const
+              return (yield* startsIt(building)) ? ('waits' as const) : ('stopped' as const)
+            }).pipe(provided, Effect.orDie),
+          resumed: Deferred.await(resumedAll),
           touchedProofs: (missionId, repositories) =>
             proofs.touched(missionId, repositories).pipe(provided, Effect.orDie),
           claim,
@@ -1590,10 +1758,22 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                   Effect.andThen(hold('writing')),
                   Effect.andThen(loop.beginHold(file, sink)),
                   provided,
-                  Effect.flatMap((waited) => Effect.map(write, (result) => ({ result, waited }))),
-                  // Once the write and its outcome are kept, out of their transaction: a failed
-                  // green runs again on what it left (#144).
-                  Effect.tap(() => wrote(file.missionId)),
+                  Effect.flatMap((waited) =>
+                    Effect.gen(function* () {
+                      // Read while the file is held: no command writes it in between.
+                      const before = yield* contentOf(file.path)
+                      const result = yield* write
+                      // Once the write and its outcome are kept, out of their transaction: a
+                      // failed green runs again on what it left (#144). A write that left the
+                      // file as it was is none; one whose file could not be read counts (#310).
+                      const after = yield* contentOf(file.path)
+                      if (before === null || after === null || !before.equals(after)) {
+                        yield* hold('wrote')
+                        yield* wrote(file.missionId)
+                      }
+                      return { result, waited }
+                    }),
+                  ),
                   Effect.ensuring(
                     Effect.suspend(() =>
                       Effect.forEach(sink.splice(0), loop.endHold, { discard: true }),
@@ -1611,20 +1791,25 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
 
       // ---- What the Builder is told.
 
-      /** A delivery to a lineage of the mission, or to its Builder, kept until it is taken. */
+      /**
+       * A delivery to a lineage of the mission, or to its Builder, kept until it is taken; under
+       * `id` when one is given.
+       */
       function deliverTo(
         building: BuildingRow,
         target: { readonly lineage: string } | { readonly role: string },
         kind: string,
         body: string,
+        id?: string,
       ) {
+        const asked = {
+          owner: { kind: 'mission', missionId: building.missionId },
+          target,
+          kind,
+          body,
+        } as const
         return Sessions.use((sessions) =>
-          sessions.deliver({
-            owner: { kind: 'mission', missionId: building.missionId },
-            target,
-            kind,
-            body,
-          }),
+          sessions.deliver(id === undefined ? asked : { ...asked, id }),
         ).pipe(
           Effect.asVoid,
           Effect.catchTag('DeliveryKindRefused', (refused) => said(refused.message)),
@@ -1671,6 +1856,67 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           )
         })
 
+      /** A decision whose need ended: kept as ended, the tasks it held released, the plan settled. */
+      const decisionEndedIn = (
+        transaction: EngineTransaction,
+        found: { readonly decision: DecisionRow; readonly building: BuildingRow },
+        how: 'expired' | 'withdrawn',
+      ) =>
+        Effect.gen(function* () {
+          yield* transaction
+            .update(buildingDecisions)
+            .set({ state: how, answeredAt: now() })
+            .where(eq(buildingDecisions.id, found.decision.id))
+            .pipe(Effect.mapError(refusedWhile('ending the decision')))
+          yield* unblockIn(transaction, found.building, found.decision.needId)
+          return (yield* settleIn(transaction, found.building)).events
+        })
+
+      /** What the Builder is told of an expiry, under one id whoever stores it first. */
+      const expirySaid = (decision: DecisionRow, reason: string | null) => {
+        const tasks = JSON.parse(decision.tasks).join(', ')
+        return {
+          id: `expired-${decision.needId}`,
+          body: `Your request no longer holds and expired: ${decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
+        }
+      }
+
+      /** What the Builder is told of the user's Retry, under one id whoever stores it first. */
+      const fixedSaid = (decision: DecisionRow) => {
+        const tasks = JSON.parse(decision.tasks).join(', ')
+        return {
+          id: `fixed-${decision.needId}`,
+          body: `The user says it is fixed: ${decision.question}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
+        }
+      }
+
+      /**
+       * An environment need's Retry: the proof it held leaves `held` with its withdrawal, and the
+       * Builder is told in it.
+       */
+      takeRetry = (retriedNeed, transaction) =>
+        Effect.gen(function* () {
+          const found = yield* decisionOfNeedIn(transaction, retriedNeed.id)
+          if (found === null || found.building.state !== 'active') return []
+          if (found.decision.state !== 'pending') return []
+          if (found.decision.kind === 'proof_environment' && found.decision.subject !== null)
+            yield* proofs.retriedIn(transaction, found.building, found.decision.subject)
+          // Ended with its need, the Builder told, so a stop before the rest of the Retry, or a
+          // follower behind, leaves nothing behind it: the end never sees the one without the other.
+          const events = yield* decisionEndedIn(transaction, found, 'withdrawn')
+          yield* storeDeliveryIn(transaction, {
+            ...fixedSaid(found.decision),
+            owner: { kind: 'mission', missionId: found.building.missionId },
+            target: { role: 'builder' },
+            kind: 'answer',
+          }).pipe(
+            Effect.catchTag('DeliveryKindRefused', (refused) =>
+              Effect.fail(new DeliveryFailed({ reason: refused.message })),
+            ),
+          )
+          return events
+        }).pipe(Effect.provide(context))
+
       /** A need of the Builder's answered: its decision kept, the amendment applied if chosen. */
       apply = (answeredNeed, transaction) =>
         Effect.gen(function* () {
@@ -1699,6 +1945,17 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
             if (problems.length > 0) {
               const reason = `the plan moved since it was asked: ${problems.join(' ')}`
               events.push(...(yield* expireNeedIn(transaction, answeredNeed.id, reason)))
+              // Told with the expiry, so a stop before the follower loses none of it.
+              yield* storeDeliveryIn(transaction, {
+                ...expirySaid(decision, reason),
+                owner: { kind: 'mission', missionId: building.missionId },
+                target: { role: 'builder' },
+                kind: 'expiry',
+              }).pipe(
+                Effect.catchTag('DeliveryKindRefused', (refused) =>
+                  Effect.fail(new DeliveryFailed({ reason: refused.message })),
+                ),
+              )
               yield* transaction
                 .update(buildingDecisions)
                 .set({ state: 'expired', answeredAt: now() })
@@ -1726,8 +1983,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (decision.scope === 'proof' && decision.kind !== 'error') {
             events.push(...(yield* proofs.answeredIn(transaction, building, decision, answer)))
           }
+          // "Cancel" on a scenario that already passes is the mission's Cancel (CT-35), kept with
+          // the answer: the stops it owes, its Building's among them, are written down with it.
+          if (decision.kind === 'already_passes' && answer === CANCEL_MISSION) {
+            events.push(...(yield* cancelMissionIn(transaction, building.missionId)))
+          }
           yield* unblockIn(transaction, building, answeredNeed.id)
           const settledNow = yield* settleIn(transaction, building)
+          // Kept for the Builder with the answer, so the end never sees one without the other.
+          yield* answerIn(
+            transaction,
+            building,
+            decision,
+            answer ?? '',
+            chosen && amendment !== null ? amendmentSaid(amendment) : null,
+          )
           return [
             buildingEvent(building.missionId, 'building.decision', {
               kind: decision.kind,
@@ -1747,6 +2017,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       /** A need of the Builder's that no longer holds, or that the user's Retry withdrew. */
       const needEnded = (needId: string, how: 'expired' | 'withdrawn', reason: string | null) =>
         Effect.gen(function* () {
+          yield* hold('releasing')
           const outcome = yield* mutate('releasing what a need held', (transaction) =>
             Effect.gen(function* () {
               const found = yield* decisionOfNeedIn(transaction, needId)
@@ -1754,17 +2025,11 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 return { result: null, events: [] }
               }
               // An answer whose amendment no longer applied expired it and released its tasks
-              // already: only the Builder is left to tell.
+              // already, as a Retry withdrawing an environment need does: only the Builder is left
+              // to tell.
               if (found.decision.state === how) return { result: found, events: [] }
               if (found.decision.state !== 'pending') return { result: null, events: [] }
-              yield* transaction
-                .update(buildingDecisions)
-                .set({ state: how, answeredAt: now() })
-                .where(eq(buildingDecisions.id, found.decision.id))
-                .pipe(Effect.mapError(refusedWhile('ending the decision')))
-              yield* unblockIn(transaction, found.building, needId)
-              const settledNow = yield* settleIn(transaction, found.building)
-              return { result: found, events: settledNow.events }
+              return { result: found, events: yield* decisionEndedIn(transaction, found, how) }
             }),
           )
           if (outcome === null) return
@@ -1782,86 +2047,106 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           ) {
             yield* proofs.retried(outcome.building, outcome.decision.subject)
           }
-          const tasks = JSON.parse(outcome.decision.tasks).join(', ')
-          yield* deliver(
-            outcome.building,
-            how === 'expired' ? 'expiry' : 'answer',
-            how === 'expired'
-              ? `Your request no longer holds and expired: ${outcome.decision.question.split('\n')[0] ?? ''}${reason === null ? '' : `\nWhy: ${reason}`}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`
-              : `The user says it is fixed: ${outcome.decision.question}${tasks === '' ? '' : `\nThe tasks it held (${tasks}) are back.`}`,
-          )
+          if (how === 'withdrawn') {
+            // Stored with the Retry already: only handed over here.
+            const { id, body } = fixedSaid(outcome.decision)
+            yield* deliverTo(outcome.building, { role: 'builder' }, 'answer', body, id)
+            return
+          }
+          // Stored already when the answer expired it: only handed over then.
+          const { id, body } = expirySaid(outcome.decision, reason)
+          yield* deliverTo(outcome.building, { role: 'builder' }, 'expiry', body, id)
         })
 
-      /** A mission cancelled: its Building ends as cancelled; the work stays. */
-      const cancelled = (missionId: string) =>
-        mutate('cancelling the Building', (transaction) =>
-          Effect.gen(function* () {
-            const building = yield* activeBuildingIn(transaction, missionId)
-            if (building === null) return { result: undefined, events: [] }
-            yield* transaction
-              .update(buildings)
-              .set({ state: 'cancelled', endedAt: now() })
-              .where(eq(buildings.id, building.id))
-              .pipe(Effect.mapError(refusedWhile('cancelling the Building')))
-            yield* transaction
-              .delete(buildingClaims)
-              .where(eq(buildingClaims.buildingId, building.id))
-              .pipe(Effect.mapError(refusedWhile('releasing the claims')))
-            for (const task of yield* tasksIn(transaction, building.id)) {
-              if (task.state !== 'in_progress') continue
-              const attempt = yield* openAttemptIn(transaction, building.id, task.id)
-              if (attempt === null) continue
-              yield* transaction
-                .update(buildingAttempts)
-                .set({ endedAt: now(), outcome: 'cancelled' })
-                .where(eq(buildingAttempts.id, attempt.id))
-                .pipe(Effect.mapError(refusedWhile('ending the attempt')))
-            }
-            counting.delete(building.id)
-            return { result: undefined, events: [] }
-          }),
-        )
-
-      const answerDelivery = (missionId: string, payload: NewEvent['payload']) =>
+      /** What the Builder is told of the user's answer, kept in the transaction that applies it. */
+      const answerIn = (
+        transaction: EngineTransaction,
+        building: BuildingRow,
+        decision: DecisionRow,
+        answer: string,
+        amendment: string | null,
+      ) =>
         Effect.gen(function* () {
-          const database = yield* Database
-          const building = yield* activeBuildingIn(database, missionId)
-          if (building === null || payload === undefined) return
-          const runner = Option.getOrNull(readString(payload['runner']))
-          if (payload['kind'] === 'error') {
-            const tasks = Array.isArray(payload['tasks']) ? payload['tasks'].map(String) : []
-            yield* deliverTo(
-              building,
-              runner === null ? { role: 'builder' } : { lineage: runner },
-              'answer',
-              [
-                `The user answered your three reds${tasks.length === 0 ? '' : ` on ${listed(tasks)}`}: ${String(payload['answer'] ?? '')}`,
+          const owner = { kind: 'mission', missionId: building.missionId } as const
+          if (decision.kind === 'error') {
+            const tasks: ReadonlyArray<string> = JSON.parse(decision.tasks)
+            return yield* storeDeliveryIn(transaction, {
+              id: redsAnsweredId(decision.needId),
+              owner,
+              target:
+                decision.proposer === null ? { role: 'builder' } : { lineage: decision.proposer },
+              kind: 'answer',
+              body: [
+                `The user answered your three reds${tasks.length === 0 ? '' : ` on ${listed(tasks)}`}: ${answer}`,
                 tasks.length === 0
                   ? 'Take it as the direction of your next attempt.'
                   : `Take it as the direction of the next attempt: start ${listed(tasks)} again with task_start.`,
               ].join('\n'),
-            )
-            return
+            })
           }
-          const amendment = Option.getOrNull(readString(payload['amendment']))
-          yield* deliver(
-            building,
-            'answer',
-            [
-              `The user answered: ${String(payload['answer'] ?? '')}`,
-              `Your request: ${String(payload['question'] ?? '')}`,
+          // Ended without, once the end was called: the summary is told here, not by the end (#306).
+          const asked = decision.subject?.split(',') ?? []
+          const left =
+            decision.kind === 'proofs_unproven' &&
+            answer === END_WITHOUT &&
+            building.endCalledAt !== null
+              ? (yield* proofs.notProvenIn(transaction, building)).filter((one) =>
+                  asked.includes(one),
+                )
+              : []
+          return yield* storeDeliveryIn(transaction, {
+            owner,
+            target: { role: 'builder' },
+            kind: 'answer',
+            body: [
+              `The user answered: ${answer}`,
+              `Your request: ${decision.question}`,
               amendment === null ? null : `The plan changed: ${amendment}`,
+              left.length === 0
+                ? null
+                : `The user ended without proving ${listed(left)}: say so in the summary.`,
             ]
               .filter((part) => part !== null)
               .join('\n'),
-          )
-        })
+          })
+        }).pipe(
+          Effect.catchTag('DeliveryKindRefused', (refused) =>
+            Effect.fail(new DeliveryFailed({ reason: refused.message })),
+          ),
+        )
+
+      const startOf = (missionId: string) =>
+        Semaphore.withPermits(
+          lock,
+          1,
+        )(begin(missionId)).pipe(
+          provided,
+          Effect.catchTag('SnapshotFailed', (failed) =>
+            Effect.andThen(
+              Snapshots.use((snapshots) => snapshots.failed(missionId, failed)).pipe(provided),
+              Effect.die(new Error(`the base snapshot could not be taken: ${failed.message}`)),
+            ),
+          ),
+          Effect.orDie,
+        )
+
+      /** A round's Building begun apart from the follower, which never waits on a start. */
+      const roundStarts = (missionId: string) =>
+        startOf(missionId).pipe(
+          Effect.catchCause((cause) =>
+            said(`the Building of a round did not start: ${String(cause)}`),
+          ),
+          Effect.forkIn(layerScope),
+          Effect.asVoid,
+        )
 
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       const follow = events.pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             const payload = event.payload ?? {}
+            // A round ready to build: "Building · round N" begins (#468).
+            if (event.type === 'review.round_building') yield* roundStarts(event.entityId)
             if (event.type === 'building.task_available' && payload['initial'] !== true) {
               const database = yield* Database
               const building = yield* activeBuildingIn(database, event.entityId)
@@ -1871,30 +2156,35 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
               }
             }
             if (event.type === 'building.decision') {
-              yield* answerDelivery(event.entityId, payload)
+              yield* hold('answering')
+              // The answer was kept for the Builder as it was applied: it is handed over now.
+              yield* SessionPost.use((post) => post.ring)
               // An answer is something the Builder acts on: its turns are watched from there.
               awake(event.entityId)
               const kind = PROOF_KINDS.find((one) => one === payload['kind'])
               const subject = Option.getOrNull(readString(payload['subject']))
               if (kind !== undefined && subject !== null) {
-                const cancel = yield* proofs.afterAnswer(
+                yield* proofs.afterAnswer(
                   event.entityId,
                   kind,
                   subject,
                   String(payload['answer'] ?? ''),
                 )
-                // "Cancel" on a scenario that already passes is the mission's Cancel (CT-35).
-                if (cancel) {
-                  yield* moveMission(event.entityId, 'cancel', 'user').pipe(
-                    Effect.catchCause((cause) =>
-                      said(`the mission was not cancelled: ${String(cause)}`),
-                    ),
-                  )
-                }
               }
               // The end judged again once the Builder was told: its turn on the answer is watched.
               const judged = yield* activeBuildingIn(yield* Database, event.entityId)
               if (judged !== null) yield* endIfReady(judged)
+            }
+            // A change the detector found outside Hemera runs a failed green again once it settles,
+            // as a write does; it is not the Builder's, so it never counts as its write (#310,
+            // #411). A compare that finds nothing says nothing.
+            if (event.type === 'building.ended') {
+              const over = yield* latestBuildingIn(yield* Database, event.entityId)
+              if (over !== null) yield* proofs.ended(over.id)
+            }
+            if (event.type === 'mission.changed_outside') {
+              yield* hold('outside')
+              yield* proofs.afterWrite(event.entityId, true)
             }
             if (
               (event.type === 'need.expired' || event.type === 'need.withdrawn') &&
@@ -1906,7 +2196,18 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
                 Option.getOrNull(readString(payload['reason'])),
               )
             }
-            if (event.type === 'mission.cancelled') yield* cancelled(event.entityId)
+            // The cancel's transaction ended the Building: this engine counts no more of its time.
+            // The stops it owes run now: a cancel kept with an answer has nobody else to run them
+            // before the next start. Out of this follower, which never waits on a stopper.
+            if (event.type === 'mission.cancelled') {
+              const cancelled = yield* latestBuildingIn(yield* Database, event.entityId)
+              if (cancelled !== null) counting.delete(cancelled.id)
+              if (cancelled !== null) yield* proofs.ended(cancelled.id)
+              yield* runStops(event.entityId).pipe(
+                Effect.catchCause((cause) => said(`the stops were not run: ${String(cause)}`)),
+                Effect.forkIn(layerScope),
+              )
+            }
           }).pipe(
             provided,
             Effect.catchCause((cause) =>
@@ -1935,6 +2236,21 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
       }).pipe(provided, Effect.orDie)
       const resume = Effect.gen(function* () {
         yield* Deferred.await(handedOver)
+        // A round made ready, its Building not begun before a stop: it begins now (#468).
+        const database = yield* Database
+        const rounds = yield* database
+          .select({ id: missions.id, round: missions.round })
+          .from(missions)
+          .where(and(eq(missions.stage, 'building'), gt(missions.round, 0)))
+          .pipe(Effect.mapError(refusedWhile('reading the missions')))
+        for (const one of rounds) {
+          const [had] = yield* database
+            .select({ id: buildings.id })
+            .from(buildings)
+            .where(and(eq(buildings.missionId, one.id), eq(buildings.round, one.round)))
+            .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+          if (had === undefined) yield* roundStarts(one.id)
+        }
         for (const building of yield* activeBuildings) {
           const checking = yield* mutate('resuming the Building', (transaction) =>
             Effect.gen(function* () {
@@ -1970,7 +2286,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
           if (current !== null && current.phase !== 'refresh') yield* ensureBuilder(current)
           yield* hold('resumed')
         }
-      })
+      }).pipe(Effect.ensuring(Deferred.succeed(resumedAll, undefined)))
 
       const heartbeat = Effect.gen(function* () {
         const database = yield* Database
@@ -2011,22 +2327,7 @@ export const builderLayer = (log: Log, hold: BuilderHold = () => Effect.void) =>
         Effect.forkScoped,
       )
 
-      return {
-        start: (missionId: string) =>
-          Semaphore.withPermits(
-            lock,
-            1,
-          )(begin(missionId)).pipe(
-            provided,
-            Effect.catchTag('SnapshotFailed', (failed) =>
-              Effect.andThen(
-                Snapshots.use((snapshots) => snapshots.failed(missionId, failed)).pipe(provided),
-                Effect.die(new Error(`the base snapshot could not be taken: ${failed.message}`)),
-              ),
-            ),
-            Effect.orDie,
-          ),
-      }
+      return { start: startOf }
     }),
   )
   return { layer, handler, cut, restarted, handed }

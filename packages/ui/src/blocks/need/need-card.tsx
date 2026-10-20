@@ -13,31 +13,7 @@ import {
   IconPlug,
   IconShieldLock,
 } from '../../icons.ts'
-
-/**
- * A need: what blocks and waits for the user, the same card wherever it is met — Home's Needs you,
- * the top of a mission, behind a notification.
- *
- * Its band says whose it is: the kind's glyph and "Needs you", then the mission (a link, left out
- * on the mission's own page), when, and the role that raised it. The body is the title and the
- * agent's own words, then what that kind asks: the call and the two reasons of a permission (with
- * how to stop being asked: Allow for this mission, or the setting that would settle it), the
- * options of a decision, the attempts of an error, the action of what is missing. The actions are
- * the band below. What cannot be chosen is not drawn: Allow for this mission is not there on a
- * sensitive place or outside a mission, Discuss only while the mission is in Planning.
- *
- * Once answered or expired, the card is one faint line: the glyph, Applied or Expired, the title,
- * and the answer or the reason.
- */
-export type NeedKind = 'permission' | 'decision' | 'error' | 'environment'
-
-/** What each kind is, in words: the legend of its glyph. */
-export const NEED_KINDS: Record<NeedKind, string> = {
-  permission: 'Permission',
-  decision: 'Decision',
-  error: 'Error',
-  environment: 'Something missing',
-}
+import { type NeedKind, NEED_KINDS } from './need-kinds.ts'
 
 const GLYPHS: Record<NeedKind, typeof IconHelpCircle> = {
   permission: IconShieldLock,
@@ -72,7 +48,12 @@ export type NeedAsk =
       /** The settings section that would settle such calls, by its name. */
       settings?: string | undefined
     }
-  | { kind: 'decision'; options: readonly DecisionOption[] }
+  | {
+      kind: 'decision'
+      options: readonly DecisionOption[]
+      /** What the decision rests on: outputs to compare, one under the other, before the options. */
+      evidence?: readonly Attempt[] | undefined
+    }
   | {
       kind: 'error'
       attempts: readonly Attempt[]
@@ -268,7 +249,25 @@ function Ask({ ask, onWrite }: { ask: NeedAsk; onWrite: NeedCardProps['onWrite']
         </>
       )
     case 'decision':
-      return onWrite === undefined ? null : <OwnAnswer onWrite={onWrite} />
+      return (
+        <>
+          {ask.evidence !== undefined && (
+            <Part label="Outputs to compare">
+              <ul aria-label="Outputs to compare" className="flex flex-col gap-2 text-sm">
+                {ask.evidence.map((output, at) => (
+                  <li key={at} className="flex flex-col gap-1">
+                    <span>{output.what}</span>
+                    <pre className={CODE}>
+                      <code>{output.output}</code>
+                    </pre>
+                  </li>
+                ))}
+              </ul>
+            </Part>
+          )}
+          {onWrite !== undefined && <OwnAnswer onWrite={onWrite} />}
+        </>
+      )
     case 'error':
       return (
         <>

@@ -1,53 +1,16 @@
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { check, instant, morph, ping, pinging, useTransition } from '../../motion.ts'
 import { Legend } from '../tooltip/legend.tsx'
-
-/**
- * Where a task stands, as one small mark that changes in place: one ring and what it holds, every
- * state a pose of the same strokes, so a change is a stroke moving and never one glyph swapped
- * for another.
- *
- * - `todo` · a dotted ring, quiet: nothing has started.
- * - `running` · an arc of the ring, turning, in the running tone.
- * - `done` · the ring closes and a ✓ draws itself in it; `failed`, a ✕.
- * - `waiting` · the ring closes around a dot that waits for the user, a ring leaving it on the
- *   beat of the theme's `ping`.
- * - `blocked` · the ring closes around a bar: the way is shut.
- * - `skipped` · the dotted ring, a stroke across it.
- *
- * Asked for less movement, every pose is there at once, the arc does not turn and no ring leaves
- * the dot. With `legend`, the state in words is a tooltip on the mark; without, the mark is
- * decoration beside a line that already says the state.
- */
-
-export type MarkState =
-  | 'todo'
-  | 'running'
-  | 'done'
-  | 'failed'
-  | 'waiting'
-  | 'blocked'
-  | 'skipped'
-  | 'idle'
-
-/** What each state means, in words: the legend, and what a screen reader says. */
-export const MARK_LEGENDS: Record<MarkState, string> = {
-  todo: 'To do',
-  running: 'Running',
-  done: 'Done',
-  failed: 'Failed',
-  waiting: 'Waiting for you',
-  blocked: 'Blocked',
-  skipped: 'Skipped',
-  idle: 'Idle',
-}
+import { type MarkState, MARK_LEGENDS } from './mark-legends.ts'
 
 const TONES: Record<MarkState, string> = {
   todo: 'relative inline-flex shrink-0 text-muted-foreground',
   running: 'relative inline-flex shrink-0 text-info',
   done: 'relative inline-flex shrink-0 text-success',
+  unverified: 'relative inline-flex shrink-0 text-success',
   failed: 'relative inline-flex shrink-0 text-destructive',
   waiting: 'relative inline-flex shrink-0 text-warning',
   blocked: 'relative inline-flex shrink-0 text-destructive',
@@ -88,7 +51,9 @@ const ARC = 0.28
 
 /** How much of the ring each pose closes. */
 function ringOf(state: MarkState): number {
-  if (state === 'todo' || state === 'skipped' || state === 'idle') return 0
+  if (state === 'todo' || state === 'skipped' || state === 'idle' || state === 'unverified') {
+    return 0
+  }
   if (state === 'running') return ARC
   return 1
 }
@@ -110,7 +75,8 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
   const ringing = useTransition(morph)
   const drawing = useTransition(check.draw)
   const beat = useTransition(pinging)
-  const dashed = state === 'todo' || state === 'skipped' || state === 'idle'
+  const dashed =
+    state === 'todo' || state === 'skipped' || state === 'idle' || state === 'unverified'
   const ring = ringOf(state)
   const waiting = state === 'waiting'
   const mark = (
@@ -159,7 +125,7 @@ export function StatusMark({ state, legend = false, size = 'md' }: StatusMarkPro
             d="M6.6 10.3l2.3 2.3l4.5 -4.7"
             data-figure="check"
             initial={false}
-            animate={drawn(state === 'done')}
+            animate={drawn(state === 'done' || state === 'unverified')}
             transition={drawing}
           />
           <motion.path

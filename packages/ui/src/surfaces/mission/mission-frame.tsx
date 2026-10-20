@@ -1,3 +1,4 @@
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
@@ -6,7 +7,8 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { type SheetView, type SheetWidth, SheetStack } from '../../components/sheet/sheet.tsx'
 import { IconChevronRight, IconDots, IconFileText, IconGitBranch } from '../../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
-import { type Ball, BALL_LEGENDS, BallMark } from '../../blocks/ball/ball-mark.tsx'
+import { BallMark } from '../../blocks/ball/ball-mark.tsx'
+import { type Ball, BALL_LEGENDS } from '../../blocks/ball/ball-legends.ts'
 import { TicketLink } from '../../blocks/mission/mission-marks.tsx'
 import type { MissionMarkView, MissionStage } from '../../blocks/mission/vocabulary.ts'
 import { NeedsYouList, type NeedsYouListProps } from '../../blocks/need/needs-you-list.tsx'
@@ -322,9 +324,24 @@ export function MissionFrameNeeds(props: NeedsYouListProps): ReactNode {
 }
 
 /** The base of a stage no page is registered for: its place, with the stage's name. */
-export function MissionFrameBase({ stage }: { stage: MissionStage }): ReactNode {
+export function MissionFrameBase({
+  stage,
+  running,
+}: {
+  stage: MissionStage
+  /**
+   * The chips of what runs, until the stage's page brings its stage card: an agent Hemera started
+   * before its last restart and could not stop.
+   */
+  running?: ReactNode
+}): ReactNode {
   return (
     <div className="mx-auto flex w-full max-w-page flex-col gap-3 px-8 py-6">
+      {running !== undefined && (
+        <section aria-label={stage} className="flex flex-wrap gap-1.5">
+          {running}
+        </section>
+      )}
       <Frame>
         <p className="px-4 py-12 text-center text-sm text-muted-foreground">The {stage} page</p>
       </Frame>

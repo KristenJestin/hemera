@@ -13,11 +13,13 @@
  */
 
 import type { AnyMessage } from '@agentclientprotocol/sdk'
-import { Context, Effect, Layer, Predicate, Schema } from 'effect'
+import { MASK } from '@hemera/core/domain'
+import { Context, Effect, Layer, Option, Predicate, Schema } from 'effect'
 
 import { openTraceLog, traceFileOf } from '../../main/diagnostic.ts'
 import { Secrets } from '../secrets.ts'
 import type { Direction } from './client.ts'
+import { agentText } from './text.ts'
 
 /** A session id that cannot name a trace file, which is never opened. */
 export class TraceNameRefused extends Schema.TaggedError<TraceNameRefused>()('TraceNameRefused', {
@@ -44,22 +46,46 @@ const MORE = /^‹\d+ more›$/
 const cut = (text: string, limit: number): string =>
   text.length <= limit ? text : `${text.slice(0, limit)}‹+${String(text.length - limit)} chars›`
 
+/** What the trace keeps of one value: the protocol's words, the size of any other string. */
+const elide = (key: string, held: Schema.Json): Schema.Json => {
+  if (Predicate.isString(held)) {
+    if (KEPT.has(key)) return cut(held, WORD_LIMIT)
+    if (key === SENTENCE) return cut(held, SENTENCE_LIMIT)
+    if (MORE.test(held)) return held
+    return `‹${String(held.length)} chars›`
+  }
+  if (Array.isArray(held) && held.length > LIST_LIMIT) {
+    return [...held.slice(0, LIST_LIMIT), `‹${String(held.length - LIST_LIMIT)} more›`]
+  }
+  return held
+}
+
+const readJson = Schema.decodeUnknownOption(Schema.Json)
+
+/**
+ * A message as JSON. What came off the wire is JSON already; what the SDK built to send may hold
+ * a field left undefined, which JSON leaves out: it goes through `JSON.stringify` once, a message
+ * that small to write. One that cannot be read is none.
+ */
+const jsonOf = (message: AnyMessage): Option.Option<Schema.Json> =>
+  Option.orElse(readJson(message), () => {
+    try {
+      return readJson(JSON.parse(JSON.stringify(message)))
+    } catch {
+      return Option.none()
+    }
+  })
+
 /**
  * One message as the trace writes it: the JSON that crossed, with the protocol's words kept,
- * every other string replaced by its size, and every array cut at 20 items.
+ * every other string replaced by its size, every array cut at 20 items, and what nests deeper than
+ * a call's arguments ever do cut where it begins (`agentText`). A message that cannot be read is
+ * `"•••"`.
  */
 export const elided = (message: AnyMessage): string =>
-  JSON.stringify(message, (key: string, held: Schema.Json) => {
-    if (Predicate.isString(held)) {
-      if (KEPT.has(key)) return cut(held, WORD_LIMIT)
-      if (key === SENTENCE) return cut(held, SENTENCE_LIMIT)
-      if (MORE.test(held)) return held
-      return `‹${String(held.length)} chars›`
-    }
-    if (Array.isArray(held) && held.length > LIST_LIMIT) {
-      return [...held.slice(0, LIST_LIMIT), `‹${String(held.length - LIST_LIMIT)} more›`]
-    }
-    return held
+  Option.match(jsonOf(message), {
+    onNone: () => agentText(MASK),
+    onSome: (json) => agentText(json, elide),
   })
 
 /** The id of a message, as text, or null for a notification. */

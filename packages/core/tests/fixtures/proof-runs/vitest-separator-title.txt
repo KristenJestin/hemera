@@ -1,0 +1,33 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ gt.test.ts (2 tests | 1 failed) 6ms
+   × a > b 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  gt.test.ts > a > b
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ gt.test.ts:3:33
+      1| import { describe, expect, test } from 'vite-plus/test'
+      2|
+      3| test('a > b', () => { expect(1).toBe(2) })
+       |                                 ^
+      4| describe('a', () => {
+      5|   test('b', () => { expect(1).toBe(1) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  15:35:45
+   Duration  109ms (transform 44%, import 24%, tests 21%, worker 10%, environment 1%)
+

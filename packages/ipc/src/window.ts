@@ -1,5 +1,12 @@
 import { ApplicationRpcs } from './application.ts'
-import { EngineApartRpcs, EngineCoreRpcs, EngineReviewRpcs, EngineSettingsRpcs } from './engine.ts'
+import {
+  EngineApartRpcs,
+  EngineCoreRpcs,
+  EngineDeliveryRulesRpcs,
+  EngineForgeRpcs,
+  EngineReviewRpcs,
+  EngineSettingsRpcs,
+} from './engine.ts'
 import { SoundPreviewRpcs, WindowNoticeRpcs } from './notifications.ts'
 import { HemeraAutoRpcs } from './permissions.ts'
 import { JiraTokenRpcs } from './tickets.ts'
@@ -17,11 +24,13 @@ export const WindowCoreRpcs = EngineCoreRpcs.merge(
 )
 
 /**
- * The window's calls whole: main serves the groups of `EngineApartRpcs`, `EngineSettingsRpcs` and
- * `EngineReviewRpcs` as layers of their own.
+ * The window's calls whole: main serves the groups of `EngineApartRpcs`, `EngineSettingsRpcs`,
+ * `EngineForgeRpcs`, `EngineDeliveryRulesRpcs` and `EngineReviewRpcs` as layers of their own.
  */
 export const WindowRpcs = WindowCoreRpcs.merge(
   EngineApartRpcs,
   EngineSettingsRpcs,
+  EngineForgeRpcs,
+  EngineDeliveryRulesRpcs,
   EngineReviewRpcs,
 )

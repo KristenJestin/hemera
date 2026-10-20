@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { IconGitBranch } from '../../icons.ts'
-import { IconButton } from '../button/button.tsx'
+import { Button, IconButton } from '../button/button.tsx'
 import { Popover } from './popover.tsx'
 
 const meta = {
@@ -69,5 +69,40 @@ export const Focused: Story = {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     expect(document.activeElement).toBe(trigger)
+  },
+}
+
+/**
+ * As wide as the row it hangs off, a picker at the end of a list: under its trigger, against the
+ * row's start edge, never shifted sideways onto what is beside it. It turns upward only when there
+ * is no room below, and keeps the same edge.
+ */
+export const AsWideAsItsRow: Story = {
+  args: {
+    title: undefined,
+    label: 'Start a service',
+    fit: 'row',
+    className: 'flex w-full',
+    trigger: <Button variant="ghost">Start a service…</Button>,
+  },
+  decorators: [
+    (Story) => (
+      <div className="ml-auto w-view-narrow">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const trigger = within(canvasElement).getByRole('button', { name: 'Start a service…' })
+    await userEvent.click(trigger)
+    const panel = await waitFor(() => within(document.body).getByRole('dialog'))
+    // SAFETY: the trigger is rendered inside the anchor's wrapper, which is its parent element.
+    const row = (trigger.parentElement as HTMLElement).getBoundingClientRect()
+    await waitFor(() => {
+      const box = panel.getBoundingClientRect()
+      expect(Math.abs(box.left - row.left)).toBeLessThan(1)
+      expect(Math.abs(box.width - row.width)).toBeLessThan(1)
+      expect(box.top).toBeGreaterThan(row.bottom)
+    })
   },
 }

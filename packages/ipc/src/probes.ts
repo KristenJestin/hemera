@@ -54,6 +54,11 @@ export const ProbeFile = Schema.Struct({
   repository: Schema.String,
   path: Schema.String,
   status: Schema.Literals(['new', 'modified', 'deleted']),
+  /**
+   * The sha256 of its content; for a file whose content is withheld (a hard link, a sensitive
+   * place) `keyed:` and a keyed hash of it, and `unopened` for one the capture could not prove
+   * where it was listed (#425).
+   */
   sha256: Schema.String,
   content: Schema.NullOr(Schema.String),
   patch: Schema.NullOr(Schema.String),

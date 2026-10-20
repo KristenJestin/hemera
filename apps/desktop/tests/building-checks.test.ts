@@ -12,10 +12,10 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-import { type CheckDraft, PermissionAnswer } from '@hemera/core/domain'
+import { type CheckDraft, PermissionAnswer, SESSION_STATES } from '@hemera/core/domain'
 import type { BuildingAttemptView, CommandDraft } from '@hemera/ipc'
 import { and, asc, eq, inArray } from 'drizzle-orm'
-import { Effect, Fiber, Predicate } from 'effect'
+import { Deferred, Effect, Fiber, Predicate } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { type BuilderHold, tasksDoneEnd } from '../src/engine/building/builder.ts'
@@ -26,7 +26,9 @@ import { answerNeed, retryNeed } from '../src/engine/needs.ts'
 import { saveCheck } from '../src/engine/project-checks.ts'
 import { saveResources } from '../src/engine/resources/declarations.ts'
 import { ExclusiveResources } from '../src/engine/resources/reservations.ts'
-import { openSession } from '../src/engine/sessions/store.ts'
+import { openSession, sessionsIn } from '../src/engine/sessions/store.ts'
+import { stopAgentRuns } from '../src/engine/runs.ts'
+import { ToolAccess } from '../src/engine/tools/access.ts'
 import { Database } from '../src/engine/storage/database.ts'
 import {
   buildingAttempts,
@@ -55,9 +57,14 @@ beforeEach(() => {
 afterEach(removeFolders)
 
 /** The engine with the Builder of this version, its real checks, and every agent call allowed. */
-const checksEngine = (dataFolder: string, hold: BuilderHold = () => Effect.void) =>
+const checksEngine = (
+  dataFolder: string,
+  hold: BuilderHold = () => Effect.void,
+  runs: { readonly hold?: (at: 'recording' | 'recorded' | 'launched') => Effect.Effect<void> } = {},
+) =>
   sessionsEngine(dataFolder, builderAgents, {
     roles: [HELPER],
+    runs,
     tools: { home: work, verdicts: verdictsSaying(() => ALLOW).layer },
     // The end of a Building is #147's suite: here the tasks' end only says they are done.
     building: { hold, end: tasksDoneEnd },
@@ -502,9 +509,11 @@ describe('A check on an exclusive resource', () => {
           const finishing = yield* Effect.forkChild(
             call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' }),
           )
+          // The check says it waits, and the reservations mark the mission: two writes, either first.
           yield* until(
             Effect.map(eventsOf(mission.id, 'building.check_waiting'), (rows) => rows.length > 0),
           )
+          yield* until(Effect.map(getMission(mission.id), (one) => one.marks.length > 0))
           const marks = (yield* getMission(mission.id)).marks.map((one) => one.sentence)
           const ranWhileHeld = ranIn('db.log').length
           const waiting = yield* eventsOf(mission.id, 'building.check_waiting')
@@ -1034,6 +1043,122 @@ describe('A restart in the middle of the checks', () => {
       },
     ])
     expect(ranIn('db.log')).toHaveLength(0)
+  })
+})
+
+describe('The exit of the Building in the middle of the checks', () => {
+  test('a task_finished check queued behind one that runs as the exit begins: the exit’s stops stop the first, and the second never starts', async () => {
+    const release = join(scripts, 'release-exit')
+    const seen = await checksEngine(data).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, (projectId) =>
+            Effect.gen(function* () {
+              yield* saveCheck(
+                projectId,
+                null,
+                check('first', checkLine('first.log', 0, '-', { release })),
+              )
+              yield* saveCheck(
+                projectId,
+                null,
+                check('second', checkLine('second.log', 0, '-', { release })),
+              )
+            }),
+          )
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          yield* Effect.forkChild(call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' }))
+          const database = yield* Database
+          const runs = Effect.map(
+            database.select({ state: commandRuns.state }).from(commandRuns),
+            (rows) => rows.map((row) => row.state),
+          )
+          yield* until(Effect.map(runs, (states) => states.includes('running')))
+          // The exit's stops, as the end runs them: the mark, the runs, then the calls waited for.
+          const lineages = (yield* sessionsIn(SESSION_STATES, {
+            kind: 'mission',
+            missionId: mission.id,
+          })).map((one) => one.lineage)
+          yield* ToolAccess.use((access) => access.exiting(mission.id, lineages))
+          yield* stopAgentRuns(mission.id)
+          let settled = false
+          yield* Effect.forkChild(
+            ToolAccess.use((access) => access.settled(mission.id)).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  settled = true
+                }),
+              ),
+            ),
+          )
+          yield* until(Effect.sync(() => settled))
+          return { states: yield* runs }
+        }),
+      ),
+    )
+    writeFileSync(release, '')
+    expect(seen.states).toEqual(['stopped'])
+    expect(existsSync(join(scripts, 'second.log'))).toBe(false)
+  })
+  test('a check recorded as the exit begins, before the stops know it: it never launches, and the exit’s wait ends', async () => {
+    const release = join(scripts, 'release-exit-recorded')
+    // Once armed, the check's run is held once written, before the stops know it.
+    let arming = false
+    const reached = Deferred.makeUnsafe<void>()
+    const go = Deferred.makeUnsafe<void>()
+    const seen = await checksEngine(data, undefined, {
+      hold: (at) =>
+        at === 'recorded' && arming
+          ? Effect.gen(function* () {
+              arming = false
+              yield* Deferred.succeed(reached, undefined)
+              yield* Deferred.await(go)
+            })
+          : Effect.void,
+    }).run(({ profile }) =>
+      within(
+        profile,
+        Effect.gen(function* () {
+          const { mission } = yield* launched(work, (projectId) =>
+            saveCheck(projectId, null, check('only', checkLine('only.log', 0, '-', { release }))),
+          )
+          const { grantId } = yield* builderOf(mission.id)
+          yield* call(grantId, 'task_start', { task: 'T1' })
+          arming = true
+          yield* Effect.forkChild(call(grantId, 'task_finished', { task: 'T1', summary: 'CSV.' }))
+          yield* Deferred.await(reached)
+          const lineages = (yield* sessionsIn(SESSION_STATES, {
+            kind: 'mission',
+            missionId: mission.id,
+          })).map((one) => one.lineage)
+          yield* ToolAccess.use((access) => access.exiting(mission.id, lineages))
+          yield* stopAgentRuns(mission.id)
+          let settled = false
+          yield* Effect.forkChild(
+            ToolAccess.use((access) => access.settled(mission.id)).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  settled = true
+                }),
+              ),
+            ),
+          )
+          yield* Deferred.succeed(go, undefined)
+          yield* until(Effect.sync(() => settled))
+          const database = yield* Database
+          return {
+            states: (yield* database.select({ state: commandRuns.state }).from(commandRuns)).map(
+              (row) => row.state,
+            ),
+          }
+        }),
+      ),
+    )
+    writeFileSync(release, '')
+    expect(seen.states).toEqual(['stopped'])
+    expect(existsSync(join(scripts, 'only.log'))).toBe(false)
   })
 })
 

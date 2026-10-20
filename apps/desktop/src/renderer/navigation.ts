@@ -9,7 +9,7 @@
  */
 
 import type { NotificationTarget } from '@hemera/ipc'
-import { Match } from 'effect'
+import { Match, Predicate } from 'effect'
 import {
   AT_BASE,
   closeView,
@@ -159,12 +159,34 @@ export function placeOf(route: Route): SidebarPlace {
   }
 }
 
-/** Settings at a section a link names: a need's "Open Settings", a notification's. */
-export const linkedSettings = (section: AppSection): Route => ({
-  kind: 'settings',
-  section,
-  linked: true,
-})
+/** Where a need's link leads: a section of the application's settings, or of a Project's. */
+export type SettingsPlace = AppSection | { readonly projectId: string; readonly section: string }
+
+/**
+ * Settings at a section a link names: a need's "Open Settings", a notification's; a Project's
+ * settings at their section for a need about one of its settings (#321).
+ */
+export const linkedSettings = (place: SettingsPlace): Route =>
+  Predicate.isString(place)
+    ? { kind: 'settings', section: place, linked: true }
+    : { kind: 'projectSettings', id: place.projectId, section: place.section }
+
+/** The Project a route is of, whose records the window reads: null for the pages that are of none. */
+export function shownProjectOf(route: Route): string | null {
+  switch (route.kind) {
+    case 'project':
+    case 'projectSettings':
+      return route.id
+    case 'chat':
+    case 'livingSpec':
+      return route.projectId
+    default:
+      return null
+  }
+}
+
+/** The chat a route shows, null for every other page. */
+export const openChatOf = (route: Route): string | null => (route.kind === 'chat' ? route.id : null)
 
 /** Whether the section a route shows was opened by a link, so its heading takes the focus. */
 export const focusOf = (route: Route): boolean => route.kind === 'settings' && route.linked === true

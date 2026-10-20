@@ -14,6 +14,13 @@ import type { ToolAnswer } from '../tools/files.ts'
 import { GateGuards, type Guard, type GuardedCall, WriteAttribution } from '../tools/ports.ts'
 import { DocsDesk } from './docs-desk.ts'
 
+/**
+ * Where the mission's Builder stands for the end: a session runs; another brings it back (the
+ * user's Retry of a need about its sessions, or this engine's start); one was started now; none
+ * runs and nothing will start it; or none can be opened, its Building having no Workspace.
+ */
+export type BuilderNow = 'live' | 'waits' | 'started' | 'stopped' | 'no_workspace'
+
 export interface BuildWork {
   readonly read: (grant: Grant, args: ToolArguments<'build_read'>) => Effect.Effect<ToolAnswer>
   readonly start: (grant: Grant, args: ToolArguments<'task_start'>) => Effect.Effect<ToolAnswer>
@@ -34,13 +41,23 @@ export interface BuildWork {
    * Runs again every stale proof and every stale final check of the mission on the current tree
    * (#144, CT-38): #147's end sequence calls it before the mission leaves Building.
    */
-  readonly refreshProofs: (missionId: string) => Effect.Effect<ProofsRefreshed>
+  readonly refreshProofs: (missionId: string) => Effect.Effect<Refreshed>
+  /**
+   * The mission's scenarios an environment need's Retry runs again now, their result not recorded
+   * yet: the end waits for it rather than taking them for stale proofs nothing runs (#306).
+   */
+  readonly rerunning: (missionId: string) => Effect.Effect<ReadonlyArray<string>>
   /**
    * The mission's Builder, resumed when its session ended while its Building is still active:
-   * what #147's exit calls when a late write sends the end back to the Builder. Never while a need
-   * about the Builder's sessions waits on the user (a start, a provider limit): its Retry does.
+   * what #147's end calls while it waits on the Builder. Never while a need about the Builder's
+   * sessions waits on the user (a start, a provider limit): its Retry does; nor before this
+   * engine's start brought its Builders back, before the end's last step.
    */
-  readonly ensureBuilder: (missionId: string) => Effect.Effect<void>
+  readonly ensureBuilder: (missionId: string) => Effect.Effect<BuilderNow>
+  /** Where the mission's Builder stands, with nothing started: never `started`. */
+  readonly builderNow: (missionId: string) => Effect.Effect<BuilderNow>
+  /** Done once this engine's start brought back the Builders it resumes. */
+  readonly resumed: Effect.Effect<void>
   /** The proofs and final checks whose repository moved since they ran, among these (R9). */
   readonly touchedProofs: (
     missionId: string,
@@ -80,6 +97,11 @@ export interface ProofsRefreshed {
   readonly checks: ReadonlyArray<string>
 }
 
+/** A refresh: what it ran again, and the trees its own snapshot took first, which it ran them on. */
+export interface Refreshed extends ProofsRefreshed {
+  readonly trees: ReadonlyArray<{ readonly repository: string; readonly tree: string }>
+}
+
 /** A check's run watched: its locks and trees taken right before its launch, let go at its end. */
 export interface CheckRunWatch {
   /** Takes the locks, then the trees it runs on; a snapshot that fails withdraws the launch. */
@@ -114,7 +136,10 @@ export const buildDeskLayer = Layer.effect(
       summary: (grant, args) => Effect.flatMap(work, (one) => one.summary(grant, args)),
       proofRun: (grant, args) => Effect.flatMap(work, (one) => one.proofRun(grant, args)),
       refreshProofs: (missionId) => Effect.flatMap(work, (one) => one.refreshProofs(missionId)),
+      rerunning: (missionId) => Effect.flatMap(work, (one) => one.rerunning(missionId)),
       ensureBuilder: (missionId) => Effect.flatMap(work, (one) => one.ensureBuilder(missionId)),
+      builderNow: (missionId) => Effect.flatMap(work, (one) => one.builderNow(missionId)),
+      resumed: Effect.flatMap(work, (one) => one.resumed),
       touchedProofs: (missionId, repositories) =>
         Effect.flatMap(work, (one) => one.touchedProofs(missionId, repositories)),
       // Only a mission's write to a path is a claim's business: nothing else waits for the desk.

@@ -102,6 +102,19 @@ describe('The ACP trace of an agent session', () => {
     expect(elided(refusal)).toContain('‹+123 chars›')
   })
 
+  test('a field the SDK left undefined is left out of the trace, as JSON leaves it out', () => {
+    const message: AnyMessage = {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'session/prompt',
+      params: { sessionId: 'native-1', messageId: undefined, stopReason: 'end_turn' },
+    }
+    const line = elided(message)
+    expect(line).toContain('"stopReason":"end_turn"')
+    expect(line).not.toContain('messageId')
+    expect(line).not.toContain('•••')
+  })
+
   test('every message is one line, both ways, with its time, direction, kind, method and id', async () => {
     const data = temporaryFolder('trace')
     await withTraces(data, tracedTurn('session-1', true, 'my private plan'))

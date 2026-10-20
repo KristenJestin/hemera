@@ -1,8 +1,9 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, Reorder, motion, useDragControls } from 'motion/react'
 import type { KeyboardEvent, ReactNode } from 'react'
 
-import { Button } from '../../components/button/button.tsx'
+import { Button, IconButton } from '../../components/button/button.tsx'
 import { Empty } from '../../components/empty/empty.tsx'
 import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
@@ -10,6 +11,7 @@ import { Skeleton } from '../../components/loading/loading.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Select } from '../../components/select/select.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import {
   IconChevronRight,
   IconFileText,
@@ -18,90 +20,21 @@ import {
   IconListCheck,
   IconPlus,
   IconTerminal,
+  IconX,
 } from '../../icons.ts'
 import { arrival, collapse, expand, fold, useTransition } from '../../motion.ts'
 import { type CatalogueChoice, CommandLineField } from './command-line.tsx'
 import { typeIcon } from './command-types.tsx'
-import { Section, SectionRefusal } from './parts.tsx'
-
-/**
- * The checks of a Project, in its settings: what Hemera runs to judge the work, never the agent.
- *
- * A check runs at one moment — after each task, after each requirement, at the end — and the
- * section reads as those moments, in the order they come: under each, its checks in the order they
- * run, one line each. A line is the command's glyph (a free line wears the terminal's), its name,
- * its line in the mono face, where it runs, the number it expects when it expects one, and two
- * marks in columns of their own: it runs only on some of the files the task wrote, it asks before
- * running. The marks are named once, at the head of the columns, by their legends; a line says
- * everything in words to a screen reader. A check is moved within its moment by its handle, with
- * the pointer or the arrows; it changes moment in its dialog.
- *
- * A Project with no check is offered what the catalogue holds, each proposal where it would run,
- * in the quiet tone, with Accept; Accept all stands in the head. Nothing is kept before it is
- * accepted. What arrives or leaves grows and folds on `fold`, pushing what stands under it.
- */
-export type CheckWhen = 'task' | 'requirement' | 'end'
-
-/** Where a check runs: each repository the task changed, the root, or one repository. */
-export type CheckWhere = 'changed' | 'root' | 'repository'
-
-/** A number read in the output: the first group the pattern captures, at least the minimum. */
-export interface CheckExpect {
-  pattern: string
-  minimum: string
-}
-
-export interface SettingsCheck {
-  id: string
-  name: string
-  /** The catalogue command it runs; null for a line of its own. */
-  command: CatalogueChoice | null
-  /** The line of its own; null for a command of the catalogue. */
-  line: string | null
-  where: CheckWhere
-  /** The repository it runs in, by path, when `where` is one repository. */
-  repository: string | null
-  when: CheckWhen
-  /** Null: exit code 0. */
-  expect: CheckExpect | null
-  /** The pattern of the files `{files}` stands for; null when the line has none. */
-  files: string | null
-}
-
-export const MOMENTS: readonly CheckWhen[] = ['task', 'requirement', 'end']
-
-export const MOMENT_WORDS: Record<CheckWhen, string> = {
-  task: 'After each task',
-  requirement: 'After each requirement',
-  end: 'At the end',
-}
-
-/** Where a check runs, as its line says it. */
-export function whereOf(check: Pick<SettingsCheck, 'where' | 'repository'>): string {
-  if (check.where === 'changed') return 'changed repositories'
-  if (check.where === 'root') return 'root'
-  return check.repository ?? ''
-}
-
-/** The line a check runs: its own, or its catalogue command's. */
-export function lineOf(check: Pick<SettingsCheck, 'command' | 'line'>): string {
-  return check.command?.line ?? check.line ?? ''
-}
-
-/** Everything a line shows, in words, for a screen reader. */
-export function wordsOf(check: SettingsCheck): string {
-  return [
-    check.name,
-    check.command === null ? null : 'from the catalogue',
-    lineOf(check),
-    check.where === 'changed' ? 'in each changed repository' : `in ${whereOf(check)}`,
-    check.expect === null ? null : `expects a number of at least ${check.expect.minimum}`,
-    check.files === null ? null : `only on the files matching ${check.files}`,
-    check.command?.askBeforeRunning === true ? 'asks before running' : null,
-  ]
-    .filter((part) => part !== null)
-    .join(', ')
-}
+import { FieldSkeleton, Section, SectionRefusal } from './parts.tsx'
+import {
+  type SettingsCheck,
+  MOMENTS,
+  MOMENT_WORDS,
+  whereOf,
+  lineOf,
+  wordsOf,
+  type CheckDraft,
+} from './checks-model.ts'
 
 const ROW = 'flex min-w-0 items-center gap-1 pl-2'
 
@@ -378,7 +311,7 @@ function Checks({
   const folding = useTransition(fold)
   const ids = checks.map((check) => check.id)
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} propagate>
       {checks.length > 0 && (
         <motion.div
           key="kept"
@@ -395,7 +328,7 @@ function Checks({
             aria-label={label}
             className="flex flex-col"
           >
-            <AnimatePresence initial={false}>
+            <AnimatePresence initial={false} propagate>
               {checks.map((check, index) => (
                 <CheckRow
                   key={check.id}
@@ -420,7 +353,7 @@ function Checks({
           exit={collapse}
           transition={folding}
         >
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} propagate>
             {proposals.map((proposal) => (
               <ProposedCheckRow
                 key={proposal.id}
@@ -432,6 +365,59 @@ function Checks({
         </motion.ul>
       )}
     </AnimatePresence>
+  )
+}
+
+/** How long a proof may run, in minutes, as its field holds it. */
+export interface ProofLimitField {
+  /** What the user wrote, or null for the default. */
+  value: string | null
+  /** The minutes that apply while the field is empty. */
+  fallback: number
+  /** Why the value is refused, in words. */
+  error?: string | undefined
+  /** Null: the limit is on its way. */
+  loading?: boolean | undefined
+  /** What the field now holds; null once it is emptied. */
+  onChange: (value: string | null) => void
+}
+
+const LIMIT_LABEL = 'How long a proof may run'
+
+const LIMIT_GROUP = 'grid grid-cols-1 items-start gap-4 p-4 sm:grid-cols-3'
+
+/** The proof's time limit, in a frame of its own under the checks. */
+function ProofLimit({ field }: { field: ProofLimitField }): ReactNode {
+  return (
+    <Frame>
+      <div className={LIMIT_GROUP} aria-busy={field.loading === true}>
+        {field.loading === true ? (
+          <FieldSkeleton label={LIMIT_LABEL} />
+        ) : (
+          <Input
+            label={LIMIT_LABEL}
+            description="In minutes. Hemera ends a proof that runs longer."
+            placeholder={String(field.fallback)}
+            value={field.value ?? ''}
+            error={field.error}
+            onValueChange={(value) => field.onChange(value.trim() === '' ? null : value)}
+            trailing={
+              field.value === null ? undefined : (
+                <Tooltip label="Back to the default">
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    icon={<IconX size="sm" />}
+                    aria-label="Back to the default time limit of a proof"
+                    onClick={() => field.onChange(null)}
+                  />
+                </Tooltip>
+              )
+            }
+          />
+        )}
+      </div>
+    </Frame>
   )
 }
 
@@ -448,12 +434,15 @@ export interface ChecksSectionProps {
   onReorder: (ids: string[]) => void
   onAccept: (id: string) => void
   onAcceptAll: () => void
+  /** How long a proof may run (#321), under the checks; not shown without it. */
+  proofLimit?: ProofLimitField | undefined
 }
 
 export function ChecksSection({
   checks,
   proposals = [],
   error,
+  proofLimit,
   onOpen,
   onAdd,
   onReorder,
@@ -509,81 +498,98 @@ export function ChecksSection({
         }
       />
       <SectionRefusal error={error} />
-      {(error === undefined || !empty) && (
-        <Frame>
-          {empty ? (
-            <Empty
-              face="asleep"
-              title="No check yet"
-              description="Until a check runs after it, a task is done, not verified."
-              action={add}
-            />
-          ) : (
-            <>
-              <ColumnsHead />
-              {loading ? (
-                <ul aria-label="Checks" aria-busy="true" className="flex flex-col">
-                  <CheckRowSkeleton />
-                  <CheckRowSkeleton />
-                  <CheckRowSkeleton />
-                  <CheckRowSkeleton />
-                </ul>
-              ) : (
-                <AnimatePresence initial={false}>
-                  {lists
-                    .filter((list) => list.checks.length + list.proposals.length > 0)
-                    .map((list) => {
-                      const among = list.checks.map((check) => check.id)
-                      return (
-                        <motion.div
-                          key={list.label}
-                          className="overflow-hidden border-b border-border last:border-b-0"
-                          initial={collapse}
-                          animate={expand}
-                          exit={collapse}
-                          transition={folding}
-                        >
-                          <h3 className={MOMENT}>{list.label}</h3>
-                          <Checks
-                            label={list.label}
-                            checks={list.checks}
-                            proposals={list.proposals}
-                            onOpen={onOpen}
-                            onMove={(id, by) => move(among, id, by)}
-                            onReorder={(next) => onReorder(merge(among, next))}
-                            onAccept={onAccept}
-                          />
-                        </motion.div>
-                      )
-                    })}
-                </AnimatePresence>
-              )}
-            </>
-          )}
-        </Frame>
-      )}
+      {/* Presences that outlive what they hold: the last line folds out with its list while the
+          empty state grows in, and a refusal with nothing to show folds the frame away. */}
+      <AnimatePresence initial={false}>
+        {(error === undefined || !empty) && (
+          <motion.div
+            key="frame"
+            className="overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <Frame>
+              <AnimatePresence initial={false} propagate>
+                {empty ? (
+                  <motion.div
+                    key="empty"
+                    className="overflow-hidden"
+                    initial={collapse}
+                    animate={expand}
+                    exit={collapse}
+                    transition={folding}
+                  >
+                    <Empty
+                      face="asleep"
+                      title="No check yet"
+                      description="Until a check runs after it, a task is done, not verified."
+                      action={add}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="list"
+                    className="overflow-hidden"
+                    initial={collapse}
+                    animate={expand}
+                    exit={collapse}
+                    transition={folding}
+                  >
+                    <ColumnsHead />
+                    {loading ? (
+                      <ul aria-label="Checks" aria-busy="true" className="flex flex-col">
+                        <CheckRowSkeleton />
+                        <CheckRowSkeleton />
+                        <CheckRowSkeleton />
+                        <CheckRowSkeleton />
+                      </ul>
+                    ) : (
+                      <AnimatePresence initial={false} propagate>
+                        {lists
+                          .filter((list) => list.checks.length + list.proposals.length > 0)
+                          .map((list) => {
+                            const among = list.checks.map((check) => check.id)
+                            return (
+                              <motion.div
+                                key={list.label}
+                                className="overflow-hidden border-b border-border last:border-b-0"
+                                initial={collapse}
+                                animate={expand}
+                                exit={collapse}
+                                transition={folding}
+                              >
+                                <h3 className={MOMENT}>{list.label}</h3>
+                                <Checks
+                                  label={list.label}
+                                  checks={list.checks}
+                                  proposals={list.proposals}
+                                  onOpen={onOpen}
+                                  onMove={(id, by) => move(among, id, by)}
+                                  onReorder={(next) => onReorder(merge(among, next))}
+                                  onAccept={onAccept}
+                                />
+                              </motion.div>
+                            )
+                          })}
+                      </AnimatePresence>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Frame>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <p className={NOTE}>
         {proposals.length > 0 &&
           'Hemera proposes these from the catalogue. Nothing is kept until you accept it. '}
         Missions already running keep the checks they were launched with.
       </p>
+      {proofLimit !== undefined && <ProofLimit field={proofLimit} />}
     </Section>
   )
-}
-
-/** What the dialog of a check writes: its catalogue command by id. */
-export type CheckDraft = Omit<SettingsCheck, 'id' | 'command'> & { command: string | null }
-
-/** A check not written yet: a line of its own, after each task, on the changed repositories. */
-export const NEW_CHECK: CheckDraft = {
-  name: '',
-  command: null,
-  line: '',
-  where: 'changed',
-  repository: null,
-  when: 'task',
-  expect: null,
-  files: null,
 }
 
 /** What the engine refuses of a draft, in its words, at the field each concerns. */

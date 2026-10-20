@@ -1,3 +1,4 @@
+import type { KeptAgentView } from '../../blocks/mission/kept-agent-chip.tsx'
 import { type ReactNode, useState } from 'react'
 
 import type { PermissionChoice } from '../../blocks/need/need-card.tsx'
@@ -5,6 +6,7 @@ import type {
   DiscussionHandlers,
   DiscussionItem,
   Finding,
+  PlanningData,
   PlanningHandlers,
   Question,
 } from '../../blocks/planning/planning-types.ts'
@@ -15,7 +17,8 @@ import { MissionFrame } from '../mission/mission-frame.tsx'
 import { AT_BASE, closeView, openView, showView } from '../mission/navigation.ts'
 import * as forYou from './for-you-fixtures.ts'
 import * as moments from './planning-fixtures.ts'
-import { PlanningPage, discussionViewId, probeViewId } from './planning-page.tsx'
+import { PlanningPage } from './planning-page.tsx'
+import { discussionViewId, probeViewId } from './planning-view-ids.ts'
 import { planningViews } from './planning-views.tsx'
 
 /** The moments of the journey a story can show, by name. */
@@ -59,6 +62,8 @@ export interface PlanningScreenProps extends PlanningHandlers, DiscussionHandler
   opened?: string | undefined
   /** Why the page stopped following the engine after it was drawn. */
   failure?: string | undefined
+  /** Agents Hemera started before its last restart and could not stop. */
+  kept?: readonly KeptAgentView[] | undefined
   onPermission: (id: string, choice: PermissionChoice) => void
   onFreeze: () => void
   onRetry: () => void
@@ -117,24 +122,8 @@ function played(
   })
 }
 
-/**
- * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
- * renderer draws above it (the ball without the face, no Now line: the stage card says it), the
- * page as its base, and the views it opens over it — a discussion, a Probe's report. The story's
- * engine takes the answers, the permissions and the dismissals.
- */
-export function PlanningScreen({
-  moment,
-  opened,
-  failure,
-  onFreeze,
-  onRetry,
-  onPermission,
-  onSay,
-  onAccept,
-  onClose,
-  ...handlers
-}: PlanningScreenProps): ReactNode {
+/** The moment played: what the user answered, held, allowed and dismissed is taken into it. */
+function usePlayed(moment: PlanningScreenProps['moment'], handlers: PlanningHandlers) {
   const [taken, setTaken] = useState<ReadonlyMap<string, Given>>(new Map())
   const [held, setHeld] = useState<ReadonlyMap<string, string | null>>(new Map())
   const [allowed, setAllowed] = useState<ReadonlySet<string>>(new Set())
@@ -155,18 +144,23 @@ export function PlanningScreen({
     handlers.onDismissFinding(findingId).then(() => {
       setDismissed((before) => new Set(before).add(findingId))
     })
+  const allow = (needId: string): void => setAllowed((before) => new Set(before).add(needId))
+  return { shown, answer, waitOnSomeone, dismissFinding, allow }
+}
+
+/** The views over the page: which are open, a discussion about to start, and a Probe's report. */
+function useFrame(
+  opened: PlanningScreenProps['opened'],
+  discussions: PlanningData['discussions'] | undefined,
+  handlers: PlanningHandlers,
+) {
   const [frame, setFrame] = useState(() =>
     opened === undefined ? AT_BASE : openView(AT_BASE, opened),
   )
   const [starting, setStarting] = useState<DiscussionItem | null>(null)
-  const data = shown?.data ?? null
-  const head = shown?.head ?? { now: null, frozen: false }
-  const line = shown === null ? null : planningNow(shown)
-  const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
-
   const discuss = (item: DiscussionItem): void => {
     handlers.onDiscuss(item)
-    if (!data?.discussions.some((one) => one.item.kind === item.kind && one.item.id === item.id)) {
+    if (!discussions?.some((one) => one.item.kind === item.kind && one.item.id === item.id)) {
       setStarting(item)
     }
     setFrame((now) => openView(now, discussionViewId(item)))
@@ -175,6 +169,45 @@ export function PlanningScreen({
     handlers.onOpenProbe(id)
     setFrame((now) => openView(now, probeViewId(id)))
   }
+  return { frame, setFrame, starting, discuss, openProbe }
+}
+
+/** What the mission frame says above the page: its head, the Freeze it offers, and the ball. */
+function headingOf(shown: ReturnType<typeof usePlayed>['shown']) {
+  const head = shown?.head ?? { now: null, frozen: false }
+  const line = shown === null ? null : planningNow(shown)
+  const freeze = shown === null ? { shown: false as const } : freezeOf(shown)
+  const ball = (shown?.needs.length ?? 0) > 0 ? ('you' as const) : (line?.ball ?? 'idle')
+  return { head, freeze, ball }
+}
+
+/**
+ * The Planning page of ACME-12 in its mission frame, at one moment of the journey: the head the
+ * renderer draws above it (the ball without the face, no Now line: the stage card says it), the
+ * page as its base, and the views it opens over it — a discussion, a Probe's report. The story's
+ * engine takes the answers, the permissions and the dismissals.
+ */
+export function PlanningScreen({
+  moment,
+  opened,
+  failure,
+  kept,
+  onFreeze,
+  onRetry,
+  onPermission,
+  onSay,
+  onAccept,
+  onClose,
+  ...handlers
+}: PlanningScreenProps): ReactNode {
+  const { shown, answer, waitOnSomeone, dismissFinding, allow } = usePlayed(moment, handlers)
+  const data = shown?.data ?? null
+  const { frame, setFrame, starting, discuss, openProbe } = useFrame(
+    opened,
+    data?.discussions,
+    handlers,
+  )
+  const { head, freeze, ball } = headingOf(shown)
 
   const views = planningViews({
     discussions: data?.discussions ?? [],
@@ -194,7 +227,7 @@ export function PlanningScreen({
       stage={head.frozen ? 'Ready' : 'Planning'}
       frozen={head.frozen}
       type="feature"
-      ball={(shown?.needs.length ?? 0) > 0 ? 'you' : (line?.ball ?? 'idle')}
+      ball={ball}
       ballFace={false}
       marks={head.outdated === true ? [{ kind: 'outdated' }] : []}
       ticket={{ key: 'acme/shop#41' }}
@@ -210,12 +243,13 @@ export function PlanningScreen({
           data={data}
           error={moment === 'error' ? 'The engine did not answer in time.' : failure}
           planner={shown?.planner}
+          kept={kept}
           declaredComplete={shown?.declaredComplete}
           needs={shown?.needs}
           onNeed={(id) => ({
             onPermission: (choice) => {
               onPermission(id, choice)
-              setAllowed((before) => new Set(before).add(id))
+              allow(id)
             },
           })}
           mentionables={MENTIONABLES}

@@ -1,0 +1,83 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 5 items
+
+tests/test_export.py FFFFF                                               [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:4: AssertionError
+_________________________________ test_chained _________________________________
+
+    def test_chained():
+        try:
+>           assert 1 == 2, "the invoice is not saved"
+E           AssertionError: the invoice is not saved
+E           assert 1 == 2
+
+tests/test_export.py:8: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+    def test_chained():
+        try:
+            assert 1 == 2, "the invoice is not saved"
+        except AssertionError:
+>           raise RuntimeError("cleanup failed")
+E           RuntimeError: cleanup failed
+
+tests/test_export.py:10: RuntimeError
+_____________________________ test_chained_reverse _____________________________
+
+    def test_chained_reverse():
+        try:
+>           {}["x"]
+E           KeyError: 'x'
+
+tests/test_export.py:14: KeyError
+
+During handling of the above exception, another exception occurred:
+
+    def test_chained_reverse():
+        try:
+            {}["x"]
+        except KeyError:
+>           assert 1 == 2, "after a key error"
+E           AssertionError: after a key error
+E           assert 1 == 2
+
+tests/test_export.py:16: AssertionError
+_______________________________ test_unsuffixed ________________________________
+
+    def test_unsuffixed():
+        print("AssertionError: printed by the test")
+>       raise NotFound("toMarkdown")
+E       test_export.NotFound: toMarkdown
+
+tests/test_export.py:23: NotFound
+----------------------------- Captured stdout call -----------------------------
+AssertionError: printed by the test
+_______________________________ test_logs_assert _______________________________
+
+    def test_logs_assert():
+        import logging
+        logging.getLogger("app").error("E   assert something")
+>       raise TypeError("x")
+E       TypeError: x
+
+tests/test_export.py:28: TypeError
+------------------------------ Captured log call -------------------------------
+ERROR    app:test_export.py:27 E   assert something
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_export.py::test_chained - RuntimeError: cleanup failed
+FAILED tests/test_export.py::test_chained_reverse - AssertionError: after a k...
+FAILED tests/test_export.py::test_unsuffixed - test_export.NotFound: toMarkdown
+FAILED tests/test_export.py::test_logs_assert - TypeError: x
+============================== 5 failed in 0.04s ===============================

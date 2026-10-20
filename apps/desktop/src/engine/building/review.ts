@@ -23,10 +23,11 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join, relative, resolve, sep } from 'node:path'
+import { type PlatformPath, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 
 import {
+  MaskedText,
   REVIEW_SEVERITIES,
   REVIEWERS,
   REVIEWER_NAMES,
@@ -34,6 +35,7 @@ import {
   type Reviewer,
   type ToolArguments,
   findingProblem,
+  repositoriesOfPath,
   sensitivePlace,
 } from '@hemera/core/domain'
 import { and, eq, inArray } from 'drizzle-orm'
@@ -54,6 +56,7 @@ import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
+import type { CancelIn } from '../missions.ts'
 import { Memory } from '../memory/index.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { Secrets } from '../secrets.ts'
@@ -122,6 +125,30 @@ export const reviewFolderOf = (dataFolder: string, buildingId: string): string =
 export const repositoryFolderOf = (folder: string, repository: string): string =>
   repository === ROOT_REPOSITORY ? folder : join(folder, repository)
 
+/**
+ * Whether a path a reviewer names is a file inside a repository's copy: never the copy itself, a
+ * place above it, nor one on another drive. `paths` is the platform's path module.
+ */
+export const insideCopy = (
+  root: string,
+  named: string,
+  paths: Pick<PlatformPath, 'resolve' | 'relative' | 'isAbsolute' | 'sep'> = {
+    resolve,
+    relative,
+    isAbsolute,
+    sep,
+  },
+): boolean => {
+  const inside = paths.relative(root, paths.resolve(root, named))
+  return (
+    inside !== '' &&
+    !inside.startsWith(`..${paths.sep}`) &&
+    inside !== '..' &&
+    // On Windows, another drive has no relative path: `relative` answers it whole.
+    !paths.isAbsolute(inside)
+  )
+}
+
 /** What a reviewer that ended a turn without its report is told, once per session. */
 export const END_WITH_REVIEW_REPORT =
   'End with review_report: every finding of your pass, each with its severity and evidence, or an empty list. Your report is the only thing you return.'
@@ -149,6 +176,16 @@ const placeSaid = (repository: string): string =>
 
 const fileSaid = (repository: string, path: string): string =>
   repository === ROOT_REPOSITORY ? path : `${repository}/${path}`
+
+/** A file a reviewer names, as the checkpoint lists it: forward slashes, no leading `./`. */
+const pathOf = (named: string): string => named.replaceAll('\\', '/').replace(/^\.\//, '')
+
+/**
+ * Whether a reviewer is kept from a file's content, in `checkpoint_read` and in the copy alike: a
+ * sensitive place, the `.env` templates included, which sometimes hold real values.
+ */
+export const withheldFromReviewers = (path: string): boolean =>
+  sensitivePlace(path, { home: homedir(), platform: process.platform }) !== null
 
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
@@ -212,6 +249,36 @@ type Needs =
   | AutomationGate
   | Memory
   | ReviewDesk
+
+/** Hemera's own words: nothing in them to mask. */
+const MISSION_CANCELLED = MaskedText.make('the mission was cancelled')
+
+/**
+ * A cancelled mission's review passes, waiting or running, end as failed in the cancel's own
+ * transaction (#378): a start never relaunches one, and the tree's stop ends their sessions.
+ */
+export const cancelReviewIn: CancelIn = (transaction, missionId) =>
+  transaction
+    .update(reviewPasses)
+    .set({ state: 'failed', failure: MISSION_CANCELLED, endedAt: now() })
+    .where(
+      and(
+        eq(reviewPasses.missionId, missionId),
+        inArray(reviewPasses.state, ['waiting', 'running']),
+      ),
+    )
+    .returning()
+    .pipe(
+      Effect.mapError(refusedWhile('failing the review’s passes')),
+      Effect.map((rows) =>
+        rows.map((row) =>
+          buildingEvent(row.missionId, 'review.pass_ended', {
+            reviewer: row.reviewer,
+            failed: MISSION_CANCELLED,
+          }),
+        ),
+      ),
+    )
 
 export const autoReviewLayer = (settings: AutoReviewSettings) =>
   Layer.effect(
@@ -501,24 +568,25 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
           /** Whether a file is in the checkpoint: changed there, or in the copy of its trees. */
           const inCopy = (repository: string, path: string) => {
             const root = repositoryFolderOf(folder, repository)
-            const file = resolve(root, path)
-            const inside = relative(root, file)
-            return (
-              inside !== '' && !inside.startsWith(`..${sep}`) && inside !== '..' && existsSync(file)
-            )
+            return insideCopy(root, path) && existsSync(resolve(root, path))
           }
+          /** The repositories a path without one may be in, by the checkpoint's changed files. */
+          const choices = (path: string) =>
+            repositoriesOfPath(repositories, (one) =>
+              files.some((file) => file.repository === one && file.path === pathOf(path)),
+            )
           const listed = (repository: string | null, path: string) => {
             const named = repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '')
             const where =
               named === undefined ? repositories : repositories.filter((one) => one === named)
             return where.some(
               (one) =>
-                files.some((file) => file.repository === one && file.path === path) ||
-                inCopy(one, path),
+                files.some((file) => file.repository === one && file.path === pathOf(path)) ||
+                inCopy(one, pathOf(path)),
             )
           }
           for (const [at, finding] of args.findings.entries()) {
-            const problem = findingProblem(finding, listed)
+            const problem = findingProblem(finding, listed, choices)
             if (problem !== null) {
               return refusal(`refused: finding ${String(at + 1)}: ${problem}. Nothing was kept.`)
             }
@@ -551,8 +619,9 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
                       requirement: finding.requirement ?? null,
                       scenario: finding.scenario ?? null,
                       repository:
-                        finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ?? null,
-                      path: finding.path?.replaceAll('\\', '/') ?? null,
+                        finding.repository?.replace(/^\.\//, '').replace(/[\\/]+$/, '') ??
+                        (finding.path === undefined ? null : (choices(finding.path)[0] ?? null)),
+                      path: finding.path === undefined ? null : pathOf(finding.path),
                       line: finding.line ?? null,
                       text: secrets.mask(finding.text.trim()),
                       contradictsSpec: finding.contradicts_spec,
@@ -636,15 +705,21 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
               ),
             )
           }
-          const path = args.path.replaceAll('\\', '/').replace(/^\.\//, '')
-          const place =
-            repositories.find((one) =>
-              files.some((file) => file.repository === one.repository && file.path === path),
-            ) ?? repositories[0]
+          const path = pathOf(args.path)
+          const among = repositoriesOfPath(
+            repositories.map((one) => one.repository),
+            (repository) =>
+              files.some((file) => file.repository === repository && file.path === path),
+          )
+          if (among.length > 1) {
+            return refusal(
+              `refused: ${path} names no single repository: say which, one of ${among.map(placeSaid).join(', ')}`,
+            )
+          }
+          const place = repositories.find((one) => one.repository === among[0])
           if (place === undefined) return refusal('refused: the checkpoint has no repository')
           const where = fileSaid(place.repository, path)
-          const machine = { home: homedir(), platform: process.platform }
-          if (sensitivePlace(path, machine) !== null) return answered(`content withheld: ${path}`)
+          if (withheldFromReviewers(path)) return answered(`content withheld: ${path}`)
           const diff = yield* checkpoints.diff(pass.checkpointId, place.repository, path)
           const text = (side: { readonly content: Uint8Array | null } | null) =>
             side?.content == null ? null : Buffer.from(side.content).toString('utf8')
@@ -723,21 +798,6 @@ export const autoReviewLayer = (settings: AutoReviewSettings) =>
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             const payload = event.payload
-            if (event.type === 'mission.cancelled') {
-              const database = yield* Database
-              const going = yield* database
-                .select()
-                .from(reviewPasses)
-                .where(
-                  and(
-                    eq(reviewPasses.missionId, event.entityId),
-                    inArray(reviewPasses.state, ['waiting', 'running']),
-                  ),
-                )
-                .pipe(Effect.mapError(refusedWhile('reading the review’s passes')))
-              for (const row of going) yield* fail(row.id, 'the mission was cancelled')
-              return
-            }
             if (event.type !== 'session.stopped') return
             if (!REVIEWERS.some((one) => one === payload['role'])) return
             // Ended too: a pass that reported is done before its session ends.

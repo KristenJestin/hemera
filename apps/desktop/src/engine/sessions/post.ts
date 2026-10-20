@@ -8,6 +8,7 @@
 import { Context, Deferred, Effect, Layer, PubSub, Stream } from 'effect'
 
 import type { NeedHandler } from '../needs.ts'
+import { instant } from './instants.ts'
 import type { SessionOwner } from './roles.ts'
 
 /** An urgent delivery, as a session's next tool result carries it. */
@@ -46,8 +47,15 @@ export class SessionPost extends Context.Service<
     ) => Effect.Effect<void>
     /** Whether a session of the mission is in a turn now. */
     readonly working: (missionId: string) => Effect.Effect<boolean>
-    /** Each turn as it begins and ends, by its session: what a Chat's transcript follows. */
-    readonly turns: Stream.Stream<{ readonly sessionId: string; readonly on: boolean }>
+    /**
+     * Each turn as it begins and ends, by its session, at the moment it does: what a Chat's
+     * transcript follows. That moment is taken before the session sends anything next.
+     */
+    readonly turns: Stream.Stream<{
+      readonly sessionId: string
+      readonly on: boolean
+      readonly at: string
+    }>
     /**
      * The owner of the needs a session gives (#41): the needs register it below the sessions,
      * which put their handler here once they run.
@@ -74,7 +82,11 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
   const stopper = yield* Deferred.make<(owner: SessionOwner) => Effect.Effect<void>>()
   const turns = new Map<string, string | null>()
   const lockWaits = new Map<string, number>()
-  const turned = yield* PubSub.unbounded<{ readonly sessionId: string; readonly on: boolean }>()
+  const turned = yield* PubSub.unbounded<{
+    readonly sessionId: string
+    readonly on: boolean
+    readonly at: string
+  }>()
   const handler = yield* Deferred.make<NeedHandler>()
   const waits = new Map<string, string>()
   return {
@@ -96,7 +108,7 @@ const makeSessionPost: Effect.Effect<SessionPost['Service']> = Effect.gen(functi
       Effect.suspend(() => {
         if (on) turns.set(sessionId, missionId)
         else turns.delete(sessionId)
-        return Effect.asVoid(PubSub.publish(turned, { sessionId, on }))
+        return Effect.asVoid(PubSub.publish(turned, { sessionId, on, at: instant() }))
       }),
     working: (missionId) => Effect.sync(() => [...turns.values()].includes(missionId)),
     turns: Stream.fromPubSub(turned),

@@ -1,0 +1,49 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ × export.test.ts > export > saves 5ms
+   → expected 1 to be 2 // Object.is equality
+ ✓ export.test.ts > export > keeps 0ms
+ × export.test.ts > export > throws 0ms
+   → missing.run is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  export.test.ts > export > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ export.test.ts:5:15
+      3| describe('export', () => {
+      4|   test('saves', () => {
+      5|     expect(1).toBe(2)
+       |               ^
+      6|   })
+      7|   test('keeps', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  export.test.ts > export > throws
+TypeError: missing.run is not a function
+ ❯ export.test.ts:13:50
+     11|     const missing: { run?: () => void } = {}
+     12|     missing.run?.call(null)
+     13|     ;(missing as unknown as { run: () => void }).run()
+       |                                                  ^
+     14|   })
+     15| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  12:10:07
+   Duration  113ms (transform 46%, import 24%, tests 21%, worker 9%)
+
+JSON report written to /tmp/hemera-report/report.json

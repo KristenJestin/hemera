@@ -1,7 +1,7 @@
 import type { NeedRow } from '../../blocks/need/needs-you-list.tsx'
 import type { Question } from '../../blocks/planning/planning-types.ts'
 import type { FaceState } from '../../components/face/states.ts'
-import type { MarkState } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
 
 /**
  * What the Review page, its round view and Ship draw, as #254 proposes them: plain values, in the

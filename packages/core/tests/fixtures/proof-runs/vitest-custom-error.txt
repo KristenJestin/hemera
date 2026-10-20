@@ -1,0 +1,51 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ export.test.ts (3 tests | 3 failed) 85ms
+   × one is one 73ms
+   × saves 1ms
+   × loads 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  export.test.ts > one is one
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ export.test.ts:3:38
+      1| import { expect, test } from 'vite-plus/test'
+      2| class NotImplemented extends Error { override name = 'NotImplemented' }
+      3| test('one is one', () => { expect(1).toBe(2) })
+       |                                      ^
+      4| test('saves', () => { throw new NotImplemented('toMarkdown') })
+      5| test('loads', () => { throw { code: 42 } })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  export.test.ts > saves
+NotImplemented: toMarkdown
+ ❯ export.test.ts:4:29
+      2| class NotImplemented extends Error { override name = 'NotImplemented' }
+      3| test('one is one', () => { expect(1).toBe(2) })
+      4| test('saves', () => { throw new NotImplemented('toMarkdown') })
+       |                             ^
+      5| test('loads', () => { throw { code: 42 } })
+      6|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  export.test.ts > loads
+{ code: 42, stacks: [] }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  10:53:27
+   Duration  1.07s (transform 46%, import 31%, tests 20%, worker 2%)
+

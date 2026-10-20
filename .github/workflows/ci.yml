@@ -3,7 +3,15 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'feature/**']
+
+# One run per ref at a time: a newer push to a branch, or to a pull request's branch, cancels the
+# run of the older one still in progress. A push to a branch and the pull request opened from it
+# are two refs (`refs/heads/x`, `refs/pull/n/merge`), so neither cancels the other. A cancelled
+# run cannot leave a required `verify (…)` green: see `ubuntu-result` and `windows-result` below.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   commit-messages:
@@ -15,16 +23,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.21.0
-      # The first push of a branch has no `before` (GitHub sends forty zeros): every commit the
-      # branch holds is checked then, which for the first push of the repository is its first.
+      # The first push of a branch has no `before` (GitHub sends forty zeros). The branch is then
+      # checked against the other branch of the repository it is closest to, so it answers for
+      # the commits it brings and not for the history it was cut from: that history holds
+      # squashed pull request titles from before this check, and a new `feature/<topic>` would
+      # fail on them. With no other branch (the first push of the repository), every commit.
       - name: Check the Angular commit convention
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
           head="${{ github.event.pull_request.head.sha || github.sha }}"
-          if [ -z "${base//0/}" ]; then
+          if [ -n "${base//0/}" ]; then
+            node tools/commit-message.ts --range "$base..$head"
+            exit
+          fi
+          closest=""
+          fewest=""
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
+            case "$ref" in origin/HEAD | "origin/$BRANCH") continue ;; esac
+            ahead=$(git rev-list --count "$head" --not "$ref")
+            if [ -z "$fewest" ] || [ "$ahead" -lt "$fewest" ]; then
+              closest="$ref"
+              fewest="$ahead"
+            fi
+          done
+          if [ -z "$closest" ]; then
             node tools/commit-message.ts --range "$head"
           else
-            node tools/commit-message.ts --range "$base..$head"
+            node tools/commit-message.ts --range "$closest..$head"
           fi
 
   # React Doctor, the React-specific check: on a pull request it reads only the files the change
@@ -64,12 +91,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-  verify:
+  # Ubuntu runs the same work as Windows below, split over five runners side by side: the static
+  # checks, the stories, and the repository suites in three parts. On one runner they took 576 to
+  # 895 s (#377): the stories' two Chromiums and the repository suites ran in one Vitest process
+  # and shared its four processors (the stories ended at 200 to 280 s, the suites alone then ran
+  # to 570 to 890 s), and the suites' two slowest files (`building-end` and `building-proofs`, 390
+  # and 380 s in that run) bound how short a part can get. Each part sets up on its own, and `verify (ubuntu-latest)`
+  # below is green only when all five are.
+  ubuntu:
+    name: ubuntu (${{ matrix.part }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        part: [checks, stories, repository 1/3, repository 2/3, repository 3/3]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,15 +134,19 @@ jobs:
         working-directory: source/apps/desktop
         run: pnpm exec install-electron
 
-      - working-directory: source
+      - if: matrix.part == 'checks'
+        working-directory: source
         run: pnpm typecheck
-      - working-directory: source
+      - if: matrix.part == 'checks'
+        working-directory: source
         run: pnpm lint
-      - working-directory: source
+      - if: matrix.part == 'checks'
+        working-directory: source
         run: pnpm fmt:check
       # The stories run as tests in a headless Chromium that Playwright downloads on demand; it
       # is cached like the Electron binary so no run fetches a browser twice.
       - name: Cache the Playwright browser
+        if: matrix.part == 'stories'
         uses: actions/cache@v4
         with:
           path: |
@@ -115,6 +154,7 @@ jobs:
             ~/AppData/Local/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('source/pnpm-lock.yaml') }}
       - name: Fetch the Playwright browser
+        if: matrix.part == 'stories'
         working-directory: source/packages/ui
         run: pnpm exec playwright install chromium --with-deps
 
@@ -124,23 +164,52 @@ jobs:
       # The suites that need a window run in the `e2e` job below. The stories run headless,
       # which is a page and not a window.
       #
-      # The step is capped: a suite that hangs fails this in twenty minutes rather than in the
-      # fifty a Windows job once sat for, and the suites' own timeouts catch what really stalls.
-      - name: Test
+      # Each step is capped, so that a part that hangs fails in minutes rather than in the fifty a
+      # Windows job once sat for; the suites' own timeouts catch what really stalls. A cap sits
+      # well above what the step takes: the stories ended in 200 to 280 s (#377) even with the
+      # suites beside them.
+      #
+      # Vitest splits the repository suites in three by their files, on the time each took
+      # (`tools/test-shards.ts`, the same table as Windows): the three parts together run every
+      # file, each once.
+      - name: Test the repository suites
+        if: startsWith(matrix.part, 'repository')
         working-directory: source
         timeout-minutes: 20
-        run: pnpm test
+        shell: bash
+        env:
+          PART: ${{ matrix.part }}
+        run: pnpm test --project repository --shard="${PART#repository }"
+      - name: Test the stories
+        if: matrix.part == 'stories'
+        working-directory: source
+        timeout-minutes: 15
+        run: pnpm test --project storybook-light --project storybook-dark
 
-  # Windows runs the same work as `verify` above, split over three runners side by side. On one
+  # The check the branch rules require, under the name it had when one runner did it all. Like
+  # `verify (windows-latest)` below, it is green only when every part is, and `always()` is what
+  # keeps it honest: a run that is cancelled still runs it, `needs.ubuntu.result` reads
+  # `cancelled`, and the step fails (`!cancelled()` would skip it, and a skipped required check
+  # counts as passed).
+  ubuntu-result:
+    name: verify (ubuntu-latest)
+    needs: ubuntu
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every Ubuntu part passed
+        run: test "${{ needs.ubuntu.result }}" = success
+
+  # Windows runs the same work as `ubuntu` above, split over four runners side by side. On one
   # runner it took 23 to 26 minutes (#277): its four processors were full for the whole of the
   # repository suites, so the time was the sum of every test, not one slow test. Each part sets
-  # up on its own, and `verify (windows-latest)` below is green only when all three are.
+  # up on its own, and `verify (windows-latest)` below is green only when all four are.
   windows:
     name: windows (${{ matrix.part }})
     strategy:
       fail-fast: false
       matrix:
-        part: [checks and stories, repository 1/2, repository 2/2]
+        part: [checks and stories, repository 1/3, repository 2/3, repository 3/3]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -228,20 +297,39 @@ jobs:
       # for without a limit. `tools/stories-watchdog.ts` fails the run after ninety seconds
       # without a finished file and names the file; the cap stays for what happens before that.
       #
-      # Vitest splits the repository suites in two by their files: the two halves together run
-      # every file, each once.
+      # Vitest splits the repository suites in three by their files: the three parts together run
+      # every file, each once. The split follows the time each file took on these runners
+      # (`tools/test-shards.ts`), not the hash of its path, which had put the two slowest files
+      # in the same half of two: that half took 13 to 15 minutes, the other 8 to 10 (#359).
       - name: Test the repository suites
         if: startsWith(matrix.part, 'repository')
         working-directory: source
         timeout-minutes: 30
-        run: pnpm test --project repository --shard=${{ matrix.part == 'repository 1/2' && '1/2' || '2/2' }}
+        shell: bash
+        env:
+          PART: ${{ matrix.part }}
+        run: pnpm test --project repository --shard="${PART#repository }"
+      #
+      # The stall itself is not explained (#294). `@vitest/browser` waits on the iframe's `load`
+      # and, once the run is acknowledged, on `response:execute`, neither with a timer; which one
+      # never comes on the runner is not known. Its debug output says it: `VITEST_BROWSER_DEBUG`
+      # logs the orchestrator's lines (iframe created, loaded, the events it receives) and
+      # `DEBUG` adds the server's (the browser connecting, the heartbeats). Only the log changes:
+      # no cap, no retry, no skip.
       - name: Test the stories
         if: matrix.part == 'checks and stories'
         working-directory: source
         timeout-minutes: 15
+        env:
+          VITEST_BROWSER_DEBUG: 'true'
+          DEBUG: 'vitest:browser:*'
         run: pnpm test --project storybook-light --project storybook-dark
 
   # The check the branch rules require, under the name it had when one runner did it all.
+  #
+  # `always()` is what keeps it honest: on a run that is cancelled (by a newer push, or by hand)
+  # the job still runs, `needs.windows.result` reads `cancelled`, and the step fails. With
+  # `!cancelled()` the job would be skipped, and GitHub counts a skipped required check as passed.
   windows-result:
     name: verify (windows-latest)
     needs: windows

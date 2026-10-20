@@ -118,6 +118,11 @@ import {
   IconLayoutColumns as TablerLayoutColumns,
   IconLayoutRows as TablerLayoutRows,
   IconMessagePlus as TablerMessagePlus,
+  IconBrandBitbucket as TablerBrandBitbucket,
+  IconGitCommit as TablerGitCommit,
+  IconGitMerge as TablerGitMerge,
+  IconGitPullRequest as TablerGitPullRequest,
+  IconTag as TablerTag,
   IconAt as TablerAt,
   IconShieldCheck as TablerShieldCheck,
   IconShieldCheckFilled as TablerShieldCheckFilled,
@@ -332,6 +337,19 @@ export const IconLayoutColumns = catalogued(
 )
 export const IconLayoutRows = catalogued(TablerLayoutRows, TablerLayoutRows, 'IconLayoutRows')
 export const IconMessagePlus = catalogued(TablerMessagePlus, TablerMessagePlus, 'IconMessagePlus')
+export const IconBrandBitbucket = catalogued(
+  TablerBrandBitbucket,
+  TablerBrandBitbucket,
+  'IconBrandBitbucket',
+)
+export const IconGitCommit = catalogued(TablerGitCommit, TablerGitCommit, 'IconGitCommit')
+export const IconGitMerge = catalogued(TablerGitMerge, TablerGitMerge, 'IconGitMerge')
+export const IconGitPullRequest = catalogued(
+  TablerGitPullRequest,
+  TablerGitPullRequest,
+  'IconGitPullRequest',
+)
+export const IconTag = catalogued(TablerTag, TablerTag, 'IconTag')
 
 /**
  * A mark Tabler does not draw, vendored as the one path it is (design D17-11).

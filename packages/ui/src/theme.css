@@ -243,6 +243,10 @@
 
   --shadow-sm: var(--shadow);
   --shadow-lg: var(--shadow-raised);
+
+  /* As wide as what a popup hangs off: Base UI sets `--anchor-width` on the popup's positioner,
+     so it is read where the popup is drawn, and kept a `var()` here for that. */
+  --spacing-anchor: var(--anchor-width);
 }
 
 /* ---- The scales, the same under both themes ---- */

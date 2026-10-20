@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
-import { validateBranch, validateCommitMessage } from './commit-message.ts'
+import {
+  validateBranch,
+  validateCommitMessage,
+  validatePullRequestDescription,
+} from './commit-message.ts'
 
 const repository = resolve(import.meta.dirname, '..')
 
@@ -142,6 +146,111 @@ describe('Commit hors convention', { timeout: 60_000 }, () => {
   test('comment lines added by git are ignored', () => {
     const message = 'feat(core): add a session entity\n\n# Please enter the commit message'
     expect(validateCommitMessage(message).ok).toBe(true)
+  })
+})
+
+const SUBJECT = 'feat(core): add a session entity'
+const CLAUDE_TRAILER = 'Co-authored-by: Claude <noreply@anthropic.com>'
+const FOOTER = '🤖 Generated with [Claude Code](https://claude.com/claude-code)'
+
+describe('Claude attribution in a commit message', () => {
+  test('a Co-authored-by trailer naming Claude is refused, naming the line', () => {
+    const result = validateCommitMessage(`${SUBJECT}\n\nWhy.\n\n${CLAUDE_TRAILER}`)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain(CLAUDE_TRAILER)
+    expect(result.error).toContain('remove')
+  })
+
+  test('a Co-authored-by trailer naming a Claude model is refused', () => {
+    const line = 'Co-Authored-By: Claude Opus 4.5 <someone@example.invalid>'
+    const result = validateCommitMessage(`${SUBJECT}\n\n${line}`)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain(line)
+  })
+
+  test('a Co-authored-by trailer at noreply@anthropic.com under another name is refused', () => {
+    const line = 'co-authored-by: Assistant <NoReply@Anthropic.com>'
+    const result = validateCommitMessage(`${SUBJECT}\n\n${line}`)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain(line)
+  })
+
+  test.each([
+    ['with its emoji and its link', FOOTER],
+    ['with its link and no emoji', 'Generated with [Claude Code](https://claude.com/claude-code)'],
+    ['with its emoji and no link', '🤖 Generated with [Claude Code]'],
+    ['with neither', 'Generated with [Claude Code]'],
+  ])('the "Generated with [Claude Code]" line %s is refused, naming the line', (_name, line) => {
+    const result = validateCommitMessage(`${SUBJECT}\n\nWhy.\n\n${line}`)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain(line)
+    expect(result.error).toContain('remove')
+  })
+
+  test('a Co-authored-by trailer naming a person is accepted', () => {
+    const message = `${SUBJECT}\n\nCo-authored-by: Ada Example <ada@example.invalid>`
+    expect(validateCommitMessage(message).ok).toBe(true)
+  })
+
+  test('a body that only talks about Claude Code is accepted', () => {
+    const message = `${SUBJECT}\n\nClaude Code writes a Generated with line that this rule refuses.`
+    expect(validateCommitMessage(message).ok).toBe(true)
+  })
+
+  test('the commit-msg hook refuses a commit carrying the trailer', { timeout: 60_000 }, () => {
+    const path = repositoryWithHooks()
+    try {
+      git(path, 'checkout', '-b', 'feature/sessions', 'dev')
+      const result = commit(path, `${SUBJECT}\n\n${CLAUDE_TRAILER}`, 'd.txt')
+      expect(result.code).not.toBe(0)
+      expect(result.output).toContain(CLAUDE_TRAILER)
+    } finally {
+      rmSync(path, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Claude attribution in a pull request description', () => {
+  test.each([
+    ['the trailer', CLAUDE_TRAILER],
+    ['the footer', FOOTER],
+  ])('a description holding %s is refused, naming the line', (_name, line) => {
+    const result = validatePullRequestDescription(`I add the entity.\n\n${line}\n\nCloses #12`)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain(line)
+    expect(result.error).toContain('remove')
+  })
+
+  test('a description without it is accepted, whatever its subject', () => {
+    const body =
+      'I add the entity.\n\nCo-authored-by: Ada Example <ada@example.invalid>\n\nCloses #12'
+    expect(validatePullRequestDescription(body).ok).toBe(true)
+  })
+
+  test('an empty description is accepted', () => {
+    expect(validatePullRequestDescription('').ok).toBe(true)
+  })
+
+  test('the command line reads the description from a file and refuses the line', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'hemera-description-'))
+    try {
+      const file = join(folder, 'body.md')
+      const run = (body: string) => {
+        writeFileSync(file, body)
+        const result = spawnSync(
+          process.execPath,
+          [join(repository, 'tools', 'commit-message.ts'), '--description', file],
+          { encoding: 'utf8' },
+        )
+        return { code: result.status, output: `${result.stdout}${result.stderr}` }
+      }
+      const refused = run(`I add it.\n\n${FOOTER}\n`)
+      expect(refused.code).toBe(1)
+      expect(refused.output).toContain(FOOTER)
+      expect(run('I add it.\n\nCloses #12\n').code).toBe(0)
+    } finally {
+      rmSync(folder, { recursive: true, force: true })
+    }
   })
 })
 

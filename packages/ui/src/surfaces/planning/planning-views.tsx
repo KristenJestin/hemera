@@ -11,7 +11,7 @@ import { ProbeReport } from '../../blocks/planning/probes.tsx'
 import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { IconMessages, IconTestPipe } from '../../icons.ts'
 import type { MissionView } from '../mission/mission-frame.tsx'
-import { discussionViewId, probeViewId } from './planning-page.tsx'
+import { discussionViewId, probeViewId } from './planning-view-ids.ts'
 
 export interface PlanningViewsOf {
   discussions: readonly Discussion[]

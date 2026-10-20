@@ -11,7 +11,7 @@
  * string takes that type, so a string that skipped masking does not type-check.
  */
 
-import { Brand, Predicate, Schema } from 'effect'
+import { Brand, Effect, Predicate, Schema } from 'effect'
 
 /** What a secret becomes. */
 export const MASK = '•••'
@@ -38,18 +38,14 @@ const PRIVATE_KEY =
  */
 const QUOTED_OR_BARE = String.raw`"(?:[^"\\]|\\.)*"|'[^']*'`
 
-/**
- * A header whose whole value is a credential, its scheme with its token: as a header line writes
- * it (to the end of the line or of the quotes around it), or as JSON writes it.
+/*
+ * Each shape below hides all it matches but its group `keep`, which begins the match: what names
+ * the credential (a header's name, a scheme, a label) stays readable.
  */
-const CREDENTIAL_HEADER = new RegExp(
-  String.raw`\b(authorization|proxy-authorization|cookie|set-cookie)(["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^"'\r\n]+)`,
-  'gi',
-)
 
 /** A bare `Bearer` credential, and a `Basic` one written as the header writes it. */
-const BEARER = /\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi
-const BASIC = /\b(Basic)\s+[A-Za-z0-9+/]{8,}={0,2}/g
+const BEARER = /\b(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi
+const BASIC = /\b(?<keep>Basic\s+)[A-Za-z0-9+/]{8,}={0,2}/g
 
 /** Tokens recognised by their prefix alone, wherever they stand. */
 const PREFIXED_TOKEN = new RegExp(
@@ -59,41 +55,511 @@ const PREFIXED_TOKEN = new RegExp(
     String.raw`\bgithub_pat_[A-Za-z0-9_]{16,}`,
     String.raw`\bxox[abprs]-[A-Za-z0-9-]{8,}`,
     String.raw`\bglpat-[A-Za-z0-9_-]{16,}`,
+    // Bitbucket app passwords, Atlassian API tokens, Bitbucket Data Center HTTP access tokens.
+    String.raw`\bATBB[A-Za-z0-9]{16,}`,
+    String.raw`\bATATT[A-Za-z0-9_=-]{16,}`,
+    String.raw`\bBBDC-[A-Za-z0-9+/_=-]{16,}`,
     String.raw`\bAKIA[0-9A-Z]{16}`,
-    String.raw`\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`,
   ].join('|'),
   'g',
 )
 
+/*
+ * The shapes below begin only where a run of the characters they cross begins (a lookbehind):
+ * begun at each word of a run instead, each would cross the rest of the run again, and a run of
+ * `a-a-a-…` took time in the square of its length. What a later start in the run would find, the
+ * one at its beginning finds too, so nothing is masked less.
+ */
+
+/**
+ * A JSON Web Token: three runs of base64url joined by dots, the first two opening on `eyJ`. Its
+ * first run may hold more before it, after a `-`: the first `eyJ` that opens a word is taken, at
+ * once (a lookahead read back), since if a token does not follow it, none follows a later one.
+ */
+const WEB_TOKEN =
+  /(?<![A-Za-z0-9_-])(?=((?:[A-Za-z0-9_-]*?-)??)eyJ)(?<keep>\1)eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g
+
 /** The password in a URL's user information; the scheme, the user and the host stay. */
-const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi
+const URL_PASSWORD = /(?<keep>(?<![a-z0-9+.-])[a-z0-9+.-]+:\/\/[^\s:/@]+:)[^\s@/]+(?=@)/gi
 
 /**
  * A credential given a value in text, by name: `password=…`, `token: …`, `api_key=…`, and the
  * names built on them (`DB_PASSWORD`, `AWS_SECRET_ACCESS_KEY`, `SECRET_KEY`). A plural
- * (`max_tokens`) is not one.
+ * (`max_tokens`) is not one. The name is the whole run of name characters before the separator,
+ * none of which can stand in a name: a lookahead finds the word in it, then the run is taken at
+ * once (a lookahead read back), never given back a character at a time.
  */
 const LABELLED_CREDENTIAL = new RegExp(
-  String.raw`\b([A-Za-z0-9_-]*?(?:api[_-]?key|password|passwd|secret|token|credential)(?:[_-][A-Za-z0-9_-]*)?)(["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^\s"']+)`,
+  String.raw`(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*?(?:api[_-]?key|password|passwd|secret|token|credential)(?:[_-]|(?![A-Za-z0-9_-])))(?=([A-Za-z0-9_-]+))(?<keep>\1["']?\s*[:=]\s*)(?:${QUOTED_OR_BARE}|[^\s"']+)`,
   'gi',
 )
 
+/** A stretch of text, from its first character to the one after its last. */
+type Span = readonly [start: number, end: number]
+
+/** A stretch of text and what replaces it. */
+interface Edit {
+  readonly start: number
+  readonly end: number
+  readonly by: string
+}
+
+/**
+ * Work done in steps. Each `yield` is a point where it may give way to other work: a long output
+ * is masked in slices (`paced`), and the engine answers between two.
+ */
+type Steps<A> = Generator<void, A, void>
+
+/** Steps run to their end at once. */
+const done = <A>(steps: Steps<A>): A => {
+  for (;;) {
+    const step = steps.next()
+    if (step.done === true) return step.value
+  }
+}
+
+/** How many units of work (a match, a piece, a line, a value) make a step. */
+const WORK_A_STEP = 256
+
+/** Units of work done since the last step, whatever masking did them. */
+let work = 0
+
+/** Whether a unit of work ends a step: a step at each unit would cost more than the work. */
+const due = (): boolean => {
+  work += 1
+  if (work < WORK_A_STEP) return false
+  work = 0
+  return true
+}
+
+/** How long steps run before they give way, in milliseconds. */
+const SLICE = 10
+
+/**
+ * A mask run to its end at once; `•••` when it throws. A mask that fails (a pattern out of stack
+ * on a quoted value of megabytes, or anything else) never gives back the text it was given, and
+ * never fails what asked for it.
+ */
+const doneOrMask = (steps: () => Steps<string>): string => {
+  try {
+    return done(steps())
+  } catch {
+    return MASK
+  }
+}
+
+/**
+ * A mask run in slices of `slice` milliseconds, other fibers and the event loop running between
+ * two; a slice of 0 gives way after every step. `•••` when it throws, as `doneOrMask`.
+ */
+const paced = (steps: () => Steps<string>, slice: number): Effect.Effect<string> =>
+  Effect.suspend(() => {
+    let running: Steps<string>
+    try {
+      running = steps()
+    } catch {
+      return Effect.succeed(MASK)
+    }
+    const next = (): Effect.Effect<string> => {
+      const until = performance.now() + slice
+      for (;;) {
+        let step: IteratorResult<void, string>
+        try {
+          step = running.next()
+        } catch {
+          return Effect.succeed(MASK)
+        }
+        if (step.done === true) return Effect.succeed(step.value)
+        if (performance.now() >= until) return Effect.flatMap(Effect.yieldNow, next)
+      }
+    }
+    return next()
+  })
+
+/** Text with its edits made; they are in order and do not overlap. */
+function* applied(text: string, edits: ReadonlyArray<Edit>): Steps<string> {
+  let out = ''
+  let from = 0
+  for (const edit of edits) {
+    out += text.slice(from, edit.start) + edit.by
+    from = edit.end
+    if (due()) yield
+  }
+  return out + text.slice(from)
+}
+
+/** A match of a shape: where it starts, where what it hides starts, and where it ends. */
+interface Match {
+  readonly start: number
+  readonly hiddenFrom: number
+  readonly end: number
+}
+
+/** A shape of credential: its first match in a text from a position, if there is one. */
+type Shape = (text: string, from: number) => Match | null
+
+/** The shape a pattern matches: it hides all it matches but its group `keep`, which begins it. */
+const matched =
+  (pattern: RegExp): Shape =>
+  (text, from) => {
+    const match = matchFrom(pattern, text, from)
+    if (match === null) return null
+    const start = match.index
+    return {
+      start,
+      hiddenFrom: start + (match.groups?.['keep']?.length ?? 0),
+      end: start + match[0].length,
+    }
+  }
+
+/** What may end a value between double quotes: its closing quote, or a line end after a backslash. */
+const IN_DOUBLE_QUOTES_STOPS = /["\n\r\u2028\u2029]/g
+
+/** What ends a bare value: a quote or a line end. */
+const BARE_STOPS = /["'\r\n]/g
+
+/**
+ * Where the value between double quotes whose quote is at `at` ends, after its closing quote, or
+ * -1 when it does not close: a backslash takes the character after it, but a line end (as `.`
+ * takes none). Read from one quote or line end to the next, never one escape at a time.
+ */
+const doubleQuotedEnd = (text: string, at: number): number => {
+  for (let from = at + 1; ;) {
+    const stop = matchFrom(IN_DOUBLE_QUOTES_STOPS, text, from)?.index ?? -1
+    if (stop === -1) return -1
+    const taken = escapedAt(text, at + 1, stop)
+    if (text.charAt(stop) === '"' && !taken) return stop + 1
+    // A line end a backslash would take: that backslash takes nothing, and the value cannot go on.
+    if (text.charAt(stop) !== '"' && taken) return -1
+    from = stop + 1
+  }
+}
+
+/**
+ * Where the bare value at `at` ends: at a quote or a line end. Read through escapes, a backslash
+ * takes the character after it but a line end, so an escaped quote (`\"`) does not end it. Read
+ * from one quote or line end to the next, never one escape at a time.
+ */
+const bareEnd = (text: string, at: number, throughEscapes: boolean): number => {
+  for (let from = at; ;) {
+    const stop = matchFrom(BARE_STOPS, text, from)?.index ?? text.length
+    const quote = text.charAt(stop) === '"' || text.charAt(stop) === "'"
+    if (!throughEscapes || !quote || !escapedAt(text, at, stop)) return stop
+    from = stop + 1
+  }
+}
+
+/**
+ * Where the value at `at`, past the spaces after a header's name, ends, or -1 when none begins
+ * there: between double quotes, between single quotes, or bare, which a quote cannot begin.
+ */
+const valueEnd = (text: string, at: number, throughEscapes: boolean): number => {
+  const first = text.charAt(at)
+  if (first === '"') return doubleQuotedEnd(text, at)
+  if (first === "'") {
+    const closing = text.indexOf("'", at + 1)
+    return closing === -1 ? -1 : closing + 1
+  }
+  if (first === '') return -1
+  return bareEnd(text, at, throughEscapes)
+}
+
+/** The name of a header whose whole value is a credential, and what stands before its value. */
+const HEADER_NAME =
+  /\b(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=](?<spaces>\s*)/gi
+
+/**
+ * A header whose whole value is a credential, its scheme with its token: as a header line writes
+ * it (to the end of the line or of the quotes around it), or as JSON writes it. Its value is read
+ * by a scan, never by a pattern: a pattern that crosses a value of megabytes runs out of stack.
+ * The scan reads it as the pattern of #401 did: where no value begins after the spaces (a quote
+ * that never closes), the spaces are given back one at a time, and the last that is no line end
+ * begins a bare value. With `throughEscapes`, a bare value runs on through a backslash escape, as
+ * an escaped quote (`\"`) closes no quotes around it; without, it stops at any quote, as masking
+ * read it before #401: the shapes read in turn as the oracle reads them read it this way
+ * (`asTheOracleReads`).
+ */
+const header =
+  (throughEscapes: boolean): Shape =>
+  (text, from) => {
+    for (let at = from; ;) {
+      const name = matchFrom(HEADER_NAME, text, at)
+      if (name === null) return null
+      const start = name.index
+      const spaced = start + name[0].length
+      const spaces = spaced - (name.groups?.['spaces']?.length ?? 0)
+      let hiddenFrom = spaced
+      let end = valueEnd(text, hiddenFrom, throughEscapes)
+      while (end === -1 && hiddenFrom > spaces) {
+        hiddenFrom -= 1
+        if (!'\r\n'.includes(text.charAt(hiddenFrom)))
+          end = bareEnd(text, hiddenFrom, throughEscapes)
+      }
+      if (end !== -1) return { start, hiddenFrom, end }
+      at = start + 1
+    }
+  }
+
+const CREDENTIAL_HEADER = header(true)
+const CREDENTIAL_HEADER_TO_A_QUOTE = header(false)
+
+/**
+ * The shapes, each matched on the text as it was given: none ever sees what another masked, so a
+ * shape that takes the first word of another cannot hide the rest of it, whatever their order.
+ */
+const SHAPES: ReadonlyArray<Shape> = [
+  matched(PRIVATE_KEY),
+  CREDENTIAL_HEADER,
+  matched(BEARER),
+  matched(BASIC),
+  matched(WEB_TOKEN),
+  matched(PREFIXED_TOKEN),
+  matched(URL_PASSWORD),
+  matched(LABELLED_CREDENTIAL),
+]
+
+/**
+ * The first match of a shape's pattern in the text from `from`. The pattern is one object every
+ * masking shares, and a paced masking gives way between two steps while another runs: where a
+ * search starts is set just before it, and read back at once, never left in the pattern across a
+ * step. (`exec` on the shared pattern rather than `matchAll`, which copies the pattern at each
+ * call, and this runs for every string of a JSON answer.)
+ */
+const matchFrom = (pattern: RegExp, text: string, from: number): RegExpExecArray | null => {
+  pattern.lastIndex = from
+  return pattern.exec(text)
+}
+
+/** What stands between a name and its value: quotes, spaces, `:` and `=`. */
+const BETWEEN = /["'\s:=]/
+
+/** A character of a name. */
+const NAME = /[\w-]/
+
+/**
+ * Where a shape's search goes on after a match. A match of the same shape that starts inside this
+ * one and runs past its end has its name, and what stands before its value, at the end of this one
+ * (`password=a.token="b c"`, the first value stopped by the quote): the search goes on from the
+ * last name of the match. Only that word is crossed again, so the search stays linear.
+ */
+const resumeAt = (text: string, start: number, hiddenFrom: number, end: number): number => {
+  let at = end
+  while (at > hiddenFrom && BETWEEN.test(text.charAt(at - 1))) at -= 1
+  while (at > hiddenFrom && NAME.test(text.charAt(at - 1))) at -= 1
+  return at > start ? at : end
+}
+
+/** The stretches one shape hides in a text, in order, and whether one began inside another. */
+interface Found {
+  readonly spans: ReadonlyArray<Span>
+  /**
+   * Whether a match began before the end of the one found before it: only a search that went on
+   * from inside a match (`resumeAt`) finds one. Where none did, each search found what a search
+   * from the end of the match before finds, as the oracle searched: the first match from a
+   * position past that end.
+   */
+  readonly resumed: boolean
+}
+
+/**
+ * The stretches one shape hides in a text, in order. Each search goes on from the last name of
+ * the match before (`resumeAt`), or, read as the oracle reads, from its end.
+ */
+function* shapeFound(text: string, shape: Shape, resume: boolean): Steps<Found> {
+  const spans: Span[] = []
+  let resumed = false
+  let from = 0
+  let reached = 0
+  for (;;) {
+    const match = shape(text, from)
+    if (match === null) break
+    const { start, hiddenFrom, end } = match
+    spans.push([hiddenFrom, end])
+    if (start < reached) resumed = true
+    reached = Math.max(reached, end)
+    from = resume ? resumeAt(text, start, hiddenFrom, end) : end
+    if (due()) yield
+  }
+  // A step at the end: the pattern may have crossed the whole text without a match.
+  yield
+  return { spans, resumed }
+}
+
+/** The stretches one shape hides in a text, in order. */
+function* shapeSpans(text: string, shape: Shape): Steps<ReadonlyArray<Span>> {
+  return (yield* shapeFound(text, shape, true)).spans
+}
+
+/** An escaped quote: the only place where the two ways of reading a header's value part. */
+const ESCAPED_QUOTE = /\\["']/
+
+/**
+ * The shapes read in turn exactly as the oracle reads them (`feature/1.0` before #381): each on
+ * the text where the known values and all the shapes before it found are written over, a header's
+ * value stopped at any quote as before #401, and each search going on from the end of the match
+ * before, as before #391.
+ */
+function* asTheOracleReads(
+  text: string,
+  knownHidden: ReadonlyArray<Span>,
+): Steps<ReadonlyArray<Span>> {
+  let view = knownHidden.length > 0 ? yield* writtenOver(text, knownHidden) : text
+  let hidden = knownHidden
+  for (const shape of SHAPES) {
+    const read = shape === CREDENTIAL_HEADER ? CREDENTIAL_HEADER_TO_A_QUOTE : shape
+    const { spans } = yield* shapeFound(view, read, false)
+    if (spans.length > 0) {
+      hidden = yield* union(hidden, spans)
+      view = yield* writtenOver(view, spans)
+    }
+  }
+  return hidden
+}
+
+/**
+ * The stretches of a text that masking hides: every occurrence of a known value, and every
+ * stretch a shape hides, those that overlap or touch made one. They are the union of three readings:
+ *
+ * - each shape on the text as it was given: no shape sees what another hid, so a shape that takes
+ *   the first word of another cannot hide the rest of it (`Bearer password=https://u:x@h`);
+ * - the shapes in turn: each on the text where the known values and all the shapes before it found
+ *   are written over. A value that stops at a space, a quote or a line end then runs on through
+ *   what an earlier shape hid, and hides what is glued after it (`password=<private key>x`). This
+ *   is read with the shapes as they are, and once more exactly as the oracle reads it
+ *   (`asTheOracleReads`), so that the union hides at least all the oracle hid (#417). The two
+ *   part in two places only: a header's value now runs on through an escaped quote (#401), and a
+ *   search now goes on from the last name of a match (#391). Either may hide the name of a shape
+ *   written after it (`Authorization: \"https://u:…@`, `Bearer a.bearer https://u:…@`), which
+ *   then reads no value through what an earlier shape hid. Where the text holds no escaped quote
+ *   (the two headers take the same characters) and no match of the first began inside the one
+ *   before it (`Found`), the two read the same: each shape finds the same stretches on the same
+ *   text, so the second is not read;
+ * - each shape once more, on the text where the known values, and every stretch the first two
+ *   readings found (the oracle's aside) that holds a space or a quote up to its last one, are
+ *   written over. A value hidden by
+ *   itself, quoted or spaced, no longer stops the value it stands in (`password=token="a b"x`,
+ *   `https://u:token="a b"x@h`), whichever shape found it. What holds neither is left as it is: it
+ *   stops no value that stops at a space or a quote, and the names in it stay readable (`Bearer
+ *   password=…`, `password=<private key>token: "a"x`).
+ *
+ * The union hides at least what any reading hides, and its cost is three scans of each shape, four
+ * where the oracle's reading is read. On top, every known value as a JSON string writes it
+ * (`se\"same`): in its own reading, since written over in the others it would hide what the
+ * shapes read around it.
+ */
+function* hiddenSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
+  const escapedHidden = yield* knownSpans(text, escapedForms(known))
+  const knownHidden = yield* knownSpans(text, known)
+  let spans = knownHidden
+  let inTurn = knownHidden
+  let closed = knownHidden
+  // Written over only once something is hidden: until then, the shapes in turn read the text.
+  let view = text
+  let written = false
+  if (knownHidden.length > 0) {
+    view = yield* writtenOver(text, knownHidden)
+    written = true
+  }
+  let resumed = false
+  for (const shape of SHAPES) {
+    const found = yield* shapeFound(text, shape, true)
+    spans = yield* union(spans, found.spans)
+    closed = yield* union(closed, yield* closedSpans(text, found.spans))
+    const foundInTurn = written ? yield* shapeFound(view, shape, true) : found
+    if (foundInTurn.resumed) resumed = true
+    if (foundInTurn.spans.length > 0) {
+      inTurn = yield* union(inTurn, foundInTurn.spans)
+      if (foundInTurn !== found)
+        closed = yield* union(closed, yield* closedSpans(text, foundInTurn.spans))
+      view = yield* writtenOver(view, foundInTurn.spans)
+      written = true
+    }
+  }
+  spans = yield* union(spans, inTurn)
+  if (resumed || ESCAPED_QUOTE.test(text)) {
+    spans = yield* union(spans, yield* asTheOracleReads(text, knownHidden))
+  }
+  spans = yield* union(spans, escapedHidden)
+  // Nothing closed: the third reading would read the text as the first did.
+  if (closed.length === 0) return spans
+  const opened = yield* writtenOver(text, closed)
+  for (const shape of SHAPES) spans = yield* union(spans, yield* shapeSpans(opened, shape))
+  return spans
+}
+
+/** What stops a value read to the next space or quote. */
+const STOPS = /[\s"']/g
+
+/** One character that stops such a value. */
+const STOP = /[\s"']/
+
+/**
+ * Of each stretch, in order of their starts, that holds a space or a quote: the part up to its
+ * last one. What follows that, up to the stretch's end, stops no value, and may be the name of a
+ * shape glued after it (`password=<private key>token: "a"`), which must stay readable. Where the
+ * next space or quote stands is searched once from each start past the last one found; the last
+ * one is found walking back from the end over what holds none, which no other stretch of the same
+ * shape crosses but a word: the text is crossed a fixed number of times.
+ */
+function* closedSpans(text: string, spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  const closed: Span[] = []
+  let stop = -1
+  for (const [start, end] of spans) {
+    if (stop < start) stop = matchFrom(STOPS, text, start)?.index ?? Number.POSITIVE_INFINITY
+    if (stop < end) {
+      let last = end
+      while (!STOP.test(text.charAt(last - 1))) last -= 1
+      closed.push([start, last])
+    }
+    if (due()) yield
+  }
+  return closed
+}
+
+/** What a hidden stretch is written over by, one for each of its characters. */
+const BLANK = MASK.charAt(0)
+
+/**
+ * A text with each of the stretches, in order, written over by as many `•`: every pattern matches
+ * there as it matched around `•••`, and every stretch it finds is where it is in the text.
+ */
+function* writtenOver(text: string, spans: ReadonlyArray<Span>): Steps<string> {
+  // Joined a step at a time, then once: a string added to piece by piece is a rope of millions
+  // of pieces, and the next pattern flattens it in one go, the engine held meanwhile.
+  const joined: string[] = []
+  let pieces: string[] = []
+  let from = 0
+  for (const [start, end] of spans) {
+    if (end <= from) continue
+    const begin = Math.max(start, from)
+    pieces.push(text.slice(from, begin), BLANK.repeat(end - begin))
+    from = end
+    if (due()) {
+      joined.push(pieces.join(''))
+      pieces = []
+      yield
+    }
+  }
+  pieces.push(text.slice(from))
+  joined.push(pieces.join(''))
+  return joined.join('')
+}
+
+/** Text with each of the stretches, in order and apart, masked. */
+function* maskedOver(text: string, spans: ReadonlyArray<Span>): Steps<string> {
+  let out = ''
+  let from = 0
+  for (const [start, end] of spans) {
+    out += text.slice(from, start) + MASK
+    from = end
+    if (due()) yield
+  }
+  return out + text.slice(from)
+}
+
 /** Credentials recognised by their shape, masked without knowing their value. */
 export function maskShapes(text: string): string {
-  return text
-    .replace(PRIVATE_KEY, MASK)
-    .replace(
-      CREDENTIAL_HEADER,
-      (_, name: string, separator: string) => `${name}${separator}${MASK}`,
-    )
-    .replace(BEARER, (_, scheme: string) => `${scheme} ${MASK}`)
-    .replace(BASIC, (_, scheme: string) => `${scheme} ${MASK}`)
-    .replace(PREFIXED_TOKEN, MASK)
-    .replace(URL_PASSWORD, (_, before: string) => `${before}${MASK}@`)
-    .replace(
-      LABELLED_CREDENTIAL,
-      (_, label: string, separator: string) => `${label}${separator}${MASK}`,
-    )
+  return doneOrMask(() => textMasked(text, []))
 }
 
 /**
@@ -103,39 +569,1045 @@ export function maskShapes(text: string): string {
 const longestFirst = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
   [...new Set(values)].filter((value) => value !== '').toSorted((a, b) => b.length - a.length)
 
+/** Each list of known values with its escaped forms, worked out once for all its strings. */
+const ESCAPED_FORMS = new WeakMap<ReadonlyArray<string>, ReadonlyArray<string>>()
+
+/** The known values a JSON string writes otherwise than as they are (`se\"same`), as it writes them. */
+const escapedForms = (known: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const kept = ESCAPED_FORMS.get(known)
+  if (kept !== undefined) return kept
+  const forms = known
+    .map((value) => JSON.stringify(value).slice(1, -1))
+    .filter((form) => !known.includes(form))
+  ESCAPED_FORMS.set(known, forms)
+  return forms
+}
+
 /**
  * Every occurrence of every known value masked over its whole span: where two values overlap
  * without one containing the other, the stretch they cover together goes as one mask.
  */
-const maskKnown = (text: string, known: ReadonlyArray<string>): string => {
-  const spans: Array<readonly [number, number]> = []
+function* knownSpans(text: string, known: ReadonlyArray<string>): Steps<ReadonlyArray<Span>> {
+  const spans: Span[] = []
   for (const value of known) {
     for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
       spans.push([at, at + value.length])
+      if (due()) yield
     }
   }
-  if (spans.length === 0) return text
-  spans.sort((a, b) => a[0] - b[0])
-  let masked = ''
-  let from = 0
-  let end = -1
-  for (const [start, stop] of spans) {
-    if (start > end) {
-      if (end !== -1) masked += MASK
-      masked += text.slice(from, start)
-    }
-    end = Math.max(end, stop)
-    from = end
+  return yield* merged(spans)
+}
+
+/** Spans in order, those that overlap or touch made one. */
+function* merged(spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  return yield* union(
+    spans.toSorted((a, b) => a[0] - b[0]),
+    [],
+  )
+}
+
+/**
+ * Two lists of spans, each in order, as one in order, those that overlap or touch made one: in
+ * one pass, where sorting them together would not be.
+ */
+function* union(
+  first: ReadonlyArray<Span>,
+  second: ReadonlyArray<Span>,
+): Steps<ReadonlyArray<Span>> {
+  const out: Span[] = []
+  let inFirst = 0
+  let inSecond = 0
+  for (;;) {
+    const fromFirst = first[inFirst]
+    const fromSecond = second[inSecond]
+    const takeFirst =
+      fromFirst !== undefined && (fromSecond === undefined || fromFirst[0] <= fromSecond[0])
+    const span = takeFirst ? fromFirst : fromSecond
+    if (span === undefined) return out
+    if (takeFirst) inFirst += 1
+    else inSecond += 1
+    const last = out.at(-1)
+    if (last !== undefined && span[0] <= last[1]) {
+      out[out.length - 1] = [last[0], Math.max(last[1], span[1])]
+    } else out.push(span)
+    if (due()) yield
   }
-  return `${masked}${MASK}${text.slice(from)}`
+}
+
+/** Text with its known values and the shapes of credentials masked. */
+function* textMasked(text: string, known: ReadonlyArray<string>): Steps<string> {
+  if (yield* untouched(text, known)) return text
+  return yield* maskedOver(text, yield* hiddenSpans(text, known))
+}
+
+/**
+ * Whether masking leaves a text as it is: no known value in it, and no shape. Most strings of a
+ * JSON answer hold nothing to mask, and this answers for them without the steps' cost.
+ */
+function* untouched(text: string, known: ReadonlyArray<string>): Steps<boolean> {
+  const has = (value: string) => text.includes(value)
+  if (known.some(has) || escapedForms(known).some(has)) return false
+  for (const shape of SHAPES) {
+    if (shape(text, 0) !== null) return false
+    // A step after each pattern on a long text: each crosses all of it.
+    if (text.length > CHARACTERS_A_STEP) yield
+  }
+  return true
 }
 
 const maskedString = Brand.nominal<Masked<string>>()
 const maskedRecord = Brand.nominal<Masked<Schema.JsonObject>>()
 
-/** Text with its known values masked, then the shapes of credentials. */
+/** Text with its known values and the shapes of credentials masked. */
 export function maskText(text: string, values: ReadonlyArray<string>): Masked<string> {
-  return maskedString(maskShapes(maskKnown(text, longestFirst(values))))
+  return maskedString(doneOrMask(() => textMasked(text, longestFirst(values))))
+}
+
+/**
+ * As `maskText`, in slices of time: other fibers run while a long text is masked. `slice` is how
+ * long a slice runs, in milliseconds.
+ */
+export const maskTextPaced = (
+  text: string,
+  values: ReadonlyArray<string>,
+  slice = SLICE,
+): Effect.Effect<Masked<string>> =>
+  Effect.map(
+    paced(() => textMasked(text, longestFirst(values)), slice),
+    maskedString,
+  )
+
+/** What a JSON string escapes, by the letter after its backslash. */
+const ESCAPED = new Map([
+  ['"', '"'],
+  ['\\', '\\'],
+  ['/', '/'],
+  ['b', '\b'],
+  ['f', '\f'],
+  ['n', '\n'],
+  ['r', '\r'],
+  ['t', '\t'],
+])
+
+/** What JSON takes for space between its tokens. */
+const JSON_SPACE = ' \t\n\r'
+
+/** Four hexadecimal digits, as a `\u` escape writes them. */
+const HEX = /^[\dA-Fa-f]{4}$/
+
+/** A run of what a JSON string holds as it is: no quote, no backslash, no control character. */
+// oxlint-disable-next-line no-control-regex -- the control characters are what ends the run
+const PLAIN = /[^"\\\u0000-\u001f]*/y
+
+/** Where reading a JSON string stopped, and whether it was closed there. */
+interface Stopped {
+  /** After its closing quote; else the first character it cannot hold. */
+  readonly stop: number
+  readonly closed: boolean
+}
+
+/**
+ * Where reading the JSON string whose quote is at `at` stops: after its closing quote, or at the
+ * first character a JSON string cannot hold (a line end or another control character, an escape
+ * JSON has not, the end of the text).
+ */
+const stringStop = (text: string, at: number): Stopped => {
+  let next = at + 1
+  for (;;) {
+    next += matchFrom(PLAIN, text, next)?.[0].length ?? 0
+    const code = text.charCodeAt(next)
+    if (Number.isNaN(code) || code < 0x20) return { stop: next, closed: false }
+    if (code === 0x22) return { stop: next + 1, closed: true }
+    if (code !== 0x5c) next += 1
+    else if (text.charAt(next + 1) === 'u') {
+      if (!HEX.test(text.slice(next + 2, next + 6))) return { stop: next, closed: false }
+      next += 6
+    } else if (ESCAPED.has(text.charAt(next + 1))) next += 2
+    else return { stop: next, closed: false }
+  }
+}
+
+/** Where the JSON string at `at` ends, after its closing quote, or -1 when it is not one. */
+const jsonStringEnd = (text: string, at: number): number => {
+  if (text.charAt(at) !== '"') return -1
+  const { stop, closed } = stringStop(text, at)
+  return closed ? stop : -1
+}
+
+/** A run of JSON space, maybe empty. */
+const JSON_SPACES = /[ \t\n\r]*/y
+
+/** Where the JSON space from `at` ends: found by the pattern, a long run is crossed at once. */
+const jsonSpace = (text: string, at: number): number =>
+  at + (matchFrom(JSON_SPACES, text, at)?.[0].length ?? 0)
+
+/** Where the run of digits at `at` ends. */
+const digitsEnd = (text: string, at: number): number => {
+  let next = at
+  while (text.charAt(next) >= '0' && text.charAt(next) <= '9') next += 1
+  return next
+}
+
+/** Where the JSON number at `at` ends, or -1 when it is not one. */
+const jsonNumberEnd = (text: string, at: number): number => {
+  let next = text.charAt(at) === '-' ? at + 1 : at
+  const whole = digitsEnd(text, next)
+  if (whole === next || (text.charAt(next) === '0' && whole > next + 1)) return -1
+  next = whole
+  if (text.charAt(next) === '.') {
+    next = digitsEnd(text, next + 1)
+    if (next === whole + 1) return -1
+  }
+  if (text.charAt(next) === 'e' || text.charAt(next) === 'E') {
+    const sign = '+-'.includes(text.charAt(next + 1)) ? next + 2 : next + 1
+    next = digitsEnd(text, sign)
+    if (next === sign) return -1
+  }
+  return next
+}
+
+/** Where the JSON string, number or literal at `at` ends, or -1 when there is none. */
+const jsonScalarEnd = (text: string, at: number): number => {
+  const first = text.charAt(at)
+  if (first === '"') return jsonStringEnd(text, at)
+  for (const literal of ['true', 'false', 'null']) {
+    if (text.startsWith(literal, at)) return at + literal.length
+  }
+  return first === '-' || (first >= '0' && first <= '9') ? jsonNumberEnd(text, at) : -1
+}
+
+/**
+ * Whether a text is JSON, in one pass and without throwing: most lines of a text are not JSON,
+ * and `JSON.parse` builds an error for each. The containers open are kept on a stack, not in
+ * calls, so no depth of nesting runs out of stack.
+ */
+export const isJson = (text: string): boolean => done(jsonRead(text))
+
+/** `isJson`, in steps. */
+function* jsonRead(text: string): Steps<boolean> {
+  const space = (at: number): number => jsonSpace(text, at)
+  /** Where the value of the next field of an object begins, past its name and colon, or -1. */
+  const field = (at: number): number => {
+    const name = jsonStringEnd(text, at)
+    if (name === -1) return -1
+    const colon = space(name)
+    return text.charAt(colon) === ':' ? space(colon + 1) : -1
+  }
+  const closers: string[] = []
+  let at = space(0)
+  for (;;) {
+    if (due()) yield
+    const first = text.charAt(at)
+    if (first === '{' || first === '[') {
+      const closing = first === '{' ? '}' : ']'
+      at = space(at + 1)
+      if (text.charAt(at) === closing) at += 1
+      else {
+        closers.push(closing)
+        if (closing === '}') at = field(at)
+        if (at === -1) return false
+        continue
+      }
+    } else {
+      at = jsonScalarEnd(text, at)
+      if (at === -1) return false
+    }
+    // A value read: close what it ends, until a comma opens the next value.
+    for (;;) {
+      at = space(at)
+      const closing = closers.at(-1)
+      if (closing === undefined) return at === text.length
+      if (text.charAt(at) === ',') {
+        at = space(at + 1)
+        if (closing === '}') at = field(at)
+        if (at === -1) return false
+        break
+      }
+      if (text.charAt(at) !== closing) return false
+      closers.pop()
+      at += 1
+    }
+  }
+}
+
+/** The spans, in order and apart, that touch this stretch. */
+const touchingSpans = (
+  spans: ReadonlyArray<Span>,
+  start: number,
+  end: number,
+): ReadonlyArray<Span> => {
+  let low = 0
+  let high = spans.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if ((spans[middle]?.[1] ?? 0) <= start) low = middle + 1
+    else high = middle
+  }
+  const found: Span[] = []
+  for (let index = low; index < spans.length; index += 1) {
+    const span = spans[index]
+    if (span === undefined || span[0] >= end) break
+    found.push(span)
+  }
+  return found
+}
+
+/** The lines of a text that are JSON by themselves, and whether some line that is not blank is not. */
+interface Lines {
+  readonly lines: ReadonlyArray<Span>
+  readonly mixed: boolean
+}
+
+/** The lines of a text that are JSON by themselves, each where it stands. */
+function* jsonLines(text: string): Steps<Lines> {
+  const lines: Span[] = []
+  let mixed = false
+  for (let start = 0; start <= text.length;) {
+    const ending = text.indexOf('\n', start)
+    const end = ending === -1 ? text.length : ending
+    const line = text.slice(start, end)
+    if (line.trim() !== '') {
+      if (yield* jsonRead(line)) lines.push([start, end])
+      else mixed = true
+    }
+    start = end + 1
+    if (due()) yield
+  }
+  return { lines, mixed }
+}
+
+/**
+ * The next match of a pattern from a position, the positions asked in order: a search starts only
+ * past the match found last, so the text is crossed once however often it is asked. The text's
+ * length when there is none.
+ */
+const nextOf = (text: string, pattern: RegExp): ((at: number) => number) => {
+  let found = -1
+  return (at) => {
+    if (found < at) found = matchFrom(pattern, text, at)?.index ?? text.length
+    return found
+  }
+}
+
+/** Where a JSON container opens. */
+const OPENERS = /[[{]/g
+
+/** A quote. */
+const QUOTES = /"/g
+
+/** A backslash. */
+const BACKSLASHES = /\\/g
+
+/** What ends what a JSON string may hold: a quote, or a line end. */
+const DELIMITERS = /["\r\n]/g
+
+/**
+ * Whether the quote (or any character) at `at` is escaped: an odd run of backslashes before it,
+ * back to `floor`. Each backslash takes the character after it, so only that run's length counts.
+ */
+const escapedAt = (text: string, floor: number, at: number): boolean => {
+  let before = at
+  while (before > floor && text.charAt(before - 1) === '\\') before -= 1
+  return (at - before) % 2 === 1
+}
+
+/**
+ * The JSON values written in a text that is not JSON whole, in order and apart:
+ *
+ * - every container read whole from where it opens, wherever it stands: after a sentence, a lone
+ *   quote, another bracket (`containersIn`). One that breaks (cut, or a string in it broken by a
+ *   line end) keeps as values those it held whole;
+ * - every line that is JSON by itself. Of two of these, the one inside the other gives way: a
+ *   string line that holds braces stays one string, a pretty container one container. Where two
+ *   overlap, the first stays;
+ * - a value a broken container held whole, where it crosses none of those and none holds it. Those
+ *   it holds give way to it: pretty JSON after a bracket of the prose that never closes stays one
+ *   value, the lines that are JSON by themselves inside it too. One read where the quotes pair the
+ *   other way crosses the others, and gives way; of two held values that cross, the longer stays;
+ * - between all those, every string opened by a quote no backslash escapes and closed before the
+ *   next of them.
+ *
+ * On top, the values that keys naming a credential hold, in any reading (`containersIn`).
+ */
+function* writtenJson(text: string, lines: ReadonlyArray<Span>): Steps<Written> {
+  const { complete, held, keyed } = yield* containersIn(text)
+  const outer: Span[] = []
+  for (const value of yield* inOrder(yield* byStart(complete), lines, ([start]) => start)) {
+    if (value[0] >= (outer.at(-1)?.[1] ?? 0)) outer.push(value)
+    if (due()) yield
+  }
+  // Two readers at most read each character, so each is in two held values at most, and the outer
+  // values each touches are counted twice at most.
+  const kept: Span[] = []
+  for (const value of yield* byStart(held)) {
+    const crossed = touchingSpans(outer, value[0], value[1]).some(
+      ([start, end]) => start < value[0] || end > value[1],
+    )
+    const last = kept.at(-1)
+    if (!crossed && value[0] >= (last?.[1] ?? 0)) kept.push(value)
+    else if (!crossed && last !== undefined && value[1] - value[0] > last[1] - last[0]) {
+      // Two read where the quotes pair the other way cross: the longer stays, and those kept
+      // before it end where it starts or sooner.
+      kept[kept.length - 1] = value
+    }
+    if (due()) yield
+  }
+  const values: Span[] = []
+  for (const value of yield* inOrder(kept, outer, ([start]) => start)) {
+    if (value[0] >= (values.at(-1)?.[1] ?? 0)) values.push(value)
+    if (due()) yield
+  }
+  const strings: Span[] = []
+  const nextQuote = nextOf(text, QUOTES)
+  let gapStart = 0
+  for (let index = 0; index <= values.length; index += 1) {
+    const gapEnd = values[index]?.[0] ?? text.length
+    for (let at = gapStart, quote = nextQuote(at); quote < gapEnd; quote = nextQuote(at)) {
+      at = quote + 1
+      if (escapedAt(text, gapStart, quote)) continue
+      const { stop, closed } = stringStop(text, quote)
+      if (closed && stop <= gapEnd) strings.push([quote, stop])
+      // Nothing between the quote and where it stopped is a quote that opens a string.
+      at = Math.min(Math.max(stop, at), gapEnd)
+      if (due()) yield
+    }
+    gapStart = values[index]?.[1] ?? text.length
+    if (due()) yield
+  }
+  return { values: yield* inOrder(values, strings, ([start]) => start), keyed }
+}
+
+/** The JSON values written in a text, and the values keys that name a credential hold. */
+interface Written {
+  readonly values: ReadonlyArray<Span>
+  /** In any reading of the text's quotes, in order and apart (`containersIn`). */
+  readonly keyed: ReadonlyArray<Span>
+}
+
+/**
+ * Spans in order of their starts, in steps. They come from two readers at most, each in order, so
+ * they are made of a few runs in order: the runs are merged two by two.
+ */
+function* byStart(spans: ReadonlyArray<Span>): Steps<ReadonlyArray<Span>> {
+  let runs: Array<ReadonlyArray<Span>> = []
+  let run: Span[] = []
+  for (const span of spans) {
+    if (span[0] < (run.at(-1)?.[0] ?? -1)) {
+      runs.push(run)
+      run = []
+    }
+    run.push(span)
+    if (due()) yield
+  }
+  runs.push(run)
+  while (runs.length > 1) {
+    const paired: Array<ReadonlyArray<Span>> = []
+    for (let index = 0; index < runs.length; index += 2) {
+      paired.push(yield* inOrder(runs[index] ?? [], runs[index + 1] ?? [], ([start]) => start))
+    }
+    runs = paired
+  }
+  return runs[0] ?? []
+}
+
+/** What a reader of a container reads next, outside its strings. */
+type Expected = 'value' | 'key' | 'colon' | 'after'
+
+/**
+ * A reader of the container that opens at `start`, its containers open kept on a stack. A text
+ * may open millions, so each costs one number, and each value held whole three.
+ */
+interface Reader {
+  readonly start: number
+  /** Where each container open begins, the innermost last: its opener says what closes it. */
+  readonly starts: number[]
+  /**
+   * The values held whole so far, three numbers each: the depth of the container that holds it,
+   * then where it starts and ends. Those of the innermost container are always the last.
+   */
+  readonly held: number[]
+  expected: Expected
+  /** Where it reads on; in a string, once the string ends there. */
+  at: number
+  /** Whether the value it reads next is held by a key that names a credential. */
+  keyed: boolean
+  /**
+   * The containers open that such a key holds, two numbers each: how many containers were open
+   * once it opened, then where it starts.
+   */
+  readonly secrets: number[]
+}
+
+/** What closes the innermost container open in a reader, if one is. */
+const closingOf = (text: string, reader: Reader): string | undefined => {
+  const start = reader.starts.at(-1)
+  if (start === undefined) return undefined
+  return text.charAt(start) === '{' ? '}' : ']'
+}
+
+/** The values held whole, two numbers each, as spans, in steps: there may be millions. */
+function* heldIn(broken: ReadonlyArray<number>): Steps<ReadonlyArray<Span>> {
+  const held: Span[] = []
+  for (let index = 0; index + 1 < broken.length; index += 2) {
+    held.push([broken[index] ?? 0, broken[index + 1] ?? 0])
+    if (due()) yield
+  }
+  return held
+}
+
+/** The two readers at most that read a text at once. */
+interface Readers {
+  /** The one that reads between strings. */
+  between: Reader | null
+  /** The one in a string. */
+  inString: Reader | null
+}
+
+/** The containers a text holds whole, and the values held whole by those that break. */
+interface Containers {
+  readonly complete: ReadonlyArray<Span>
+  readonly held: ReadonlyArray<Span>
+  /** The values keys that name a credential hold, in any reader, in order and apart. */
+  readonly keyed: ReadonlyArray<Span>
+}
+
+/** The name a key of the text says, from its quote to after its closing quote. */
+function* keyName(text: string, start: number, end: number): Steps<string> {
+  const plain = text.slice(start + 1, end - 1)
+  return plain.includes('\\') ? (yield* readString(text, start, end)).read : plain
+}
+
+/**
+ * Every container read whole from where it opens, in one pass. A reader starts at each opener
+ * where no reader reads outside a string; one that meets an opener goes into it. On a line, the
+ * quotes no backslash escapes open and close strings in turn, so a reader that would start where
+ * another reads outside its strings reads as that one does, inside one of its containers: it ends
+ * where that container ends, or breaks where the other breaks, and is not needed. Any other reads
+ * strings where the other reads between them. So two readers at most run at once, one between
+ * strings and one in a string, and they swap at each quote: each character is read once by each,
+ * and the text is crossed twice at most.
+ *
+ * The two readers are the two ways the quotes pair, and both are weighed (#412): a key that names a
+ * credential in either hides the value it holds, from where it begins to where it ends, or to where
+ * the reader broke when it broke first, as a field so named is masked whole in JSON.
+ */
+function* containersIn(text: string): Steps<Containers> {
+  const complete: Span[] = []
+  const nextOpener = nextOf(text, OPENERS)
+  const readers: Readers = { between: null, inString: null }
+  /** Where no reader has read outside a string yet. */
+  let frontier = 0
+  /**
+   * What the containers open in each reader that broke hold whole, where each starts and ends,
+   * kept to the end in one list: millions of readers may break, most holding one value or none.
+   */
+  const broken: number[] = []
+  /** The values keys that name a credential hold, as the readers find them. */
+  const keyed: Span[] = []
+  const secret = (start: number, end: number) => {
+    if (end > start) keyed.push([start, end])
+  }
+  /** A reader broke at `at`: what it held whole is kept, and a credential's value open hidden to there. */
+  const broke = (reader: Reader, at: number) => {
+    for (let index = 0; index + 2 < reader.held.length; index += 3) {
+      broken.push(reader.held[index + 1] ?? 0, reader.held[index + 2] ?? 0)
+    }
+    // The values open run to the same place: the outermost holds all the others.
+    if (reader.secrets.length > 0) secret(reader.secrets[1] ?? at, at)
+  }
+  /** The innermost container open in a reader holds a value whole. */
+  const hold = (reader: Reader, start: number, end: number) => {
+    reader.held.push(reader.starts.length, start, end)
+  }
+  /** The reader outside a string stops at `at`: broken, ended, or gone into a string. */
+  const stops = (at: number) => {
+    readers.between = null
+    frontier = at
+  }
+  /** A value read whole, from `start` (-1 for a scalar, which no one holds) to `end`. */
+  const read = (reader: Reader, start: number, end: number) => {
+    if (reader.starts.length === 0) {
+      complete.push([reader.start, end])
+      stops(end)
+      return
+    }
+    if (start !== -1) hold(reader, start, end)
+    reader.expected = 'after'
+    reader.at = end
+  }
+  for (;;) {
+    if (due()) yield
+    const reader = readers.between
+    if (reader === null) {
+      const opener = nextOpener(frontier)
+      if (readers.inString !== null && readers.inString.at <= opener) {
+        // Its string ended before any opener: it reads on outside it.
+        readers.between = readers.inString
+        readers.inString = null
+      } else if (opener < text.length) {
+        readers.between = {
+          start: opener,
+          starts: [],
+          held: [],
+          expected: 'value',
+          at: opener,
+          keyed: false,
+          secrets: [],
+        }
+      } else {
+        return {
+          complete,
+          held: yield* heldIn(broken),
+          keyed: yield* union(yield* byStart(keyed), []),
+        }
+      }
+      continue
+    }
+    const at = jsonSpace(text, reader.at)
+    const first = text.charAt(at)
+    const closing = closingOf(text, reader)
+    if ((first === '{' || first === '[') && reader.expected === 'value') {
+      const closes = first === '{' ? '}' : ']'
+      const inside = jsonSpace(text, at + 1)
+      const keyedHere = reader.keyed
+      reader.keyed = false
+      if (text.charAt(inside) === closes) {
+        if (keyedHere) secret(at, inside + 1)
+        read(reader, at, inside + 1)
+      } else {
+        reader.starts.push(at)
+        if (keyedHere) reader.secrets.push(reader.starts.length, at)
+        reader.expected = closes === '}' ? 'key' : 'value'
+        reader.at = at + 1
+      }
+    } else if (closing !== undefined && first === closing && reader.expected === 'after') {
+      // What it held goes with it: it is now held whole itself.
+      const depth = reader.starts.length
+      while (reader.held.length > 0 && reader.held.at(-3) === depth) reader.held.length -= 3
+      if (reader.secrets.at(-2) === depth) {
+        secret(reader.secrets.at(-1) ?? at, at + 1)
+        reader.secrets.length -= 2
+      }
+      read(reader, reader.starts.pop() ?? at, at + 1)
+    } else if (closing !== undefined && first === ',' && reader.expected === 'after') {
+      reader.expected = closing === '}' ? 'key' : 'value'
+      reader.at = at + 1
+    } else if (first === ':' && reader.expected === 'colon') {
+      reader.expected = 'value'
+      reader.at = at + 1
+    } else if (first === '"') {
+      // The quote ends the string the other reader is in, when one is.
+      const other = readers.inString
+      readers.inString = null
+      const { stop, closed } = stringStop(text, at)
+      // A credential's value that is a string, closed or cut where it stops.
+      if (reader.expected === 'value' && reader.keyed) secret(at, stop)
+      reader.keyed = false
+      if (closed && (reader.expected === 'value' || reader.expected === 'key')) {
+        if (reader.starts.length > 0) hold(reader, at, stop)
+        if (reader.expected === 'key') {
+          reader.keyed = CREDENTIAL_FIELD.test(yield* keyName(text, at, stop))
+        }
+        reader.expected = reader.expected === 'key' ? 'colon' : 'after'
+        reader.at = stop
+        readers.inString = reader
+      } else broke(reader, closed ? at : stop)
+      stops(at + 1)
+      if (other?.at === at + 1) readers.between = other
+      else if (other !== null) broke(other, other.at)
+    } else if (reader.expected === 'value' && jsonScalarEnd(text, at) !== -1) {
+      const end = jsonScalarEnd(text, at)
+      if (reader.keyed) secret(at, end)
+      reader.keyed = false
+      read(reader, -1, end)
+    } else {
+      broke(reader, at)
+      stops(at)
+    }
+  }
+}
+
+/**
+ * What the shapes and the known values hide in the text outside the JSON values written in it,
+ * read as JSON strings: each stretch between two quotes no backslash escapes, or a line end, that
+ * holds a backslash is read as a string holds it, and what masking that string hides is hidden
+ * where it is written. A string's content is always one such stretch, whatever quote before it
+ * was taken to open another: a lone quote in a sentence never makes a string read as text. A
+ * string opened and never closed is read up to its line end. This only ever adds.
+ */
+function* readAsStrings(
+  text: string,
+  written: ReadonlyArray<Span>,
+  known: ReadonlyArray<string>,
+): Steps<ReadonlyArray<Span>> {
+  const spans: Span[] = []
+  const nextBackslash = nextOf(text, BACKSLASHES)
+  const nextDelimiter = nextOf(text, DELIMITERS)
+  const unescaped = (floor: number, at: number) =>
+    text.charAt(at) !== '"' || !escapedAt(text, floor, at)
+  let gapStart = 0
+  for (let unit = 0; unit <= written.length; unit += 1) {
+    const gapEnd = written[unit]?.[0] ?? text.length
+    let at = gapStart
+    for (let backslash = nextBackslash(at); backslash < gapEnd; backslash = nextBackslash(at)) {
+      // The stretch that holds it: from the last delimiter before it, to the next one after it.
+      let first = at
+      for (let stop = nextDelimiter(at); stop < backslash; stop = nextDelimiter(stop + 1)) {
+        if (unescaped(first, stop)) first = stop + 1
+      }
+      let last = nextDelimiter(backslash)
+      while (last < gapEnd && !unescaped(first, last)) last = nextDelimiter(last + 1)
+      last = Math.min(last, gapEnd)
+      const { read, from } = yield* readBody(text, first, last)
+      // With no escape JSON has, it reads as printed: the whole text's masking found all of it.
+      const escaped = read.length !== last - first
+      if (escaped && !(yield* untouched(read, known))) {
+        for (const [start, end] of yield* hiddenSpans(read, known)) {
+          spans.push([from[start] ?? first, from[end] ?? last])
+        }
+      }
+      at = last
+      if (due()) yield
+    }
+    gapStart = written[unit]?.[1] ?? text.length
+    if (due()) yield
+  }
+  return yield* merged(spans)
+}
+
+/** The parts of the spans outside the units. Both are in order, and the units do not overlap. */
+function* outside(
+  spans: ReadonlyArray<Span>,
+  units: ReadonlyArray<Span>,
+): Steps<ReadonlyArray<Span>> {
+  const parts: Span[] = []
+  let first = 0
+  for (const [start, end] of spans) {
+    while ((units[first]?.[1] ?? Number.POSITIVE_INFINITY) <= start) first += 1
+    let from = start
+    for (let index = first; index < units.length; index += 1) {
+      const unit = units[index]
+      if (unit === undefined || unit[0] >= end) break
+      if (unit[0] > from) parts.push([from, unit[0]])
+      from = Math.max(from, unit[1])
+    }
+    if (from < end) parts.push([from, end])
+    if (due()) yield
+  }
+  return parts
+}
+
+/**
+ * A JSON string read: what it says, and where each of its characters is written in the text. JSON
+ * writes each character of a string as one, or as one escape: character `i` is written from
+ * `from[i]` to `from[i + 1]`.
+ */
+interface Read {
+  readonly read: string
+  readonly from: Int32Array
+}
+
+/** A JSON string of the text, read, each character with where it is written. */
+function* readString(text: string, start: number, end: number): Steps<Read> {
+  return yield* readBody(text, start + 1, end - 1)
+}
+
+/**
+ * The text from `first` to `last` read as what a JSON string holds, each character with where it
+ * is written: an escape JSON has is read as what it writes, and a backslash that begins none as
+ * itself.
+ */
+function* readBody(text: string, first: number, last: number): Steps<Read> {
+  const parts: string[] = []
+  const from = new Int32Array(last - first + 1)
+  let count = 0
+  let at = first
+  // A run of characters written as themselves is taken whole, at the next escape or the end.
+  let run = at
+  while (at < last) {
+    from[count] = at
+    count += 1
+    const letter = text.charAt(at) === '\\' && at + 2 <= last ? text.charAt(at + 1) : ''
+    const unicode = letter === 'u' && at + 6 <= last && HEX.test(text.slice(at + 2, at + 6))
+    const writes = ESCAPED.get(letter)
+    if (unicode) {
+      parts.push(
+        text.slice(run, at),
+        String.fromCharCode(Number.parseInt(text.slice(at + 2, at + 6), 16)),
+      )
+      at += 6
+      run = at
+    } else if (writes === undefined) at += 1
+    else {
+      parts.push(text.slice(run, at), writes)
+      at += 2
+      run = at
+    }
+    if (count % CHARACTERS_A_STEP === 0) yield
+  }
+  parts.push(text.slice(run, at))
+  from[count] = at
+  return { read: parts.join(''), from: from.subarray(0, count + 1) }
+}
+
+/** How many characters of a string are read in one step. */
+const CHARACTERS_A_STEP = 4096
+
+const QUOTED_MASK = JSON.stringify(MASK)
+
+/**
+ * What a string must hold for JSON written in it to hold a string or a container: without a quote
+ * or an opener, it holds no field and nothing to read again, and masked as text it is masked the
+ * same, at the cost of text.
+ */
+const STRUCTURED = /["[{]/
+
+/**
+ * How many JSON strings deep JSON written in a JSON string is read as JSON (`{"body":"{\"a\":…}"}`
+ * is one). Each level reads again what the one above it read, so the levels cost as many times
+ * the text; a string read at the last level that holds a quote, and so another string, is masked
+ * whole.
+ */
+export const STRING_NESTING_LIMIT = 4
+
+/** A JSON container open while its values are read. */
+interface Open {
+  readonly closing: string
+  /** The field the container stands in, which its items stand in too when it is a list. */
+  readonly field: string
+  /** Whether what it holds is left as it is: it is masked whole, or stands in what is. */
+  readonly quiet: boolean
+  /** Where it begins when it is masked whole, once closed; -1 when it is not. */
+  readonly whole: number
+}
+
+/**
+ * What a CLI printed, masked so that it hides at least all that masking the whole text hides,
+ * and stays JSON where it was: the whole text, or each of its lines.
+ *
+ * The stretches the whole-text masking hides are found in the text as printed. Outside JSON, each
+ * is masked as that masking does. In JSON, a number or literal one touches is masked whole
+ * (`"•••"`), and so is a string one runs out of; in a string, the characters one writes are
+ * masked once the string is read. Between values stand only brackets, commas, colons and spaces,
+ * which hold nothing. On top, the rules of a structured value: a field whose name says it is a
+ * credential masked whole, and every string, keys included, masked as text once read (where a
+ * known value written with escapes is found). Nothing else is written again: a number beyond what
+ * a double holds, the spacing and the escapes come out as printed.
+ */
+export function maskPrinted(text: string, values: ReadonlyArray<string>): Masked<string> {
+  return maskedString(doneOrMask(() => printedMasked(text, longestFirst(values))))
+}
+
+/**
+ * As `maskPrinted`, in slices of time: other fibers run while a long output is masked, and the
+ * engine answers meanwhile. `slice` is how long a slice runs, in milliseconds.
+ */
+export const maskPrintedPaced = (
+  text: string,
+  values: ReadonlyArray<string>,
+  slice = SLICE,
+): Effect.Effect<Masked<string>> =>
+  Effect.map(
+    paced(() => printedMasked(text, longestFirst(values)), slice),
+    maskedString,
+  )
+
+/**
+ * `maskPrinted` of a text read from `depth` JSON strings (0 for what was printed), with the
+ * stretches `hiddenAbove` hidden on top: those the masking of the text it was read from hid in it.
+ */
+function* printedMasked(
+  text: string,
+  known: ReadonlyArray<string>,
+  depth = 0,
+  hiddenAbove: ReadonlyArray<Span> = [],
+): Steps<string> {
+  const allJson = yield* jsonRead(text)
+  const { lines, mixed } = allJson ? { lines: [], mixed: false } : yield* jsonLines(text)
+  const { values, keyed }: Written = allJson
+    ? { values: [[0, text.length]], keyed: [] }
+    : yield* writtenJson(text, lines)
+  const shapes = yield* union(yield* union(yield* hiddenSpans(text, known), hiddenAbove), keyed)
+  const hidden = allJson ? shapes : yield* union(shapes, yield* readAsStrings(text, values, known))
+  const touching = (start: number, end: number) => touchingSpans(hidden, start, end)
+  const edits: Edit[] = []
+  const space = (at: number): number => jsonSpace(text, at)
+  const stringEnd = (at: number): number => {
+    let next = at + 1
+    while (text.charAt(next) !== '"') next += text.charAt(next) === '\\' ? 2 : 1
+    return next + 1
+  }
+  const tokenEnd = (at: number): number => {
+    let next = at
+    while (next < text.length && !`,]}:${JSON_SPACE}`.includes(text.charAt(next))) next += 1
+    return next
+  }
+  /**
+   * A string masked: whole where a hidden stretch runs past its quotes or covers all it holds;
+   * otherwise read, and what it reads masked as printed, the characters the hidden stretches
+   * write hidden on top: JSON written in it is masked as JSON, and stays JSON (#409, #431).
+   */
+  function* maskString(start: number, end: number): Steps<void> {
+    const spans = touching(start, end)
+    if (
+      spans.some(([from, to]) => from <= start || to >= end || (from <= start + 1 && to >= end - 1))
+    ) {
+      edits.push({ start, end, by: QUOTED_MASK })
+      return
+    }
+    // Nothing of the whole text's masking here, and written with no escape: it reads as printed,
+    // and masking it finds nothing the whole text's masking did not find in it. A shape that would
+    // stop at its quotes stops there in the text too, one that runs past them touches it, and with
+    // no quote in it, it holds no string and no field.
+    if (spans.length === 0 && !text.slice(start + 1, end - 1).includes('\\')) return
+    const { read, from } = yield* readString(text, start, end)
+    // At the last level read, a string that holds another is not read: it is masked whole.
+    if (depth >= STRING_NESTING_LIMIT && read.includes('"')) {
+      edits.push({ start, end, by: QUOTED_MASK })
+      return
+    }
+    // The characters the spans write, as spans of what the string reads, those that touch made one.
+    const marked: Span[] = []
+    let markFrom = -1
+    // The spans are in order and apart, as the characters: one index moves forward through them.
+    let next = 0
+    for (let at = 0; at < read.length; at += 1) {
+      const written = from[at] ?? 0
+      while ((spans[next]?.[1] ?? Number.POSITIVE_INFINITY) <= written) next += 1
+      const hiddenHere = (spans[next]?.[0] ?? Number.POSITIVE_INFINITY) < (from[at + 1] ?? 0)
+      if (hiddenHere && markFrom === -1) markFrom = at
+      if (!hiddenHere && markFrom !== -1) {
+        marked.push([markFrom, at])
+        markFrom = -1
+      }
+      if (at % CHARACTERS_A_STEP === 0) yield
+    }
+    if (markFrom !== -1) marked.push([markFrom, read.length])
+    const masked = yield* STRUCTURED.test(read)
+      ? printedMasked(read, known, depth + 1, marked)
+      : marked.length === 0
+        ? textMasked(read, known)
+        : maskedOver(read, yield* union(marked, yield* hiddenSpans(read, known)))
+    if (masked !== read) edits.push({ start, end, by: JSON.stringify(masked) })
+  }
+  /** The name of the field whose key is at `at`, the key masked unless quiet. */
+  function* key(at: number, quiet: boolean): Steps<string> {
+    const end = stringEnd(at)
+    if (!quiet) yield* maskString(at, end)
+    const plain = text.slice(at + 1, end - 1)
+    return plain.includes('\\') ? (yield* readString(text, at, end)).read : plain
+  }
+  /**
+   * Masks the JSON value at `at` and all it holds. The containers open are kept on a stack, not
+   * in calls, so no depth of nesting runs out of stack.
+   */
+  function* value(at: number): Steps<void> {
+    const open: Open[] = []
+    let next = at
+    let field = ''
+    let quiet = false
+    for (;;) {
+      if (due()) yield
+      const start = space(next)
+      // Typed: the loop reads them back through `quiet`, and inference would go round in a circle.
+      const whole: number = !quiet && CREDENTIAL_FIELD.test(field) ? start : -1
+      const inner: boolean = quiet || whole !== -1
+      const first = text.charAt(start)
+      let end = start
+      if (first === '{' || first === '[') {
+        const closing = first === '{' ? '}' : ']'
+        next = space(start + 1)
+        if (text.charAt(next) !== closing) {
+          open.push({ closing, field, quiet: inner, whole })
+          quiet = inner
+          if (closing === '}') {
+            field = yield* key(next, quiet)
+            next = space(stringEnd(next)) + 1
+          }
+          continue
+        }
+        end = next + 1
+      } else if (first === '"') {
+        end = stringEnd(start)
+        if (!inner) yield* maskString(start, end)
+      } else {
+        end = tokenEnd(start)
+        if (!inner && touching(start, end).length > 0) {
+          edits.push({ start, end, by: QUOTED_MASK })
+        }
+      }
+      if (whole !== -1) edits.push({ start: whole, end, by: QUOTED_MASK })
+      // The value read: the containers it ends are closed, up to the comma before the next one.
+      for (;;) {
+        const container = open.at(-1)
+        if (container === undefined) return
+        next = space(end)
+        if (text.charAt(next) === ',') {
+          quiet = container.quiet
+          field = container.field
+          next = space(next + 1)
+          if (container.closing === '}') {
+            field = yield* key(next, quiet)
+            next = space(stringEnd(next)) + 1
+          }
+          break
+        }
+        open.pop()
+        end = next + 1
+        if (container.whole !== -1) edits.push({ start: container.whole, end, by: QUOTED_MASK })
+      }
+    }
+  }
+  // Among lines that are not JSON, a value a hidden stretch covers whole is text: it is hidden
+  // whole, as masking the text would hide it.
+  const coveredWhole = ([from, to]: Span) =>
+    touchingSpans(hidden, from, to).some(([spanFrom, spanTo]) => spanFrom <= from && spanTo >= to)
+  const units: Span[] = []
+  for (const unit of values) {
+    if (!mixed || !coveredWhole(unit)) units.push(unit)
+    if (due()) yield
+  }
+  const nextBackslash = nextOf(text, BACKSLASHES)
+  for (const [start, end] of units) {
+    // A string that nothing hidden touches and that holds no escape is left as printed: what
+    // `maskString` does, without its cost on a text of many small strings.
+    const plain = text.charAt(start) === '"' && nextBackslash(start) >= end
+    if (!plain || touching(start, end).length > 0) yield* value(start)
+    else if (due()) yield
+  }
+  const outsideJson: Edit[] = []
+  for (const [start, end] of yield* outside(hidden, units)) {
+    if (text.slice(start, end).trim() !== '') outsideJson.push({ start, end, by: MASK })
+    if (due()) yield
+  }
+  return yield* applied(text, yield* inOrder(edits, outsideJson, (edit) => edit.start))
+}
+
+/**
+ * Two lists, each in order of where its items start, as one in order: in one pass and in steps,
+ * where sorting them together would hold the engine on an output with millions of masks.
+ */
+function* inOrder<Item>(
+  first: ReadonlyArray<Item>,
+  second: ReadonlyArray<Item>,
+  startOf: (item: Item) => number,
+): Steps<ReadonlyArray<Item>> {
+  const out: Item[] = []
+  let inFirst = 0
+  let inSecond = 0
+  for (;;) {
+    const fromFirst = first[inFirst]
+    const fromSecond = second[inSecond]
+    const takeFirst =
+      fromFirst !== undefined &&
+      (fromSecond === undefined || startOf(fromFirst) <= startOf(fromSecond))
+    const edit = takeFirst ? fromFirst : fromSecond
+    if (edit === undefined) return out
+    if (takeFirst) inFirst += 1
+    else inSecond += 1
+    out.push(edit)
+    if (due()) yield
+  }
 }
 
 /** `Array.isArray` does not narrow a read-only array out of a union: this does. */
@@ -149,39 +1621,354 @@ export const maskedJson = (record: Masked<Schema.JsonObject>): Masked<string> =>
 type MaskString = (text: string, field: string) => string
 
 /**
- * A value with every string in it masked by `string`, and a field whose name says it is a
- * credential masked whole.
+ * How many containers one in another a structured value may have, the record itself the first.
+ * What lies deeper is masked whole where it begins: no call's arguments nest that far, and a value
+ * that is kept must be written and read back by code that recurses, which a stack carries to a few
+ * thousand levels only.
  */
-const visit = (value: Schema.Json, field: string, string: MaskString): Schema.Json => {
-  if (CREDENTIAL_FIELD.test(field)) return MASK
-  if (Predicate.isString(value)) return string(value, field)
-  if (isList(value)) return value.map((item) => visit(item, field, string))
-  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) return value
-  return visitFields(value, string)
+export const NESTING_LIMIT = 256
+
+/** A container being masked: what it holds still to visit, and what is masked already. */
+interface Level {
+  /** The name it stands under in its parent, as written; its items stand in it too when it is a list. */
+  readonly into: string
+  /** That name as the parent keeps it. */
+  readonly kept: string
+  /** The names of the fields of a record as written; null for a list. */
+  readonly names: ReadonlyArray<string> | null
+  /** The same names as the record keeps them (`keptNames`); null for a list. */
+  readonly keptNames: ReadonlyArray<string> | null
+  readonly items: ReadonlyArray<Schema.Json>
+  /** The items done, in order: the next one to visit is at this length. */
+  readonly masked: Array<readonly [name: string, item: Schema.Json]>
 }
 
-/** The tag of a tagged value names its shape, never a secret: it is kept as it is. */
+/**
+ * The names of a record's fields as it keeps them, given each name masked as text. A name masking
+ * left as it was is kept as it is. A masked name that another field of the record already holds
+ * is followed by ` (2)`, ` (3)`…, the first number free, in the order of the fields: no two fields
+ * share a name, so no value is ever dropped. Each masked name counts on from the number it last
+ * took, so the names are numbered in time linear in their count.
+ */
+const keptNames = (
+  names: ReadonlyArray<string>,
+  masked: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const held = new Set(names.filter((name, at) => masked[at] === name))
+  const counted = new Map<string, number>()
+  return masked.map((name, at) => {
+    if (name === names[at]) return name
+    let count = counted.get(name) ?? 1
+    let kept = name
+    while (held.has(kept)) {
+      count += 1
+      kept = `${name} (${String(count)})`
+    }
+    counted.set(name, count)
+    held.add(kept)
+    return kept
+  })
+}
+
+const openLevel = (
+  container: Schema.JsonObject | Schema.JsonArray,
+  into: string,
+  kept: string,
+  rename: (name: string) => string,
+): Level => {
+  if (isList(container))
+    return { into, kept, names: null, keptNames: null, items: container, masked: [] }
+  const entries = Object.entries(container)
+  const names = entries.map(([name]) => name)
+  return {
+    into,
+    kept,
+    names,
+    keptNames: keptNames(names, names.map(rename)),
+    items: entries.map(([, item]) => item),
+    masked: [],
+  }
+}
+
+const closedLevel = (level: Level): Schema.Json =>
+  level.names === null ? level.masked.map(([, item]) => item) : Object.fromEntries(level.masked)
+
+/** A value masked, and whether any of it lay beyond `NESTING_LIMIT` and was masked whole. */
+interface Walked {
+  readonly masked: Schema.JsonObject
+  readonly cut: boolean
+}
+
+/** The tag of a value the engine builds names its shape, never a secret: it is kept as it is. */
 const TAG = '_tag'
 
-const visitFields = (record: Schema.JsonObject, string: MaskString): Schema.JsonObject =>
-  Object.fromEntries(
-    Object.entries(record).map(([name, item]) => [
-      name,
-      name === TAG ? item : visit(item, name, string),
-    ]),
-  )
+/** Who chose the names of a structured value: an agent, or the engine, by a schema. */
+type NamedBy = 'agent' | 'engine'
 
 /**
- * A structured value with every string in it masked, and a field whose name says it is a
- * credential (`password`, `token`, `secret`, `api_key`, `credential`, `authorization`) masked
- * whole.
+ * The fields of a record the engine fixes, by name: for each, the literals its schema allows
+ * there. A field of the record itself (never one nested in it) that holds exactly one of them is
+ * kept as it is: it names something of Hemera's (a settings section), never a secret, and masked
+ * it would no longer name it (#416). Any other field, or any other value, is masked as text.
+ */
+export type FixedFields = ReadonlyMap<string, ReadonlyArray<string>>
+
+const NOTHING_FIXED: FixedFields = new Map()
+
+/**
+ * Whether a string of a record the engine builds is kept as it is: its tag, or a field of the
+ * record itself that holds a literal its schema fixes. `top` says the string is a field of the
+ * record itself, `inRecord` that it is a field at all, not an item of a list.
+ */
+const keptAsIs = (
+  namedBy: NamedBy,
+  fixed: FixedFields,
+  name: string,
+  item: Schema.Json,
+  inRecord: boolean,
+  top: boolean,
+): boolean =>
+  namedBy === 'engine' &&
+  inRecord &&
+  Predicate.isString(item) &&
+  (name === TAG || (top && fixed.get(name)?.includes(item) === true))
+
+/**
+ * A structured value with every string in it masked by `string`, and a field whose name says it
+ * is a credential masked whole. The names of its fields and its string tags are masked too when an
+ * agent chose them (#404); a value the engine builds keeps both, as the schema that reads it back
+ * needs them. The containers open are kept on a stack, not in calls, so no depth of nesting runs
+ * out of stack; what lies beyond `NESTING_LIMIT` is masked whole, and `cut` says so.
+ */
+const walk = (
+  record: Schema.JsonObject,
+  string: MaskString,
+  namedBy: NamedBy,
+  fixed: FixedFields = NOTHING_FIXED,
+): Walked => {
+  let cut = false
+  const open: Level[] = []
+  const rename = (name: string) => (namedBy === 'agent' ? string(name, '') : name)
+  const enter = (container: Schema.JsonObject | Schema.JsonArray, into: string, kept: string) => {
+    open.push(openLevel(container, into, kept, rename))
+  }
+  enter(record, '', '')
+  for (;;) {
+    const level = open.at(-1)
+    if (level === undefined) return { masked: {}, cut: true }
+    const at = level.masked.length
+    if (at === level.items.length) {
+      open.pop()
+      const parent = open.at(-1)
+      if (parent === undefined) return { masked: Object.fromEntries(level.masked), cut }
+      parent.masked.push([level.kept, closedLevel(level)])
+      continue
+    }
+    const item = level.items[at] ?? null
+    const name = level.names?.[at] ?? level.into
+    const kept = level.keptNames?.[at] ?? level.kept
+    if (keptAsIs(namedBy, fixed, name, item, level.names !== null, open.length === 1)) {
+      level.masked.push([kept, item])
+    } else if (CREDENTIAL_FIELD.test(name)) {
+      level.masked.push([kept, MASK])
+    } else if (Predicate.isString(item)) {
+      level.masked.push([kept, string(item, name)])
+    } else if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) {
+      level.masked.push([kept, item])
+    } else if (open.length >= NESTING_LIMIT) {
+      cut = true
+      level.masked.push([kept, MASK])
+    } else {
+      enter(item, name, kept)
+    }
+  }
+}
+
+/**
+ * Every field of a record masked whole, its name through `rename`: what is kept of a record that
+ * could not be read.
+ */
+const maskedWhole = (
+  record: Schema.JsonObject,
+  rename: (name: string) => string,
+): Schema.JsonObject => {
+  const names = Object.keys(record)
+  const kept = keptNames(names, names.map(rename))
+  return Object.fromEntries(kept.map((one) => [one, MASK]))
+}
+
+/**
+ * A masked record as its JSON writes it, and the stretches of that text masking may write over,
+ * in order: each string but those kept as they are, and each name when an agent chose the names.
+ * The text is the one `JSON.stringify` writes. A masked record nests no deeper than
+ * `NESTING_LIMIT`, so the calls here stay within the stack.
+ */
+const writtenRecord = (record: Schema.JsonObject, namedBy: NamedBy, fixed: FixedFields) => {
+  const pieces: string[] = []
+  const spans: Span[] = []
+  let length = 0
+  const put = (piece: string, open: boolean) => {
+    if (open) spans.push([length, length + piece.length])
+    pieces.push(piece)
+    length += piece.length
+  }
+  const value = (item: Schema.Json, kept: boolean, top: boolean) => {
+    if (Predicate.isString(item)) put(JSON.stringify(item), !kept)
+    else if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) {
+      put(JSON.stringify(item), false)
+    } else if (isList(item)) {
+      put('[', false)
+      item.forEach((one, at) => {
+        if (at > 0) put(',', false)
+        value(one, false, false)
+      })
+      put(']', false)
+    } else {
+      put('{', false)
+      Object.entries(item).forEach(([name, one], at) => {
+        if (at > 0) put(',', false)
+        put(JSON.stringify(name), namedBy === 'agent')
+        put(':', false)
+        value(one, keptAsIs(namedBy, fixed, name, one, true, top), false)
+      })
+      put('}', false)
+    }
+  }
+  value(record, false, true)
+  return { text: pieces.join(''), spans }
+}
+
+/**
+ * A masked record with the strings `hidden` says masked whole (`hidden` is asked once for each
+ * stretch `writtenRecord` gives, in order), and the names too when an agent chose them; names
+ * masked alike are numbered as the walk numbers them (`keptNames`).
+ */
+const rewritten = (
+  record: Schema.JsonObject,
+  namedBy: NamedBy,
+  fixed: FixedFields,
+  hidden: (index: number) => boolean,
+): Schema.JsonObject => {
+  let index = 0
+  const next = () => {
+    index += 1
+    return hidden(index - 1)
+  }
+  const fields = (item: Schema.JsonObject, top: boolean): Schema.JsonObject => {
+    const entries = Object.entries(item)
+    const names: string[] = []
+    const values: Schema.Json[] = []
+    for (const [name, one] of entries) {
+      names.push(namedBy === 'agent' && next() ? MASK : name)
+      values.push(value(one, keptAsIs(namedBy, fixed, name, one, true, top)))
+    }
+    const kept = keptNames(
+      entries.map(([name]) => name),
+      names,
+    )
+    return Object.fromEntries(kept.map((name, at) => [name, values[at] ?? null]))
+  }
+  const value = (item: Schema.Json, kept: boolean): Schema.Json => {
+    if (Predicate.isString(item)) return !kept && next() ? MASK : item
+    if (item === null || Predicate.isNumber(item) || Predicate.isBoolean(item)) return item
+    if (isList(item)) return item.map((one) => value(one, false))
+    return fields(item, false)
+  }
+  return fields(record, true)
+}
+
+/**
+ * The indexes of the stretches that any of the hits touches; both lists in order, the hits apart,
+ * crossed once.
+ */
+const touchedBy = (spans: ReadonlyArray<Span>, hits: ReadonlyArray<Span>): ReadonlySet<number> => {
+  const touched = new Set<number>()
+  let hit = 0
+  spans.forEach(([start, end], index) => {
+    while ((hits[hit]?.[1] ?? Number.POSITIVE_INFINITY) <= start) hit += 1
+    if ((hits[hit]?.[0] ?? Number.POSITIVE_INFINITY) < end) touched.add(index)
+  })
+  return touched
+}
+
+/**
+ * A masked record whose stored text holds no known value across its strings (#416): masked string
+ * by string, a known value written with JSON's quotes, commas or colons can still stand across a
+ * name and its value (`a":"b` in `{"zz a":"b zz"}`), two items of a list, or what an escape
+ * writes (`a\"b`). Every string such a value touches in the text is masked whole, and every name
+ * an agent chose; the names of a record the engine builds, its tags and its fixed fields stay, as
+ * its schema reads them back. Masks written may make a value that holds `•••` appear: if one then
+ * touches what can still be masked, all of it is. Each pass crosses the text once.
+ */
+const storedSafe = (
+  record: Schema.JsonObject,
+  known: ReadonlyArray<string>,
+  namedBy: NamedBy,
+  fixed: FixedFields,
+): Schema.JsonObject => {
+  if (known.length === 0) return record
+  const first = writtenRecord(record, namedBy, fixed)
+  const hits = done(knownSpans(first.text, known))
+  if (hits.length === 0) return record
+  const touched = touchedBy(first.spans, hits)
+  if (touched.size === 0) return record
+  const once = rewritten(record, namedBy, fixed, (index) => touched.has(index))
+  const second = writtenRecord(once, namedBy, fixed)
+  const left = touchedBy(second.spans, done(knownSpans(second.text, known)))
+  const open = [...left].some((index) => {
+    const [start, end] = second.spans[index] ?? [0, 0]
+    return second.text.slice(start, end) !== QUOTED_MASK
+  })
+  return open ? rewritten(once, namedBy, fixed, () => true) : once
+}
+
+/** `maskRecord` or `maskArguments`, as `namedBy` says. */
+const maskedNamedBy = (
+  record: Schema.JsonObject,
+  values: ReadonlyArray<string>,
+  namedBy: NamedBy,
+  fixed: FixedFields = NOTHING_FIXED,
+): Masked<Schema.JsonObject> => {
+  const known = longestFirst(values)
+  const masked = (text: string) => doneOrMask(() => textMasked(text, known))
+  try {
+    return maskedRecord(
+      storedSafe(walk(record, masked, namedBy, fixed).masked, known, namedBy, fixed),
+    )
+  } catch {
+    return maskedRecord(maskedWhole(record, namedBy === 'agent' ? masked : (name) => name))
+  }
+}
+
+/**
+ * A structured value the engine builds, with every string in it masked, and a field whose name
+ * says it is a credential (`password`, `token`, `secret`, `api_key`, `credential`,
+ * `authorization`) masked whole. Its names and its string tags are kept as they are: a schema
+ * fixed them and reads them back, and a variable that holds `options` must not rename a need's
+ * `options`. A field of the record that `fixed` lists keeps a literal its schema fixes there (#416).
+ * No known value stands across its strings in the JSON it is stored as (`storedSafe`). What lies
+ * beyond `NESTING_LIMIT` containers, or whatever cannot be read, is `•••`, and the call it serves
+ * never fails.
  */
 export function maskRecord(
   record: Schema.JsonObject,
   values: ReadonlyArray<string>,
+  fixed: FixedFields = NOTHING_FIXED,
 ): Masked<Schema.JsonObject> {
-  const known = longestFirst(values)
-  return maskedRecord(visitFields(record, (text) => maskShapes(maskKnown(text, known))))
+  return maskedNamedBy(record, values, 'engine', fixed)
+}
+
+/**
+ * Arguments an agent sent, as `maskRecord` masks a record, with the names of their fields and
+ * their string tags masked as text too: an agent chose them, and may have put a secret there. A
+ * masked name that another field already holds is numbered (`keptNames`), so no value is lost.
+ * What this gives is kept to be read, never decoded by a schema.
+ */
+export function maskArguments(
+  record: Schema.JsonObject,
+  values: ReadonlyArray<string>,
+): Masked<Schema.JsonObject> {
+  return maskedNamedBy(record, values, 'agent')
 }
 
 /**
@@ -189,18 +1976,35 @@ export function maskRecord(
  * a field that says where the action goes (`path`, `target`, `cwd`, `command`, `program`, `line`,
  * `url`, `host`). A credential recognised by its shape leaves a destination readable (the URL of
  * a `curl` stays), so it does not stop the action; a known value inside a destination may be the
- * destination itself, and a partial action is never sent.
+ * destination itself, and a partial action is never sent. The engine builds the action and fixes
+ * every name in it (`jevAction`): its names and its tags are kept, so a variable that holds
+ * `platform` does not change what the action says (#404).
  */
 export function maskAction(
   action: Schema.JsonObject,
   values: ReadonlyArray<string>,
 ): Masked<Schema.JsonObject> | null {
-  const known = longestFirst(values)
-  let lostDestination = false
-  const masked = visitFields(action, (text, field) => {
-    const withoutKnown = maskKnown(text, known)
-    if (DESTINATION_FIELD.test(field) && withoutKnown !== text) lostDestination = true
-    return maskShapes(withoutKnown)
-  })
-  return lostDestination ? null : maskedRecord(masked)
+  try {
+    const known = longestFirst(values)
+    let lostDestination = false
+    const { masked, cut } = walk(
+      action,
+      (text, field) => {
+        const destination = DESTINATION_FIELD.test(field)
+        if (destination && known.some((value) => text.includes(value))) lostDestination = true
+        try {
+          return done(textMasked(text, known))
+        } catch {
+          // A destination that could not be masked is gone whole: the action would be sent in part.
+          if (destination) lostDestination = true
+          return MASK
+        }
+      },
+      'engine',
+    )
+    // An action cut where it nests too deep, or that could not be read, is not sent in part.
+    return lostDestination || cut ? null : maskedRecord(masked)
+  } catch {
+    return null
+  }
 }

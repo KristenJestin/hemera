@@ -16,7 +16,6 @@
  * template applies to the next session.
  */
 
-import { readFileSync } from 'node:fs'
 import { join, posix, resolve, win32 } from 'node:path'
 
 import { ADAPTERS } from '../agents/adapters/index.ts'
@@ -24,6 +23,7 @@ import type { AgentAdapter } from '../agents/adapter.ts'
 import { getProject } from '../projects.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
 import { projectRepositories, workspaceRepositories, workspaces } from '../storage/schema.ts'
+import { readOwnSync } from '../tools/judged.ts'
 import { asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { AgentProvider } from '@hemera/core/domain'
@@ -106,9 +106,13 @@ type InstructionFileName = InstructionFile['file']
 const otherFile = (file: InstructionFileName): InstructionFileName =>
   file === 'CLAUDE.md' ? 'AGENTS.md' : 'CLAUDE.md'
 
+/** The most of an instruction file Hemera reads: far above any a repository keeps. */
+const INSTRUCTIONS_CAP = 4 * 1024 * 1024
+
+/** An instruction file's text, read without waiting on a pipe put in its place (#434); else null. */
 const readText = (path: string): string | null => {
   try {
-    return readFileSync(path, 'utf8')
+    return readOwnSync(path, INSTRUCTIONS_CAP).bytes.toString('utf8')
   } catch {
     return null
   }

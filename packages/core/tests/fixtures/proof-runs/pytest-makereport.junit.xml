@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="0.023" timestamp="2026-10-18T16:58:01.537265+00:00" hostname="acme"><testcase classname="tests.test_a" name="test_other" time="0.000" /><testcase classname="tests.test_a" name="test_saves" time="0.000"><failure message="AssertionError: assert 'csv' == 'md'&#10;  &#10;  - md&#10;  + csv">item = &lt;Function test_saves&gt;
+call = &lt;CallInfo when='call' excinfo=&lt;ExceptionInfo AssertionError("assert 'csv' == 'md'\n  \n  - md\n  + csv") tblen=1&gt;&gt;
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_makereport(item, call):
+        if item.name == "test_saves" and call.when == "call":
+            try:
+&gt;               assert "csv" == "md"
+E               AssertionError: assert 'csv' == 'md'
+E                 
+E                 - md
+E                 + csv
+
+conftest.py:8: AssertionError</failure></testcase></testsuite></testsuites>

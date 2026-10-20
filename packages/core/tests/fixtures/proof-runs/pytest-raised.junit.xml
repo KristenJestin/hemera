@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.021" timestamp="2026-10-16T14:51:55.327993+02:00" hostname="home"><testcase classname="tests.test_raised" name="test_saves" time="0.000"><failure message="TypeError: exceptions must derive from BaseException">def test_saves():
+&gt;       raise "AssertionError: assert 1 == 2"
+E       TypeError: exceptions must derive from BaseException
+
+tests/test_raised.py:2: TypeError</failure></testcase><testcase classname="tests.test_raised" name="test_keeps" time="0.000"><failure message="test_raised.test_keeps.&lt;locals&gt;.AssertionError: assert 1 == 2">def test_keeps():
+        class AssertionError(Exception):
+            pass
+    
+&gt;       raise AssertionError("assert 1 == 2")
+E       test_raised.test_keeps.&lt;locals&gt;.AssertionError: assert 1 == 2
+
+tests/test_raised.py:9: AssertionError</failure></testcase></testsuite></testsuites>

@@ -37,6 +37,14 @@ import { AnswerPropose, TicketEventReport } from './ticket-events.ts'
 import { PrelaunchReport } from './building.ts'
 import { DocsReport } from './docs.ts'
 import { CheckpointRead, EvidenceRead, ReviewReport } from './review.ts'
+import {
+  FeedbackAnswer,
+  RoundPointRemove,
+  RoundPointWrite,
+  RoundProposeMission,
+  RoundReady,
+  RoundTasksWrite,
+} from './rounds.ts'
 import { TaskAmendment } from './build-tasks.ts'
 import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
@@ -60,6 +68,7 @@ export const ROLES = [
   'chat',
   'setup',
   'living-spec',
+  'round-planner',
 ] as const
 export const Role = Schema.Literals(ROLES)
 export type Role = typeof Role.Type
@@ -80,6 +89,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   chat: 'the Chat',
   setup: 'the setup agent',
   'living-spec': 'the living spec agent',
+  'round-planner': 'the Planner in round mode',
 }
 
 /** The kinds of place a role works in. */
@@ -114,6 +124,8 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   chat: { kind: 'main-checkout', readOnly: false },
   setup: { kind: 'main-checkout', readOnly: true },
   'living-spec': { kind: 'main-checkout', readOnly: true },
+  // The Workspace as the user reviewed it, never the main checkout (#468).
+  'round-planner': { kind: 'workspace', readOnly: true },
 }
 
 export type GateClass = 'local' | 'judged' | 'workflow'
@@ -628,6 +640,12 @@ const WaveQuestion = Schema.Struct({
   ),
   from_finding: Schema.optionalKey(Bounded(80, 'The cold read finding it comes from.')),
   replaces: Schema.optionalKey(Bounded(20, 'The question (`Q3`) it replaces.')),
+  conflict: Schema.optionalKey(
+    Bounded(
+      80,
+      'In round mode: the feedback, by its id, that conflicts with the frozen Spec. Hemera offers its three outcomes itself and acts on the user’s choice; `recommended` is their index (0: clarify with a note, 1: withdraw the feedback, 2: the third outcome).',
+    ),
+  ),
 })
 
 const AskWave = Schema.Struct({
@@ -919,6 +937,7 @@ const READERS: ReadonlyArray<Role> = [
   'chat',
   'setup',
   'living-spec',
+  'round-planner',
 ]
 const WRITERS: ReadonlyArray<Role> = [
   'probe',
@@ -1009,7 +1028,7 @@ export const TOOLS = {
     label: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
   }),
   memory_read: tool({
-    roles: ['planner', 'probe', 'builder', 'chat'],
+    roles: ['planner', 'probe', 'builder', 'chat', 'round-planner'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1017,7 +1036,7 @@ export const TOOLS = {
     label: { label: 'Read memory', mark: 'read-memory', doing: 'Reading the Memory' },
   }),
   now_set: tool({
-    roles: ['planner', 'probe', 'builder', 'helper', 'documenter'],
+    roles: ['planner', 'probe', 'builder', 'helper', 'documenter', 'round-planner'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1025,7 +1044,7 @@ export const TOOLS = {
     label: { label: 'Update Now', mark: 'update-now', doing: 'Updating Now' },
   }),
   journal_add: tool({
-    roles: ['planner', 'builder'],
+    roles: ['planner', 'builder', 'round-planner'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1033,7 +1052,7 @@ export const TOOLS = {
     label: { label: 'Add to the Journal', mark: 'journal-add', doing: 'Writing in the Journal' },
   }),
   note_add: tool({
-    roles: ['planner', 'probe', 'builder', 'helper', 'prototyper'],
+    roles: ['planner', 'probe', 'builder', 'helper', 'prototyper', 'round-planner'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1100,6 +1119,7 @@ export const TOOLS = {
       'documenter',
       'spec-reviewer',
       'code-reviewer',
+      'round-planner',
     ],
     gate: 'workflow',
     effect: 'reads',
@@ -1168,7 +1188,7 @@ export const TOOLS = {
     },
   }),
   ask_wave: tool({
-    roles: ['planner'],
+    roles: ['planner', 'round-planner'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1196,7 +1216,7 @@ export const TOOLS = {
     },
   }),
   input_integrated: tool({
-    roles: ['planner'],
+    roles: ['planner', 'round-planner'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1208,7 +1228,7 @@ export const TOOLS = {
     },
   }),
   living_spec_read: tool({
-    roles: ['planner', 'chat', 'living-spec'],
+    roles: ['planner', 'chat', 'living-spec', 'round-planner'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1559,6 +1579,62 @@ export const TOOLS = {
     input: ReviewReport,
     label: { label: 'Report the review', mark: 'review-report', doing: 'Reporting the review' },
   }),
+  round_point_write: tool({
+    roles: ['round-planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RoundPointWrite,
+    label: { label: 'Write a point', mark: 'round-point-write', doing: 'Writing a point' },
+  }),
+  round_point_remove: tool({
+    roles: ['round-planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RoundPointRemove,
+    label: { label: 'Remove a point', mark: 'round-point-remove', doing: 'Removing a point' },
+  }),
+  round_tasks_write: tool({
+    roles: ['round-planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RoundTasksWrite,
+    label: {
+      label: 'Write the round’s tasks',
+      mark: 'round-tasks-write',
+      doing: 'Writing the round’s tasks',
+    },
+  }),
+  round_propose_mission: tool({
+    roles: ['round-planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RoundProposeMission,
+    label: {
+      label: 'Propose a mission',
+      mark: 'round-propose-mission',
+      doing: 'Proposing a mission',
+    },
+  }),
+  round_ready: tool({
+    roles: ['round-planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: RoundReady,
+    label: { label: 'Round ready', mark: 'round-ready', doing: 'Ending the grilling' },
+  }),
+  feedback_answer: tool({
+    roles: ['builder', 'round-planner'],
+    gate: 'workflow',
+    effect: 'records',
+    path: null,
+    input: FeedbackAnswer,
+    label: { label: 'Answer a feedback', mark: 'feedback-answer', doing: 'Answering a feedback' },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1648,6 +1724,12 @@ export const TOOL_NAMES = [
   'checkpoint_read',
   'evidence_read',
   'review_report',
+  'round_point_write',
+  'round_point_remove',
+  'round_tasks_write',
+  'round_propose_mission',
+  'round_ready',
+  'feedback_answer',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
