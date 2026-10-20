@@ -37,13 +37,15 @@ import {
   IconPlus,
 } from '../../icons.ts'
 import { instant, useTransition } from '../../motion.ts'
-// The libraries draw in shadow roots: this sheet is where their variables meet the tokens.
-// oxlint-disable-next-line import/no-unassigned-import
-import './review-diffs.css'
-import { type CommentAction, CommentBox, CommentStack, type NewComment } from './comments.tsx'
+import {
+  type CommentHandlers,
+  CommentStack,
+  type NewComment,
+  NewCommentBox,
+} from './diff-comments.tsx'
 import { DIFF_THEME, useDocumentTheme } from './diff-theme.ts'
-import { idOf } from './tree.tsx'
-import type { DiffComment, DiffFile, DiffRepository, GitLetter, Place } from './types.ts'
+import { idOf } from './diff-tree.tsx'
+import type { DiffComment, DiffFile, DiffRepository, GitLetter, Place } from './diff-types.ts'
 
 /**
  * The middle of the diff view: every file of the Workspace one after the other in one scroll, the
@@ -75,7 +77,7 @@ export type StageTarget =
 /** What a line of the diff holds under it: the comments ending there, or the box being written. */
 type Note = { kind: 'comments'; comments: readonly DiffComment[] } | { kind: 'draft'; place: Place }
 
-export interface DiffStageProps {
+export interface DiffStageProps extends CommentHandlers {
   repositories: readonly DiffRepository[]
   comments: readonly DiffComment[]
   layout: DiffLayout
@@ -86,9 +88,8 @@ export interface DiffStageProps {
   /** The comment the view was sent to, lit while it is. */
   lit?: string | null | undefined
   onAdd: (comment: NewComment) => void
-  onAction: (id: string, action: CommentAction) => void
-  onOpenVersion: (id: string) => void
-  onOpenForge: (url: string) => void
+  /** A large file's Show pressed: its sides are asked for, by its id. */
+  onShow: (id: string) => void
 }
 
 interface Known {
@@ -148,35 +149,47 @@ function inTreeOrder(left: DiffFile, right: DiffFile): number {
   return a.length - b.length
 }
 
-/** Whether a file has lines to draw at all: not a binary, not a withheld one. */
-const drawable = (file: DiffFile): boolean => file.binary === undefined && file.withheld !== true
+/** Whether a file has lines to draw at all: not a binary, a withheld or an unreadable one. */
+const drawable = (file: DiffFile): boolean =>
+  file.binary === undefined && file.withheld !== true && file.unreadable === undefined
+
+/** The diff of a file with no lines to draw, or none read yet. */
+const emptyOf = (file: DiffFile): FileDiffMetadata =>
+  parseDiffFromFile({ name: file.path, contents: '' }, { name: file.path, contents: '' })
+
+/** A text file's diff, and the count of its parses: what moved in it moves its version. */
+interface Parsed {
+  before: string | null
+  after: string | null
+  diff: FileDiffMetadata
+  parse: number
+}
 
 /**
  * Each text file's diff, parsed once per content: CodeView keeps a diff by identity, and a new
- * object under the same version is a file it refuses to redraw.
+ * object under the same version is a file it refuses to redraw. A file whose sides are not read
+ * yet has none.
  */
-function useDiffs(files: ReadonlyMap<string, Known>): ReadonlyMap<string, FileDiffMetadata> {
-  const cache = useRef(
-    new Map<string, { before: string | null; after: string | null; diff: FileDiffMetadata }>(),
-  )
+function useDiffs(files: ReadonlyMap<string, Known>): ReadonlyMap<string, Parsed> {
+  const cache = useRef(new Map<string, Parsed>())
   return useMemo(() => {
-    const diffs = new Map<string, FileDiffMetadata>()
+    const diffs = new Map<string, Parsed>()
     for (const [id, { file }] of files) {
-      if (!drawable(file)) continue
+      const sides = file.sides
+      if (!drawable(file) || sides === undefined) continue
       const known = cache.current.get(id)
-      if (known !== undefined && known.before === file.before && known.after === file.after) {
-        diffs.set(id, known.diff)
+      if (known !== undefined && known.before === sides.before && known.after === sides.after) {
+        diffs.set(id, known)
         continue
       }
       const name = file.path
       const diff = parseDiffFromFile(
-        file.before === null
-          ? { name: file.from ?? name, contents: '' }
-          : { name: file.from ?? name, contents: file.before },
-        file.after === null ? { name, contents: '' } : { name, contents: file.after },
+        { name: file.from ?? name, contents: sides.before ?? '' },
+        { name, contents: sides.after ?? '' },
       )
-      cache.current.set(id, { before: file.before, after: file.after, diff })
-      diffs.set(id, diff)
+      const parsed = { ...sides, diff, parse: (known?.parse ?? 0) + 1 }
+      cache.current.set(id, parsed)
+      diffs.set(id, parsed)
     }
     return diffs
   }, [files])
@@ -224,11 +237,10 @@ interface HeadProps {
   open: boolean
   /** Whether the file folds at all: one with no lines to show has nothing to fold. */
   folds: boolean
-  loaded: boolean
   writable: boolean
   comments: number
   onFold: () => void
-  onLoad: () => void
+  onShow: () => void
   onComment: () => void
 }
 
@@ -238,16 +250,15 @@ function FileHead({
   file,
   open,
   folds,
-  loaded,
   writable,
   comments,
   onFold,
-  onLoad,
+  onShow,
   onComment,
 }: HeadProps): ReactNode {
   const id = idOf(repository, file.path)
   const letter = LETTERS[file.letter]
-  const lines = (file.after ?? file.before ?? '').split('\n').length - 1
+  const waits = file.large !== undefined && file.sides === undefined
   return (
     <div className={HEAD} data-file-head={id}>
       {folds ? (
@@ -311,6 +322,13 @@ function FileHead({
           </span>
         </Legend>
       )}
+      {file.unreadable !== undefined && (
+        <Legend label={`Unreadable: ${file.unreadable}`}>
+          <span className="flex shrink-0 text-destructive">
+            <IconAlertTriangle size="sm" />
+          </span>
+        </Legend>
+      )}
       {file.binary !== undefined && (
         <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
           <Legend label="Binary: its sizes before and after">
@@ -338,12 +356,12 @@ function FileHead({
             {`${String(comments)} ${comments === 1 ? 'comment' : 'comments'}`}
           </span>
         )}
-        {file.large === true && !loaded && (
-          <Button variant="secondary" size="sm" onClick={onLoad}>
-            {`Show its ${lines.toLocaleString('en')} lines`}
+        {waits && (
+          <Button variant="secondary" size="sm" onClick={onShow}>
+            {`Show its ${(file.large?.lines ?? 0).toLocaleString('en')} lines`}
           </Button>
         )}
-        {writable && drawable(file) && (file.large !== true || loaded) && (
+        {writable && drawable(file) && file.sides !== undefined && (
           <Tooltip label="Comment on the whole file">
             <IconButton
               variant="ghost"
@@ -416,9 +434,8 @@ export function DiffStage({
   target = null,
   lit = null,
   onAdd,
-  onAction,
-  onOpenVersion,
-  onOpenForge,
+  onShow,
+  ...handlers
 }: DiffStageProps): ReactNode {
   const view = useRef<CodeViewHandle<Note, undefined>>(null)
   const scroller = useRef<HTMLDivElement | null>(null)
@@ -431,7 +448,6 @@ export function DiffStage({
   const [said, setSaid] = useState('')
   // What the hand folded and unfolded, by id: a generated file starts folded, the others open.
   const [toggled, setToggled] = useState<ReadonlySet<string>>(new Set())
-  const [loaded, setLoaded] = useState<ReadonlySet<string>>(new Set())
 
   const files = useMemo(() => {
     const index = new Map<string, Known>()
@@ -445,13 +461,12 @@ export function DiffStage({
   const diffs = useDiffs(files)
   const rows = useMemo(() => {
     const index = new Map<string, readonly Row[]>()
-    for (const [id, diff] of diffs) index.set(id, rowsOf(diff))
+    for (const [id, parsed] of diffs) index.set(id, rowsOf(parsed.diff))
     return index
   }, [diffs])
 
   const isOpen = (id: string, file: DiffFile): boolean => {
-    if (!drawable(file)) return false
-    if (file.large === true && !loaded.has(id)) return false
+    if (!drawable(file) || file.sides === undefined) return false
     const folded = file.generated === true
     return toggled.has(id) ? folded : !folded
   }
@@ -486,7 +501,7 @@ export function DiffStage({
         })
       }
       const open = isOpen(id, file)
-      const diff = diffs.get(id)
+      const parsed = diffs.get(id)
       const signature = JSON.stringify([
         notes.map((note) =>
           note.metadata.kind === 'draft'
@@ -495,28 +510,26 @@ export function DiffStage({
         ),
         open,
         writable,
-        file.after?.length,
-        loaded.has(id),
+        parsed?.parse,
       ])
       const known = versions.current.get(id)
       const version =
         known === undefined ? 0 : known.signature === signature ? known.version : known.version + 1
       versions.current.set(id, { signature, version })
-      if (diff === undefined) {
-        list.push({
-          id,
-          type: 'file',
-          file: { name: file.path, contents: '' },
-          collapsed: true,
-          version,
-        })
-        continue
-      }
-      list.push({ id, type: 'diff', fileDiff: diff, annotations: notes, collapsed: !open, version })
+      list.push({
+        id,
+        type: 'diff',
+        // A file with no lines read yet is an empty diff, folded: the same kind of item as the
+        // one it becomes once its sides arrive, which the library then redraws in place.
+        fileDiff: parsed?.diff ?? emptyOf(file),
+        annotations: notes,
+        collapsed: !open,
+        version,
+      })
     }
     return list
-    // `isOpen` reads `toggled` and `loaded`, both listed.
-  }, [files, diffs, comments, draft, toggled, loaded, lit, writable])
+    // `isOpen` reads `toggled`, listed.
+  }, [files, diffs, comments, draft, toggled, lit, writable])
 
   const behavior = moving === instant ? 'instant' : 'smooth'
 
@@ -564,6 +577,17 @@ export function DiffStage({
     setSelection(null)
     scroller.current?.focus({ preventScroll: true })
   }
+
+  // A large file asked for: once its lines arrive, the view stands at its head. Left alone, the
+  // scroll would keep the file after it in place and leap over the lines just asked for.
+  const asked = useRef(new Set<string>())
+  useEffect(() => {
+    for (const id of asked.current) {
+      if (!diffs.has(id)) continue
+      asked.current.delete(id)
+      view.current?.scrollTo({ type: 'item', id, align: 'start', behavior: 'instant' })
+    }
+  }, [diffs])
 
   // Sent here from the tree, or from a comment's place on the Review page.
   useEffect(() => {
@@ -676,7 +700,7 @@ export function DiffStage({
     const { metadata } = annotation
     if (metadata.kind === 'draft') {
       return (
-        <CommentBox
+        <NewCommentBox
           place={metadata.place}
           where={whereOf(metadata.place)}
           onCancel={closeDraft}
@@ -687,16 +711,7 @@ export function DiffStage({
         />
       )
     }
-    return (
-      <CommentStack
-        comments={metadata.comments}
-        lit={lit}
-        writable={writable}
-        onAction={onAction}
-        onOpenVersion={onOpenVersion}
-        onOpenForge={onOpenForge}
-      />
-    )
+    return <CommentStack comments={metadata.comments} lit={lit} writable={writable} {...handlers} />
   }
 
   function headOf(item: CodeViewItem<Note>): ReactNode {
@@ -708,8 +723,7 @@ export function DiffStage({
         repository={repository}
         file={file}
         open={isOpen(item.id, file)}
-        folds={drawable(file) && (file.large !== true || loaded.has(item.id))}
-        loaded={loaded.has(item.id)}
+        folds={drawable(file) && file.sides !== undefined}
         writable={writable}
         comments={commentsOf(repository, file.path)}
         onFold={() =>
@@ -720,7 +734,10 @@ export function DiffStage({
             return next
           })
         }
-        onLoad={() => setLoaded((before) => new Set([...before, item.id]))}
+        onShow={() => {
+          asked.current.add(item.id)
+          onShow(item.id)
+        }}
         onComment={() =>
           setDraft({
             id: item.id,

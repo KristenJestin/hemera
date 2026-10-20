@@ -2,103 +2,78 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { stageWords } from '../../blocks/mission/vocabulary.ts'
 import { Button } from '../../components/button/button.tsx'
-import { IconGitCompare, IconHistory, IconMessages } from '../../icons.ts'
+import { IconGitCompare, IconHistory } from '../../icons.ts'
 import { ContentHeader, type Crumb } from '../../shell/content-header.tsx'
-import { MissionFrame, type MissionView } from '../../surfaces/mission/mission-frame.tsx'
+import { MissionFrame, MissionFrameBase, type MissionView } from '../mission/mission-frame.tsx'
 import {
   AT_BASE,
   type MissionFrameState,
   closeView,
   openView,
   showView,
-} from '../../surfaces/mission/navigation.ts'
-import { BRANCH, KEY, MOMENTS, ROUND_TWO_BUILDING, TITLE } from '../review/fixtures.ts'
-import type { RailHandlers } from '../review/rail.tsx'
-import { ReviewPage } from '../review/review.tsx'
-import { RoundView } from '../review/round-view.tsx'
-import type { Remark } from '../review/types.ts'
-import type { CommentAction, NewComment } from './comments.tsx'
+} from '../mission/navigation.ts'
+import type { CommentAction, NewComment } from './diff-comments.tsx'
+import { F13_VERSION, LARGE_SIDES, LIVE_STEPS } from './diff-fixtures.ts'
+import type { DiffLayout, StageTarget } from './diff-stage.tsx'
+import type { DiffComment, DiffMoment, DiffRepository } from './diff-types.ts'
 import { CommentedVersion, DiffActions, DiffView } from './diff-view.tsx'
-import { F13_VERSION, LIVE_STEPS } from './fixtures.ts'
-import type { DiffLayout, StageTarget } from './stage.tsx'
-import { idOf } from './tree.tsx'
-import type { DiffComment, DiffMoment } from './types.ts'
 
 /**
  * ACME-12 in its mission frame with the diff view opened over its base, under the window's header
- * that carries the trail: `ACME-12 › Review · round 1 › Diff`. The base is the Review page of
- * #254, the round view over it when the diff was opened from a round, and the stage is Building
- * while a round writes.
- *
- * Open question 33, as recommended: one list. A comment written in the diff is a remark of the
- * Review page with a place; the Review page's remark opens the diff at its lines, lit; Back (the
- * ×, Escape, or the trail) finds the Review page as it was. The story's engine holds the comments,
- * so that one added, withdrawn or resolved shows on both.
+ * that carries the trail: `ACME-12 › Review · round 1 › Diff`. The base is the stage's page —
+ * Review, or Building while round 2 writes — drawn here as its place only. The fixture holds the
+ * comments, as the engine does, so that one added, edited, withdrawn or resolved shows at once.
  */
 
 export interface DiffScreenProps {
   moment: DiffMoment
-  /** Where the diff was opened from: the Review page, a round's view, or Building · round 2. */
-  from?: 'review' | 'round' | 'building' | undefined
+  /** Where the diff was opened from: the Review page, or Building · round 2. */
+  from?: 'review' | 'building' | undefined
   /** Whether the diff is open as the story starts, or waits to be opened from the base. */
   opened?: boolean | undefined
   /** The comment the diff was opened at, from its remark on the Review page. */
   at?: string | undefined
   layout?: DiffLayout | undefined
   loading?: boolean | undefined
+  error?: string | undefined
   /** Round 2 writes while the user reads: the steps of `LIVE_STEPS`, one after the other. */
   live?: boolean | undefined
-  /** Open question 33's alternative: the comments listed again in a column of the view. */
-  column?: boolean | undefined
   onComment: (comment: NewComment) => void
   onAction: (id: string, action: CommentAction) => void
+  onEdit: (id: string, text: string) => void
+  onFollowUp: (id: string, text: string) => void
+  onShow: (id: string) => void
   onOpenForge: (url: string) => void
   onOpenVersion: (id: string) => void
 }
 
-/** A remark of the Review page made of a comment written in the diff: the same thing, listed. */
-function remarkOf(comment: DiffComment): Remark {
-  const lines = comment.place.lines
-  const where = lines === null ? '' : `:${String(lines.start)}`
-  return {
-    id: comment.id,
-    kind: comment.kind,
-    text: comment.text,
-    state: comment.state,
-    at: comment.at,
-    anchor: `${idOf(comment.place.repository, comment.place.path)}${where}`,
-  }
-}
-
-const noAnswer = async (): Promise<void> => {}
-
-const QUESTION: RailHandlers['question'] = {
-  onAnswer: noAnswer,
-  onWaitOnSomeone: noAnswer,
-  onCopyDraft: () => {},
-  onAcceptProposed: noAnswer,
-  onDismissProposed: noAnswer,
-  onDiscuss: () => {},
-}
-
 const LIVE_EVERY = 1_600
+
+const LARGE = 'web/src/billing/fixtures/invoices.csv'
+
+/** The repositories with the large file's sides read, once its Show was pressed. */
+function withLarge(repositories: readonly DiffRepository[]): readonly DiffRepository[] {
+  return repositories.map((repository) => ({
+    ...repository,
+    files: repository.files.map((file) =>
+      `${repository.name}/${file.path}` === LARGE ? { ...file, sides: LARGE_SIDES } : file,
+    ),
+  }))
+}
 
 export function DiffScreen(props: DiffScreenProps): ReactNode {
   const { moment, from = 'review', opened = true, loading = false } = props
   const [comments, setComments] = useState<readonly DiffComment[]>(moment.comments)
   const [layout, setLayout] = useState<DiffLayout>(props.layout ?? 'stacked')
   const [step, setStep] = useState(props.live === true ? 0 : -1)
+  const [shown, setShown] = useState(false)
   const nonce = useRef(0)
   const [target, setTarget] = useState<StageTarget | null>(() =>
     props.at === undefined ? null : { kind: 'comment', id: props.at, nonce: 0 },
   )
-  const [lit, setLit] = useState<string | null>(props.at ?? null)
-  const initial: MissionFrameState = !opened
-    ? AT_BASE
-    : from === 'round'
-      ? { open: ['round:2', 'diff'], shown: 'diff' }
-      : { open: ['diff'], shown: 'diff' }
-  const [views, setViews] = useState(initial)
+  const [views, setViews] = useState<MissionFrameState>(
+    opened ? { open: ['diff'], shown: 'diff' } : AT_BASE,
+  )
 
   // The round writing: one step more at each beat, until the last.
   useEffect(() => {
@@ -107,33 +82,18 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
     return () => clearTimeout(timer)
   }, [step])
 
-  const repositories = step >= 0 ? (LIVE_STEPS[step] ?? moment.repositories) : moment.repositories
+  const written = step >= 0 ? (LIVE_STEPS[step] ?? moment.repositories) : moment.repositories
+  const repositories = shown ? withLarge(written) : written
   const source = props.live === true ? { kind: 'live' as const, round: 2 } : moment.source
   const stage = from === 'review' && props.live !== true ? 'Review' : 'Building'
   const round = stage === 'Building' ? 2 : 1
 
-  const go = (id: string): void => {
-    nonce.current += 1
-    setLit(id)
-    setTarget({ kind: 'comment', id, nonce: nonce.current })
-  }
-
-  /** The Review page's remark opened its place: the diff, at that comment's lines. */
-  const openAt = (where: string): void => {
-    const path = where.replace(/:\d+(–\d+)?$/, '')
-    const comment = comments.find((one) => idOf(one.place.repository, one.place.path) === path)
-    setViews((before) => openView(before, 'diff'))
-    if (comment !== undefined) go(comment.id)
-  }
+  const change = (id: string, next: (comment: DiffComment) => DiffComment): void =>
+    setComments((before) => before.map((one) => (one.id === id ? next(one) : one)))
 
   const act = (id: string, action: CommentAction): void => {
     props.onAction(id, action)
-    if (action !== 'withdraw' && action !== 'resolve') return
-    setComments((before) =>
-      before.map((one) =>
-        one.id === id ? { ...one, state: action === 'withdraw' ? 'withdrawn' : 'resolved' } : one,
-      ),
-    )
+    change(id, (one) => ({ ...one, state: action === 'withdraw' ? 'withdrawn' : 'resolved' }))
   }
 
   const add = (added: NewComment): void => {
@@ -155,37 +115,16 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
   }
 
   const outdated = comments.find((one) => one.outdated !== undefined)
-  const base = MOMENTS.feedback()
-  const mine = comments.filter(
-    (one) => one.team === undefined && !base.remarks.some((had) => had.id === one.id),
-  )
-  const remarks: readonly Remark[] = [
-    ...base.remarks,
-    ...mine.filter((one) => one.state === 'waiting').map(remarkOf),
-  ]
+  const filled = repositories.some((one) => one.files.length > 0)
 
   const all: MissionView[] = [
-    {
-      id: 'round:2',
-      title: 'Round 2',
-      icon: <IconMessages size="sm" />,
-      width: 'wide',
-      body: (
-        <RoundView
-          round={ROUND_TWO_BUILDING}
-          question={QUESTION}
-          onPoint={() => {}}
-          onOpenBuilding={() => {}}
-        />
-      ),
-    },
     {
       id: 'diff',
       title: 'Diff',
       icon: <IconGitCompare size="sm" />,
       width: 'wide',
       // Nothing to lay out yet, nothing to toggle.
-      actions: repositories.some((one) => one.files.length > 0) ? (
+      actions: filled ? (
         <DiffActions source={source} layout={layout} onLayout={setLayout} />
       ) : undefined,
       body: (
@@ -195,11 +134,27 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
           source={source}
           layout={layout}
           loading={loading}
+          error={props.error === undefined ? undefined : { words: props.error, onRetry: () => {} }}
           target={target}
-          lit={lit}
-          column={props.column}
+          lit={props.at ?? null}
           onAdd={add}
           onAction={act}
+          onEdit={(id, text) => {
+            props.onEdit(id, text)
+            change(id, (one) => ({ ...one, text }))
+          }}
+          onFollowUp={(id, text) => {
+            props.onFollowUp(id, text)
+            change(id, (one) => ({
+              ...one,
+              state: 'waiting',
+              thread: [...(one.thread ?? []), { who: 'you', text, at: 'now' }],
+            }))
+          }}
+          onShow={(id) => {
+            props.onShow(id)
+            setShown(true)
+          }}
           onOpenForge={props.onOpenForge}
           onOpenVersion={(id) => {
             props.onOpenVersion(id)
@@ -209,7 +164,6 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
             nonce.current += 1
             setTarget({ kind: 'file', id, nonce: nonce.current })
           }}
-          onGo={go}
         />
       ),
     },
@@ -231,7 +185,7 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
 
   const crumbs: Crumb[] = [
     { id: 'project', label: 'Acme', onPress: () => {} },
-    { id: 'mission', label: KEY, mono: true, onPress: () => setViews(AT_BASE) },
+    { id: 'mission', label: 'ACME-12', mono: true, onPress: () => setViews(AT_BASE) },
     { id: 'stage', label: stageWords(stage, round), onPress: () => setViews(AT_BASE) },
     ...views.open.map((id) => ({
       id: `view:${id}`,
@@ -241,34 +195,20 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
     })),
   ]
 
-  const rail: RailHandlers = {
-    onService: () => {},
-    onVerify: () => {},
-    onTeam: () => {},
-    onPull: () => {},
-    onOpenDiff: openAt,
-    onOpenLink: () => {},
-    onCopy: () => {},
-    question: QUESTION,
-  }
-
   return (
     <div className="flex h-screen flex-col bg-surface-content">
       <ContentHeader folded={false} onFold={() => {}} crumbs={crumbs} />
       <MissionFrame
-        ballFace={false}
-        missionKey={KEY}
-        title={TITLE}
+        missionKey="ACME-12"
+        title="Export invoices as CSV"
         stage={stage}
         round={round}
         frozen
         type="feature"
         ball={stage === 'Building' ? 'agent' : 'you'}
-        marks={[]}
         ticket={{ key: 'acme/shop#41' }}
-        branch={BRANCH}
+        branch="acme-12-export-invoices"
         spec="frozen 3 days ago at 17:02"
-        onOpenSpec={() => {}}
         more={[
           {
             label: 'Diff',
@@ -277,23 +217,7 @@ export function DiffScreen(props: DiffScreenProps): ReactNode {
           },
         ]}
         onCancel={() => {}}
-        base={
-          <ReviewPage
-            moment={{ ...base, remarks }}
-            loading={false}
-            model="rounds"
-            rail={rail}
-            feedback={{
-              onAdd: () => {},
-              onEdit: () => {},
-              onWithdraw: (id) => act(id, 'withdraw'),
-              onResolve: (id) => act(id, 'resolve'),
-              onFix: () => {},
-              onOpenDiff: openAt,
-              onOpenRound: (n) => setViews((before) => openView(before, `round:${String(n)}`)),
-            }}
-          />
-        }
+        base={<MissionFrameBase stage={stage} />}
         views={all}
         open={views.open}
         shown={views.shown}

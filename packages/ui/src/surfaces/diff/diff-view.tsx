@@ -2,14 +2,21 @@ import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { Empty } from '../../components/empty/empty.tsx'
+import { ErrorState } from '../../components/error-state/error-state.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { IconGitCompare, IconHistory, IconLayoutColumns, IconLayoutRows } from '../../icons.ts'
-import { type CommentAction, CommentCard, type NewComment, linesOf } from './comments.tsx'
-import { type DiffLayout, DiffStage, type StageTarget } from './stage.tsx'
-import { ChangesTree, idOf } from './tree.tsx'
-import type { DiffComment, DiffRepository, DiffSource } from './types.ts'
+import {
+  IconAlertTriangle,
+  IconGitCompare,
+  IconHistory,
+  IconLayoutColumns,
+  IconLayoutRows,
+} from '../../icons.ts'
+import { CommentCard, type CommentHandlers, type NewComment } from './diff-comments.tsx'
+import { type DiffLayout, DiffStage, type StageTarget } from './diff-stage.tsx'
+import { ChangesTree } from './diff-tree.tsx'
+import type { DiffComment, DiffRepository, DiffSource } from './diff-types.ts'
 
 /**
  * The diff view of a mission, opened over its base (prototype screen E11): the tree of what
@@ -20,14 +27,12 @@ import type { DiffComment, DiffRepository, DiffSource } from './types.ts'
  * checkpoint, said in words above it, and nothing can be written on it.
  */
 
-export interface DiffViewHandlers {
+export interface DiffViewHandlers extends CommentHandlers {
   onAdd: (comment: NewComment) => void
-  onAction: (id: string, action: CommentAction) => void
-  onOpenVersion: (id: string) => void
-  onOpenForge: (url: string) => void
+  /** A file chosen in the tree: the diff is sent to it, by its id. */
   onFile: (id: string) => void
-  /** Open question 33's alternative: a comment chosen in the column beside the diff. */
-  onGo?: ((id: string) => void) | undefined
+  /** A large file's Show pressed: its sides are asked for, by its id. */
+  onShow: (id: string) => void
 }
 
 export interface DiffViewProps extends DiffViewHandlers {
@@ -36,10 +41,10 @@ export interface DiffViewProps extends DiffViewHandlers {
   source: DiffSource
   layout: DiffLayout
   loading?: boolean | undefined
+  /** Why the diff could not be read, in words, and the way to read it again. */
+  error?: { words: string; onRetry: () => void } | undefined
   target?: StageTarget | null | undefined
   lit?: string | null | undefined
-  /** Open question 33's alternative: the comments listed again in a column of the view. */
-  column?: boolean | undefined
 }
 
 const TOGGLE =
@@ -95,60 +100,32 @@ function checkpointWords(source: Extract<DiffSource, { kind: 'checkpoint' }>): s
   return `Read from the last checkpoint, ${source.at}: ${why}.`
 }
 
-/** The alternative to 33: every comment of the diff in a column, each sending to its lines. */
-function CommentsColumn({
-  comments,
-  lit,
-  onGo,
-}: {
-  comments: readonly DiffComment[]
-  lit: string | null
-  onGo: (id: string) => void
-}): ReactNode {
-  return (
-    <aside
-      aria-label="Comments"
-      className="flex w-diff-tree shrink-0 flex-col border-l border-border"
-    >
-      <h3 className="flex h-control-lg shrink-0 items-center px-3 text-sm font-semibold">
-        {`Comments · ${String(comments.length)}`}
-      </h3>
-      <ul aria-label="Comments of the diff" className="flex min-h-0 flex-1 flex-col overflow-auto">
-        {comments.map((comment) => (
-          <li key={comment.id}>
-            <button
-              type="button"
-              aria-current={lit === comment.id}
-              className="flex w-full min-w-0 flex-col gap-0.5 border-b border-border px-3 py-2 text-left text-sm outline-none hover:tinted focus-ring hover-motion aria-[current=true]:bg-primary-muted"
-              onClick={() => onGo(comment.id)}
-            >
-              <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">
-                <span>{comment.id}</span>
-                <span className="min-w-0 truncate">
-                  {`${idOf(comment.place.repository, comment.place.path)} · ${linesOf(comment.place)}`}
-                </span>
-              </span>
-              <span className="line-clamp-2 break-words">{comment.text}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </aside>
-  )
-}
-
 export function DiffView({
   repositories,
   comments,
   source,
   layout,
   loading = false,
+  error,
   target = null,
   lit = null,
-  column = false,
+  onFile,
   ...handlers
 }: DiffViewProps): ReactNode {
-  const empty = !loading && repositories.every((one) => one.files.length === 0)
+  if (error !== undefined) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <ErrorState
+          title="The diff cannot be read"
+          description={error.words}
+          onRetry={error.onRetry}
+        />
+      </div>
+    )
+  }
+  const unreadable = repositories.filter((one) => one.unreadable !== undefined)
+  const empty =
+    !loading && unreadable.length === 0 && repositories.every((one) => one.files.length === 0)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {source.kind === 'checkpoint' && (
@@ -159,6 +136,17 @@ export function DiffView({
           {checkpointWords(source)}
         </p>
       )}
+      {unreadable.map((one) => (
+        <p
+          key={one.name}
+          className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-sm text-muted-foreground"
+        >
+          <span className="flex shrink-0 text-destructive">
+            <IconAlertTriangle size="sm" />
+          </span>
+          <span className="min-w-0 break-words">{`Git cannot read ${one.name}: ${one.unreadable ?? ''}`}</span>
+        </p>
+      ))}
       {empty ? (
         <div className="flex flex-1 items-center justify-center p-8">
           <Empty
@@ -170,7 +158,7 @@ export function DiffView({
       ) : (
         <div className="flex min-h-0 flex-1">
           <div className={cn('flex w-diff-tree shrink-0 flex-col border-r border-border')}>
-            <ChangesTree repositories={repositories} loading={loading} onFile={handlers.onFile} />
+            <ChangesTree repositories={repositories} loading={loading} onFile={onFile} />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
             <DiffStage
@@ -181,31 +169,50 @@ export function DiffView({
               loading={loading}
               target={target}
               lit={lit}
-              onAdd={handlers.onAdd}
-              onAction={handlers.onAction}
-              onOpenVersion={handlers.onOpenVersion}
-              onOpenForge={handlers.onOpenForge}
+              {...handlers}
             />
           </div>
-          {column && handlers.onGo !== undefined && (
-            <CommentsColumn comments={comments} lit={lit} onGo={handlers.onGo} />
-          )}
         </div>
       )}
     </div>
   )
 }
 
-/** The commented version of an outdated comment: the file as it was, the comment on its lines. */
+const NOTHING = (): void => {}
+
+/**
+ * The commented version of an outdated comment: the file as it was, the comment on its lines. A
+ * version whose content cannot be shown (a binary, a file that may hold secrets) says why.
+ */
 export function CommentedVersion({
   comment,
   contents,
+  why,
   onOpenForge,
 }: {
   comment: DiffComment
-  contents: string
+  /** The file as it was, or null when it cannot be shown. */
+  contents: string | null
+  /** Why it cannot be shown, in words. */
+  why?: string | undefined
   onOpenForge: (url: string) => void
 }): ReactNode {
+  if (contents === null) {
+    return (
+      <div className="flex flex-col gap-3 p-4">
+        <p className="text-sm text-muted-foreground">{why}</p>
+        <CommentCard
+          comment={{ ...comment, outdated: undefined }}
+          writable={false}
+          onAction={NOTHING}
+          onEdit={NOTHING}
+          onFollowUp={NOTHING}
+          onOpenVersion={NOTHING}
+          onOpenForge={onOpenForge}
+        />
+      </div>
+    )
+  }
   const lines = contents.trimEnd().split('\n')
   // The lines it was written on, as this version numbers them: where its excerpt stands.
   const excerpt = (comment.outdated?.excerpt ?? '').trimEnd().split('\n')
@@ -235,8 +242,10 @@ export function CommentedVersion({
           place: { ...comment.place, lines: written },
         }}
         writable={false}
-        onAction={() => {}}
-        onOpenVersion={() => {}}
+        onAction={NOTHING}
+        onEdit={NOTHING}
+        onFollowUp={NOTHING}
+        onOpenVersion={NOTHING}
         onOpenForge={onOpenForge}
       />
     </div>

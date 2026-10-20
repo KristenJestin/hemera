@@ -1,5 +1,4 @@
-import { LONG_PATH, LONG_REMARK } from '../review/fixtures.ts'
-import type { DiffComment, DiffFile, DiffMoment, DiffRepository } from './types.ts'
+import type { DiffComment, DiffFile, DiffMoment, DiffRepository } from './diff-types.ts'
 
 /**
  * ACME-12 as the diff view reads it: the mission that exports invoices as CSV, across `api`,
@@ -9,6 +8,24 @@ import type { DiffComment, DiffFile, DiffMoment, DiffRepository } from './types.
  */
 
 const code = (...lines: readonly string[]): string => `${lines.join('\n')}\n`
+
+/** A remark of 2,000 characters, the longest a field holds. */
+const LONG_REMARK = [
+  'The export button works on the first page of invoices, but as soon as I change the customer filter and come back to the list, the button keeps the old filter in its tooltip and the file it gives me holds the invoices of the previous customer.',
+  'I tried it three times with Northwind and then Globex: each time the second export carried the first customer’s rows, and the file name said Globex while the rows said Northwind, which is the worst of both.',
+  'Reloading the page fixes it, so it looks like the filters are read once when the page mounts and never again.',
+  'While I was there: the progress on the button jumps from 0 to 100 on exports under a thousand rows, which reads as a glitch rather than as a progress — I would rather not show it at all below a second.',
+  'The date column is right for Tokyo now, but the header still says “Date (UTC)” even when the dates are in the customer’s zone; it should name the zone it uses, or say nothing.',
+  'Last, on a narrow window the button’s label wraps under its icon and pushes the table down by a line; the other buttons of the toolbar shrink to their icon instead, and this one should do the same.',
+  'None of this blocks the merge for me except the first point, which exports the wrong customer’s invoices: please treat it first, and add a scenario that changes the filter twice before exporting.',
+]
+  .join(' ')
+  .padEnd(2000, ' Again, the first point matters most.')
+  .slice(0, 2000)
+
+/** A path as deep as a real front end nests one. */
+const LONG_PATH =
+  'src/features/billing/invoices/export/components/export-button/export-progress-indicator.tsx'
 
 /** A route of the billing API, as the controller holds a dozen of them. */
 const route = (name: string, reader: string): readonly string[] => [
@@ -497,15 +514,29 @@ export const LARGE_CSV = code(
   }),
 )
 
-/** Lines added and removed between two versions, as Git counts them for the tree. */
-function counted(file: Omit<DiffFile, 'added' | 'removed'>): DiffFile {
+/**
+ * A file with both its sides read, and the lines added and removed between them as Git counts
+ * them for the tree. A binary or a withheld file has no sides; a large one waits for its Show.
+ */
+function counted({
+  before: was,
+  after: now,
+  ...file
+}: Omit<DiffFile, 'added' | 'removed' | 'sides'> & {
+  before: string | null
+  after: string | null
+}): DiffFile {
   if (file.binary !== undefined || file.withheld === true) return { ...file, added: 0, removed: 0 }
-  const before = new Set((file.before ?? '').split('\n'))
-  const after = new Set((file.after ?? '').split('\n'))
-  const added = (file.after ?? '').split('\n').filter((line) => !before.has(line)).length
-  const removed = (file.before ?? '').split('\n').filter((line) => !after.has(line)).length
-  return { ...file, added, removed }
+  const before = new Set((was ?? '').split('\n'))
+  const after = new Set((now ?? '').split('\n'))
+  const added = (now ?? '').split('\n').filter((line) => !before.has(line)).length
+  const removed = (was ?? '').split('\n').filter((line) => !after.has(line)).length
+  const sides = { before: was, after: now }
+  return file.large === undefined ? { ...file, added, removed, sides } : { ...file, added, removed }
 }
+
+/** The sides of the large file, given once its Show is pressed. */
+export const LARGE_SIDES = { before: null, after: LARGE_CSV }
 
 export const API: DiffRepository = {
   name: 'api',
@@ -587,7 +618,7 @@ export const WEB: DiffRepository = {
     counted({
       path: 'src/billing/fixtures/invoices.csv',
       letter: 'A',
-      large: true,
+      large: { lines: 10_000 },
       before: null,
       after: LARGE_CSV,
     }),
@@ -869,7 +900,7 @@ export const LONG: DiffMoment = {
       ...WEB,
       files: [
         counted({
-          path: LONG_PATH.replace(/^web\/|:\d+$/g, ''),
+          path: LONG_PATH,
           letter: 'A',
           before: null,
           after: code(
@@ -895,7 +926,7 @@ export const LONG: DiffMoment = {
       state: 'waiting',
       place: {
         repository: 'web',
-        path: LONG_PATH.replace(/^web\/|:\d+$/g, ''),
+        path: LONG_PATH,
         side: 'new',
         lines: { start: 4, end: 5 },
       },

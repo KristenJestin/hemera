@@ -1,14 +1,18 @@
-import type { RemarkState } from '../review/types.ts'
-
 /**
- * What the diff view of #264 draws, as plain values in the words the screen uses. The engine's
- * names stay in the RPCs the build tickets wire (`diff.live`, `diff.file`, `review.state`…).
+ * What the diff view draws, as plain values in the words the screen uses. The engine's names stay
+ * in the RPCs the renderer reads (`diff.live`, `diff.file`, `review.state`…).
  */
 
 /** Git's letter for a change: added, modified, deleted, renamed, type changed. */
 export type GitLetter = 'A' | 'M' | 'D' | 'R' | 'T'
 
-/** One file a repository of the Workspace changed, with both sides of its content. */
+/** The two sides of a text file: null before for a file it added, null after for one it deleted. */
+export interface DiffSides {
+  before: string | null
+  after: string | null
+}
+
+/** One file a repository of the Workspace changed. */
 export interface DiffFile {
   path: string
   /** Where a renamed file was. */
@@ -20,8 +24,8 @@ export interface DiffFile {
   generated?: boolean | undefined
   /** A file whose content is not text: its sizes before and after, in words. */
   binary?: { before: string | null; after: string | null } | undefined
-  /** A file too long to draw at once: it waits until it is asked for. */
-  large?: boolean | undefined
+  /** A file too long to draw at once: its lines, and it waits until it is asked for. */
+  large?: { lines: number } | undefined
   /** A file that may hold secrets: listed, its content never shown. */
   withheld?: boolean | undefined
   /** Changed outside Hemera since the mission last looked. */
@@ -29,16 +33,18 @@ export interface DiffFile {
   /** Lines added and removed; none for a binary or a withheld file. */
   added: number
   removed: number
-  /** The content before, null for a file it added. */
-  before: string | null
-  /** The content now, null for a file it deleted. */
-  after: string | null
+  /** Its two sides once read; absent while they are read, or while a large file waits. */
+  sides?: DiffSides | undefined
+  /** Why its sides could not be read, in words. */
+  unreadable?: string | undefined
 }
 
 export interface DiffRepository {
   name: string
   /** Changed outside Hemera: a file of it was written by something else than the mission. */
   outside?: boolean | undefined
+  /** Why Git could not read it, in words: its files are then none. */
+  unreadable?: string | undefined
   files: readonly DiffFile[]
 }
 
@@ -52,32 +58,39 @@ export interface Place {
   lines: { start: number; end: number } | null
 }
 
+/**
+ * Where a comment of the user stands. It waits until Fix sends it; it is in a round while the
+ * round works on it; the agent marks it addressed, and only its author resolves it; its author may
+ * withdraw it while it is not resolved.
+ */
+export type CommentState = 'waiting' | 'inRound' | 'addressed' | 'resolved' | 'withdrawn'
+
 /** One answer under a comment: the agent's, or the user's follow-up. */
 export interface Reply {
   who: 'agent' | 'you'
   text: string
-  at: string
+  at?: string | undefined
 }
 
 /** Who wrote a comment on the forge, and where it stands there. */
 export interface TeamAuthor {
   name: string
   forge: 'GitHub' | 'Bitbucket'
-  url: string
+  /** Where it is read on the forge, when the forge said. */
+  url?: string | undefined
   /** Resolved on the forge: settled there, folded here. */
   resolved: boolean
 }
 
 /**
- * A comment on the diff. The user's comments are remarks of the Review page (#254) with a place:
- * the same ids, the same states. A team member's comes from the forge and keeps its own state
- * there.
+ * A comment on the diff. The user's comments are remarks of the Review page with a place: the
+ * same ids, the same states. A team member's comes from the forge and keeps its own state there.
  */
 export interface DiffComment {
   id: string
   kind: 'remark' | 'question'
   text: string
-  state: RemarkState
+  state: CommentState
   place: Place
   round?: number | undefined
   at: string
@@ -87,7 +100,7 @@ export interface DiffComment {
   movedFrom?: { start: number; end: number } | undefined
   /**
    * Its lines changed since it was written: the excerpt it was written on, and the version it
-   * was written on, which opens on request.
+   * was written on in words, which opens on request.
    */
   outdated?: { excerpt: string; version: string } | undefined
   /** From the forge: who wrote it there. */
@@ -103,9 +116,4 @@ export interface DiffMoment {
   repositories: readonly DiffRepository[]
   comments: readonly DiffComment[]
   source: DiffSource
-}
-
-/** A comment being written: on lines, or on a whole file. */
-export interface Draft {
-  place: Place
 }

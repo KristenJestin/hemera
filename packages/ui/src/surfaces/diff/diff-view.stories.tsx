@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { CHECKPOINT, EMPTY, LONG, OUTSIDE, REVIEWING } from './fixtures.ts'
+import { CHECKPOINT, EMPTY, LONG, OUTSIDE, REVIEWING } from './diff-fixtures.ts'
 import {
   codeText,
   commentOf,
@@ -13,19 +13,19 @@ import {
   stageOf,
   tabTo,
   treeRow,
-} from './play.ts'
-import { DiffScreen, type DiffScreenProps } from './screen.tsx'
+} from './diff-play.ts'
+import { DiffScreen, type DiffScreenProps } from './diff-screen-fixture.tsx'
 
 /**
- * The diff view of #264, recommended: a view of the mission's stack like every other (open
- * question 76), a wide sheet over the base with its crumb — `ACME-12 › Review · round 1 › Diff` —
- * opened from Review, from a round, or from Building · round N, and Back finds the base intact.
- * The tree of what changed on the left, one root per repository; every file in one scroll beside
- * it, drawn by `@pierre/diffs`. Comments stand under their lines, and they are the Review page's
- * remarks (open question 33): one list, the diff its place in the code.
+ * The diff of a mission: a view of the mission's stack like every other, a wide sheet over the
+ * base with its crumb — `ACME-12 › Review · round 1 › Diff` — opened from Review or from
+ * Building · round N, and Back finds the base intact. The tree of what changed on the left, one
+ * root per repository; every file in one scroll beside it, drawn by `@pierre/diffs`. Comments
+ * stand under their lines, and they are the Review page's remarks: one list, the diff their place
+ * in the code.
  */
 const meta = {
-  title: 'Explorations/Review diffs/Diff',
+  title: 'Surfaces/Diff',
   component: DiffScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
@@ -33,6 +33,9 @@ const meta = {
     moment: REVIEWING,
     onComment: fn(),
     onAction: fn(),
+    onEdit: fn(),
+    onFollowUp: fn(),
+    onShow: fn(),
     onOpenForge: fn(),
     onOpenVersion: fn(),
   },
@@ -168,10 +171,14 @@ export const BinaryFileSizes: Story = {
 
 /** A file of 10,000 lines waits for its Show, then scrolls as a short one. */
 export const LargeFileOnRequest: Story = {
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const head = await goToFile(canvasElement, 'web/src/billing/fixtures/invoices.csv')
     await userEvent.click(within(head).getByRole('button', { name: 'Show its 10,000 lines' }))
-    await waitFor(() => expect(codeText(canvasElement)).toMatch(/ACME-INV-0000/))
+    await expect(args.onShow).toHaveBeenCalledWith('web/src/billing/fixtures/invoices.csv')
+    // Ten thousand lines are parsed and highlighted once they arrive: a slow runner takes seconds.
+    await waitFor(() => expect(codeText(canvasElement)).toMatch(/ACME-INV-0000/), {
+      timeout: 10_000,
+    })
     await expect(
       within(await headOf(canvasElement, 'web/src/billing/fixtures/invoices.csv')).getByRole(
         'button',
@@ -308,6 +315,40 @@ export const AddressedWithTheAnswer: Story = {
         body(canvasElement).getAllByRole('article', { name: /^F1, resolved/ }).length,
       ).toBeGreaterThan(0),
     )
+  },
+}
+
+/** Its words written again while it waits: Edit opens them in place, Save keeps the new ones. */
+export const EditingAComment: Story = {
+  args: { at: 'F8' },
+  play: async ({ canvasElement, args }) => {
+    const comment = within(await commentOf(canvasElement, 'F8'))
+    await userEvent.click(comment.getByRole('button', { name: 'Edit F8' }))
+    const box = await waitFor(() => comment.getByRole('textbox', { name: 'Edit F8' }))
+    await expect(box).toHaveFocus()
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Select only the columns the CSV writes.{Enter}')
+    await expect(args.onEdit).toHaveBeenCalledWith('F8', 'Select only the columns the CSV writes.')
+    await waitFor(() =>
+      expect(comment.getByText('Select only the columns the CSV writes.')).toBeVisible(),
+    )
+  },
+}
+
+/** Addressed, and not quite: Follow up writes under the answer, and the comment waits again. */
+export const FollowingUpAnAnswer: Story = {
+  args: { at: 'F1' },
+  play: async ({ canvasElement, args }) => {
+    const comment = within(await commentOf(canvasElement, 'F1'))
+    await userEvent.click(comment.getByRole('button', { name: 'Follow up F1' }))
+    const box = await waitFor(() => comment.getByRole('textbox', { name: 'A follow-up on F1' }))
+    await expect(box).toHaveFocus()
+    await userEvent.type(box, 'Keyboard presses still start a second export.{Enter}')
+    await expect(args.onFollowUp).toHaveBeenCalledWith(
+      'F1',
+      'Keyboard presses still start a second export.',
+    )
+    await waitFor(() => expect(comment.getByText('Your follow-up')).toBeVisible())
   },
 }
 
@@ -458,6 +499,16 @@ export const Loading: Story = {
   },
 }
 
+/** The diff could not be read: why, in words, where the diff would be. */
+export const ErrorInWords: Story = {
+  args: { error: 'Hemera could not read its storage: the disk is full.' },
+  play: async ({ canvasElement }) => {
+    const alert = body(canvasElement).getByRole('alert')
+    await expect(alert).toHaveTextContent('The diff cannot be read')
+    await expect(alert).toHaveTextContent('the disk is full')
+  },
+}
+
 /** Nothing changed yet: the view says so, once. */
 export const Empty: Story = {
   args: { moment: EMPTY, from: 'building' },
@@ -466,39 +517,23 @@ export const Empty: Story = {
   },
 }
 
-// --- Its place in the navigation (open question 76) and the way between (33) ---------------
+// --- Its place in the navigation -----------------------------------------------------------
 
 /**
- * From the Review page: a remark's place opens the diff at its lines, the comment lit; Escape
- * finds the Review page as it was, the remark still open.
+ * From the mission's `…`: the diff opens as a sheet over the base, its crumb after the stage's;
+ * Escape gives the base back as it was.
  */
-export const OpenedFromTheReviewPage: Story = {
+export const OpenedFromTheMission: Story = {
   args: { opened: false },
   play: async ({ canvasElement }) => {
     const page = body(canvasElement)
-    const next = within(page.getByRole('list', { name: 'Next round' }))
-    const line = next.getByRole('button', { name: /^F8/ })
-    await userEvent.click(line)
-    await userEvent.click(
-      await waitFor(() => next.getByRole('button', { name: 'api/src/billing/export.query.ts:57' })),
-    )
+    await userEvent.click(page.getByRole('button', { name: 'More for ACME-12' }))
+    await userEvent.click(await waitFor(() => page.getByRole('menuitem', { name: 'Diff' })))
     await waitFor(() => expect(here(canvasElement)).toBe('Diff'))
-    await expect(await commentOf(canvasElement, 'F8')).toHaveAttribute('data-lit', 'true')
+    await expect(page.getByRole('button', { name: 'Review · round 1' })).toBeVisible()
+    await stageOf(canvasElement)
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(page.queryByRole('heading', { name: 'Diff' })).toBeNull())
-    await expect(line).toHaveAttribute('aria-expanded', 'true')
-  },
-}
-
-/** From round 2's view, while it builds: the diff stacks on it, `Building · round 2 › Round 2 › Diff`. */
-export const OpenedFromARound: Story = {
-  args: { from: 'round' },
-  play: async ({ canvasElement }) => {
-    const page = body(canvasElement)
-    await expect(page.getByRole('button', { name: 'Round 2' })).toBeVisible()
-    await expect(here(canvasElement)).toBe('Diff')
-    await userEvent.click(page.getByRole('button', { name: 'Close Diff' }))
-    await waitFor(() => expect(page.getByRole('heading', { name: 'Round 2' })).toBeVisible())
   },
 }
 
