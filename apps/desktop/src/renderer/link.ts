@@ -16,6 +16,18 @@ import {
   WindowRpcs,
   type AgentState,
   type AgentUpdate,
+  type AutoReviewView,
+  type BuildingChange,
+  type BuildingPreparation,
+  type BuildingView,
+  type CheckModel,
+  type DiffChange,
+  type JournalPage,
+  type MissionBudget,
+  type MissionDiff,
+  type MissionGrant,
+  type MissionService,
+  type PrelaunchView,
   type AutomaticBackups,
   type BootstrapRun,
   type BaseBranchEdit,
@@ -128,10 +140,8 @@ import {
   type WindowNotice,
   type WorkspacesRootEdit,
   type CommentedVersion,
-  type DiffChange,
   type DiffContents,
   type FeedbackView,
-  type MissionDiff,
   type ReviewChange,
   type ReviewStateView,
 } from '@hemera/ipc'
@@ -140,6 +150,7 @@ import type {
   AnchorAsked,
   FeedbackKind,
   ChatMention,
+  LaunchChoice,
   ModelSettingValue,
   NeverEntry,
   ProviderStatus,
@@ -655,6 +666,57 @@ export interface Link {
     listener: (decision: PermissionDecision) => void,
     onEnd: (error: Error) => void,
   ) => () => void
+  /** The user's Build: a check of a Ready mission against the code of today. */
+  readonly checkLaunch: (missionId: string) => Promise<PrelaunchView>
+  /** Launches on a valid check: the Workspace is prepared, then the mission builds. */
+  readonly launch: (
+    missionId: string,
+    checkId: string,
+    choice: LaunchChoice,
+  ) => Promise<BuildingPreparation>
+  /** Sends the mission back to Planning, the check's report as the reason. */
+  readonly backToPlanning: (missionId: string, checkId: string) => Promise<Mission>
+  /** The Builder's model for this mission, or null to inherit it. */
+  readonly chooseBuilderModel: (
+    missionId: string,
+    setting: ModelSettingValue | null,
+  ) => Promise<CheckModel>
+  /** The mission's last check and its preparation, then again at each change. */
+  readonly onLaunch: (
+    missionId: string,
+    listener: (change: BuildingChange) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The mission's Building, null before one, then again at each change. */
+  readonly onBuilding: (
+    missionId: string,
+    listener: (building: BuildingView | null) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** A page of the mission's Journal, newest first, before a line's sequence or from the last. */
+  readonly journal: (missionId: string, before: number | null) => Promise<JournalPage>
+  readonly missionServices: (missionId: string) => Promise<ReadonlyArray<MissionService>>
+  readonly startService: (missionId: string, commandId: string) => Promise<MissionService>
+  readonly stopService: (missionId: string, runId: string) => Promise<MissionService>
+  readonly restartService: (missionId: string, runId: string) => Promise<MissionService>
+  readonly dismissService: (missionId: string, runId: string) => Promise<void>
+  /** The missions whose services or changes outside Hemera changed, by id, as they change. */
+  readonly onMissionWorkspaces: (
+    listener: (missionId: string) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The mission's Building helpers now, then again at each change of one. */
+  readonly onHelpers: (
+    missionId: string,
+    listener: (helpers: ReadonlyArray<HelperChip>) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The automatic review of the mission's Building, null before one, then at each change. */
+  readonly onAutoReview: (
+    missionId: string,
+    listener: (review: AutoReviewView | null) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The mission's diff, live from its Workspace or from its last checkpoint. */
   readonly liveDiff: (missionId: string) => Promise<MissionDiff>
   /** Each repository of the mission's diff that moved, as it moves. */
@@ -701,6 +763,12 @@ export interface Link {
   readonly followUpFeedback: (feedbackId: string, body: string) => Promise<FeedbackView>
   /** The version of a file a code comment was written on. */
   readonly commentedVersion: (feedbackId: string) => Promise<CommentedVersion>
+  /** What was allowed for the mission, the revoked and fallen grants included. */
+  readonly missionGrants: (missionId: string) => Promise<ReadonlyArray<MissionGrant>>
+  /** Revokes a grant, from the next call on. */
+  readonly revokeGrant: (grantId: string) => Promise<void>
+  /** A mission's budget and what its agents used. */
+  readonly missionBudget: (missionId: string) => Promise<MissionBudget>
   readonly close: () => void
 }
 
@@ -1130,6 +1198,36 @@ export function linkOver(port: Port): Link {
         Predicate.isNever,
         () => undefined,
       ),
+    checkLaunch: (missionId) => call((ready) => ready['building.check']({ missionId })),
+    launch: (missionId, checkId, choice) =>
+      call((ready) => ready['building.launch']({ missionId, checkId, choice })),
+    backToPlanning: (missionId, checkId) =>
+      call((ready) => ready['building.backToPlanning']({ missionId, checkId })),
+    chooseBuilderModel: (missionId, setting) =>
+      call((ready) => ready['building.chooseModel']({ missionId, setting })),
+    onLaunch: (missionId, listener, onEnd) =>
+      follow((ready) => ready['building.changed']({ missionId }), listener, anError, onEnd),
+    onBuilding: (missionId, listener, onEnd) =>
+      follow((ready) => ready['building.tasksChanged']({ missionId }), listener, anError, onEnd),
+    journal: (missionId, before) => call((ready) => ready['memory.journal']({ missionId, before })),
+    missionServices: (missionId) => call((ready) => ready['mission.services']({ missionId })),
+    startService: (missionId, commandId) =>
+      call((ready) => ready['mission.serviceStart']({ missionId, commandId })),
+    stopService: (missionId, runId) =>
+      call((ready) => ready['mission.serviceStop']({ missionId, runId })),
+    restartService: (missionId, runId) =>
+      call((ready) => ready['mission.serviceRestart']({ missionId, runId })),
+    dismissService: (missionId, runId) =>
+      call((ready) => ready['mission.serviceDismiss']({ missionId, runId })),
+    onMissionWorkspaces: (listener, onEnd) =>
+      follow((ready) => ready['mission.changed'](), listener, anError, onEnd),
+    onHelpers: (missionId, listener, onEnd) =>
+      follow((ready) => ready['helpers.changed']({ missionId }), listener, anError, onEnd),
+    onAutoReview: (missionId, listener, onEnd) =>
+      follow((ready) => ready['autoReview.changed']({ missionId }), listener, anError, onEnd),
+    missionGrants: (missionId) => call((ready) => ready['permissions.grants']({ missionId })),
+    revokeGrant: (grantId) => call((ready) => ready['permissions.revoke']({ grantId })),
+    missionBudget: (missionId) => call((ready) => ready['limits.mission']({ missionId })),
     liveDiff: (missionId) => call((ready) => ready['diff.live']({ missionId })),
     onDiffChanges: (missionId, listener, onEnd) =>
       follow((ready) => ready['diff.changes']({ missionId }), listener, anError, onEnd),

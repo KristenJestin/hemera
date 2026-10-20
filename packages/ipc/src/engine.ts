@@ -208,8 +208,11 @@ export const EngineForgeRpcs = ForgeRpcs
 /** A Project's delivery rules (#340), a layer of its own in the engine and in main (TS2589). */
 export const EngineDeliveryRulesRpcs = DeliveryRulesRpcs
 
-/** The live diff of a mission (#249), a layer of its own in the engine and in main (TS2589). */
-export const EngineReviewRpcs = DiffRpcs
+/**
+ * The live diff of a mission (#249) and its automatic review (#147), which the Building page reads
+ * (#151): each a layer of its own in the engine and in main (TS2589).
+ */
+export const EngineReviewRpcs = DiffRpcs.merge(AutoReviewRpcs)
 
 /** Review's feedback (#341), which the diff view writes (#497): a layer of its own (TS2589). */
 export const EngineFeedbackRpcs = ReviewRpcs
@@ -224,8 +227,7 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
 )
 
 /**
- * Everything the engine serves: what main asks, and the proofs (#144), the automatic review
- * (#147) and the pushes (R6), served apart until their screens (R10) forward them; their handlers
- * are layers of their own (TS2589).
+ * Everything the engine serves: what main asks, and the proofs (#144) and the pushes (R6), served
+ * apart until their screens (R10) forward them; their handlers are layers of their own (TS2589).
  */
-export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, AutoReviewRpcs, DeliveryRpcs)
+export const EngineServedRpcs = EngineMainRpcs.merge(ProofsRpcs, DeliveryRpcs)

@@ -15,6 +15,7 @@ import {
   WindowRpcs,
   EngineApartRpcs,
   ChecksRpcs,
+  AutoReviewRpcs,
   DiffRpcs,
   ReviewRpcs,
   CheckRefused,
@@ -622,6 +623,10 @@ const main = async (engine: 'answers' | 'gone') => {
       'review.round': unused,
       'review.startMissionFrom': unused,
       'review.changes': () => Stream.die('the window’s link is not asked for a review here'),
+    }),
+    AutoReviewRpcs.toLayer({
+      'autoReview.read': unused,
+      'autoReview.changed': () => Stream.die('the window’s link is not asked for a review here'),
     }),
   )
   const program = Effect.gen(function* () {

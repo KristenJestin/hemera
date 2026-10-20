@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_TITLE } from './fixtures.ts'
-import { tabTo } from './play.ts'
-import { ReadyScreen } from './screen.tsx'
+import { LONG_TITLE } from './building-fixtures.ts'
+import { tabTo } from './building-play.ts'
+import { ReadyScreen } from './building-screen-fixture.tsx'
 
 /**
  * The Ready page of #149, recommended: the frozen Spec in summary in the middle, and at the top of
@@ -14,7 +14,7 @@ import { ReadyScreen } from './screen.tsx'
  * header while it can be pressed. The mission's dependencies, grants and budget end the rail.
  */
 const meta = {
-  title: 'Explorations/Building/Ready',
+  title: 'Surfaces/Ready',
   component: ReadyScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
@@ -167,6 +167,35 @@ export const CheckExpired: Story = {
     await waitFor(() => {
       expect(statusOf(canvasElement)).toHaveTextContent('Checking what moved')
     })
+  },
+}
+
+/** The budget unfolded: each limit of the mission, then the usage, marked as an estimate. */
+export const BudgetEstimated: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const line = canvas.getByRole('button', { name: /^Budget/ })
+    await expect(line).toHaveTextContent('0 of 8 launches')
+    await userEvent.click(line)
+    await waitFor(() => {
+      expect(canvas.getByText('≈ $3.10 · 900 k tokens')).toBeVisible()
+    })
+    await expect(canvas.getByText('0 of 30 tries')).toBeVisible()
+    await expect(canvas.getByText(/^Estimated:/)).toBeVisible()
+  },
+}
+
+/** The check could not finish: why, in words, and Check again; nothing launches. */
+export const CheckFailed: Story = {
+  args: { moment: 'failed' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(statusOf(canvasElement)).toHaveTextContent('The check could not finish')
+    await expect(canvas.getByText(/could not be read/)).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Launch anyway' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Launch' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheckAgain).toHaveBeenCalled()
   },
 }
 
