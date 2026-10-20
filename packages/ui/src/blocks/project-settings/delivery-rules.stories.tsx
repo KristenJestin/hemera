@@ -21,16 +21,15 @@ import {
   LONG_RULES,
   MERGE_WITHOUT_PR,
   PLAIN_RULES,
+  MANIFESTS,
   PR_WITHOUT_PUSH,
+  REFUSED_CLEANUP,
+  REFUSED_TEMPLATE,
   RULES,
   pushedIn,
 } from './delivery-fixtures.ts'
-import {
-  CATALOGUE,
-  type DeliveryRefusals,
-  type DeliveryRules,
-  STEP_WORDS,
-} from './delivery-model.ts'
+import { CLEANUP_KINDS } from './delivery-form-options.ts'
+import { type DeliveryRefusals, type DeliveryRules, STEP_WORDS } from './delivery-model.ts'
 import { DeliveryPage as Page } from './delivery-page.tsx'
 import { STALE } from './project-settings-fixtures.ts'
 
@@ -191,6 +190,7 @@ export const EveryStepType: Story = {
       'Merge',
       'CI',
       'Action on the remote',
+      'Approve a deployment',
       'Published version',
       'Command',
       'Agent',
@@ -217,6 +217,13 @@ export const EmptyMoment: Story = {
       expect(within(dialog).getByRole('combobox', { name: 'After' })).toHaveTextContent('First')
     })
   },
+}
+
+/** The selects of a dialog, by their names: a step's place, how it starts, its kind's own. */
+function comboboxNames(dialog: HTMLElement): string[] {
+  return within(dialog)
+    .getAllByRole('combobox')
+    .map((one) => one.getAttribute('aria-label') ?? '')
 }
 
 function stepStory(id: string, check: (dialog: HTMLElement) => Promise<void>): Story {
@@ -248,7 +255,7 @@ export const StepMerge = stepStory('merge', async (dialog) => {
 
 /** CI: nothing to write but how it starts. */
 export const StepCI = stepStory('ci', async (dialog) => {
-  expect(within(dialog).getAllByRole('combobox')).toHaveLength(1)
+  expect(comboboxNames(dialog)).toEqual(['When', 'After', 'Starts'])
 })
 
 /** An action on the remote: the workflow or the pipeline the forge's command line starts. */
@@ -256,6 +263,7 @@ export const StepRemoteAction = stepStory('release', async (dialog) => {
   expect(within(dialog).getByRole('textbox', { name: 'Workflow or pipeline' })).toHaveValue(
     'release.yml',
   )
+  expect(within(dialog).getByRole('textbox', { name: 'Inputs' })).toHaveValue('channel=stable')
   expect(within(dialog).getByRole('combobox', { name: 'Starts' })).toHaveTextContent(
     'Waits for your click',
   )
@@ -290,7 +298,7 @@ export const StepAgent = stepStory('changelog', async (dialog) => {
 /** Hemera commits: with the commit template, nothing else to write. */
 export const StepCommitByHemera = stepStory('commit', async (dialog) => {
   expect(dialog).toHaveAccessibleName('Hemera commits · api · When Review starts')
-  expect(within(dialog).getAllByRole('combobox')).toHaveLength(1)
+  expect(comboboxNames(dialog)).toEqual(['When', 'After', 'Starts'])
   expect(within(dialog).queryByText(/^May write to the network/)).toBeNull()
 })
 
@@ -359,6 +367,7 @@ export const AddAStep: Story = {
       'Merge locally',
       'CI',
       'Action on the remote',
+      'Approve a deployment',
       'Published version',
       'Command',
       'Agent',
@@ -659,7 +668,9 @@ export const EndCleanupAdded: Story = {
     const dialog = await findOpen(body(), 'dialog', { name: 'New cleanup step' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
     const kinds = await body().findAllByRole('option')
-    expect(kinds.map((one) => one.textContent)).toEqual(CATALOGUE.map((kind) => STEP_WORDS[kind]))
+    expect(kinds.map((one) => one.textContent)).toEqual(
+      CLEANUP_KINDS.map((kind) => STEP_WORDS[kind]),
+    )
     await userEvent.click(body().getByRole('option', { name: 'Command' }))
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Command' }))
     await userEvent.click(await body().findByRole('option', { name: 'notify-release' }))
@@ -868,5 +879,192 @@ export const ReducedMotion: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: /^web, Application/ }))
     expect(canvas.getByRole('list', { name: 'Steps of web' })).toBeVisible()
+  },
+}
+
+// ——— The gestures of #502 ———
+
+/** The steps of a moment's list, by their ids. */
+function stepsIn(list: HTMLElement): string[] {
+  return within(list)
+    .getAllByRole('listitem')
+    .map((one) => one.getAttribute('data-step') ?? '')
+    .filter((one) => one !== '')
+}
+
+/**
+ * Adding a reviewer, listed: while the forge's list is read as the dialog opens, what is typed
+ * waits under rows of the shape to come.
+ */
+export const ReviewersReading: Story = {
+  args: { form: { kind: 'reviewers' }, reviewers: 'reading' },
+  play: async () => {
+    const dialog = await findOpen(body(), 'dialog', { name: 'Reviewers' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Add a reviewer' }), 'na')
+    expect(within(dialog).getByRole('list', { name: 'Reviewers found' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    )
+  },
+}
+
+/**
+ * Adding a reviewer, listed, when the forge's command line cannot be asked: the trouble, its
+ * command and Check again, and a handle typed is added as typed.
+ */
+export const ReviewersCannotList: Story = {
+  args: { form: { kind: 'reviewers' }, reviewers: 'cannot' },
+  play: async ({ args }) => {
+    const dialog = await findOpen(body(), 'dialog', { name: 'Reviewers' })
+    expect(within(dialog).getByText(/^gh is signed out of github\.com/)).toBeVisible()
+    expect(within(dialog).getByText('gh auth login --hostname github.com')).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check again' }))
+    expect(args.onCheckAgain).toHaveBeenCalledWith('reviewers')
+    await userEvent.type(
+      within(dialog).getByRole('textbox', { name: 'Add a reviewer' }),
+      '@acme/ops',
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add @acme/ops as typed' }))
+    const chosen = within(dialog).getByRole('list', { name: 'Chosen reviewers' })
+    expect(within(chosen).getAllByRole('listitem')).toHaveLength(3)
+  },
+}
+
+/**
+ * Reordering a placed step in its dialog: web's check on staging says where it stands, When and
+ * After; After Bump and Save moves it there.
+ */
+export const StepMovedInItsMoment: Story = {
+  args: { open: ['web'], form: { kind: 'step', repository: 'web', id: 'staging' } },
+  play: async ({ canvasElement }) => {
+    const dialog = await findOpen(body(), 'dialog')
+    expect(within(dialog).getByRole('combobox', { name: 'When' })).toHaveTextContent('After Ship')
+    expect(within(dialog).getByRole('combobox', { name: 'After' })).toHaveTextContent('Merge')
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'After' }))
+    await userEvent.click(await body().findByRole('option', { name: 'Bump' }))
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    const steps = within(canvasElement).getByRole('list', { name: 'Steps of web' })
+    await waitFor(() => expect(stepsIn(steps)).toEqual(['bump', 'staging', 'merge', 'ci']))
+  },
+}
+
+/** Reordering a placed step across moments: moved into Review, it keeps its click. */
+export const StepMovedAcrossMoments: Story = {
+  args: { open: ['web'], form: { kind: 'step', repository: 'web', id: 'staging' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await findOpen(body(), 'dialog')
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'When' }))
+    await userEvent.click(await body().findByRole('option', { name: 'When Review starts' }))
+    await waitFor(() =>
+      expect(within(dialog).getByRole('combobox', { name: 'After' })).toHaveTextContent(
+        'Pull request',
+      ),
+    )
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    const review = canvas.getByRole('list', { name: 'Steps of web in Review' })
+    await waitFor(() => expect(stepsIn(review).at(-1)).toBe('staging'))
+    expect(
+      within(review).getByRole('button', { name: /^Confirm, .*waits for your click/ }),
+    ).toBeVisible()
+    expect(stepsIn(canvas.getByRole('list', { name: 'Steps of web' }))).not.toContain('staging')
+  },
+}
+
+/** A refusal of a template is said at its line: under the commit message. */
+export const RefusedTemplateAtItsLine: Story = {
+  args: REFUSED_TEMPLATE,
+  play: async ({ canvasElement }) => {
+    const lines = within(canvasElement).getByRole('list', { name: 'Pull requests' })
+    expect(within(lines).getByRole('alert')).toHaveTextContent(/^\{titel\} is not a name/)
+  },
+}
+
+/** A refusal of a cleanup step is said at its line: under Notify the release. */
+export const RefusedCleanupAtItsLine: Story = {
+  args: REFUSED_CLEANUP,
+  play: async ({ canvasElement }) => {
+    const cleanup = within(canvasElement).getByRole('list', { name: 'Cleanup' })
+    expect(within(cleanup).getByRole('alert')).toHaveTextContent(/“Notify the release”/)
+  },
+}
+
+/**
+ * Removing an accepted dependency: api and web deliver after shared; removing api's puts api in
+ * the first wave, and since its manifest still names shared, it is proposed again.
+ */
+export const DependencyRemoved: Story = {
+  args: { manifests: MANIFESTS },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const accepted = canvas.getByRole('list', { name: 'Dependencies' })
+    expect(within(accepted).getAllByRole('listitem')).toHaveLength(2)
+    await userEvent.click(
+      within(accepted).getByRole('button', { name: 'Remove: api delivers after shared' }),
+    )
+    await waitFor(() =>
+      expect(
+        within(canvas.getByRole('list', { name: 'Wave 1' })).getAllByRole('listitem'),
+      ).toHaveLength(2),
+    )
+    const proposed = canvas.getByRole('list', { name: 'Proposed dependencies' })
+    expect(
+      await within(proposed).findByRole('button', { name: 'Accept: api delivers after shared' }),
+    ).toBeVisible()
+  },
+}
+
+/** Approving a deployment is its own kind, with one field: the environment. */
+export const ApproveDeploymentKind: Story = {
+  args: { open: ['api'] },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Add a step to api' }))
+    const dialog = await findOpen(body(), 'dialog', { name: 'New step · api' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
+    await userEvent.click(await body().findByRole('option', { name: 'Approve a deployment' }))
+    expect(await within(dialog).findByRole('textbox', { name: 'Environment' })).toBeVisible()
+    expect(within(dialog).queryByRole('textbox', { name: 'Workflow or pipeline' })).toBeNull()
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
+  },
+}
+
+/** A forge that cannot approve a deployment does not offer it: ui-kit, on Bitbucket. */
+export const ApproveDeploymentAbsentWithoutIt: Story = {
+  args: { rules: FORGE_CANNOT, open: ['ui-kit'] },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('button', { name: 'Add a step to ui-kit' }),
+    )
+    const dialog = await findOpen(body(), 'dialog', { name: 'New step · ui-kit' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
+    const kinds = (await body().findAllByRole('option')).map((one) => one.textContent)
+    expect(kinds).toContain('Action on the remote')
+    expect(kinds).not.toContain('Approve a deployment')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(body().queryByRole('listbox')).toBeNull())
+  },
+}
+
+/**
+ * The defaults kept as built: each change is checked and saved at once; one the engine refuses
+ * stays on screen, unsaved, with its reason at its line.
+ */
+export const SavedAtEachChange: Story = {
+  args: { rules: PR_WITHOUT_PUSH, open: ['web'] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('alert')).toHaveTextContent(/push/)
+    expect(canvas.queryByRole('region', { name: 'Unsaved changes' })).toBeNull()
+  },
+}
+
+/** The defaults kept as built: one Pull requests frame, written to every repository. */
+export const PullRequestsOnce: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getAllByRole('list', { name: 'Pull requests' })).toHaveLength(1)
+    expect(canvas.queryByRole('combobox', { name: 'Pull requests of' })).toBeNull()
   },
 }

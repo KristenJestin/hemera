@@ -20,6 +20,7 @@ import {
   withCleanupAdded,
   withCleanupRemoved,
   withCleanupSaved,
+  withDependencyRemoved,
   withPreparation,
   withPreset,
   withPushIn,
@@ -28,6 +29,7 @@ import {
   withStepPutBack,
   withStepRemoved,
   withStepReset,
+  withStepMoved,
   withStepSaved,
   withTemplate,
   workingOf,
@@ -204,6 +206,7 @@ function dialogContextOf({
   delivery,
   draft,
   commit,
+  copy,
   close,
 }: {
   link: Link
@@ -215,6 +218,7 @@ function dialogContextOf({
   delivery: DeliveryProject
   draft: DeliveryRulesDraft
   commit: (change: Change) => Promise<void>
+  copy: (text: string) => void
   close: () => void
 }): DialogContext {
   return {
@@ -241,8 +245,13 @@ function dialogContextOf({
         writeRepository(link, project, forges, repositoryId, chosen).then((answered) => {
           if (answered !== null) setForges(answered)
         }),
-      stepSaved: (repositoryId, step) =>
-        commit((rules) => withStepSaved(rules, delivery, repositoryId, step)),
+      stepSaved: (repositoryId, step, place) =>
+        commit((rules) => {
+          const saved = withStepSaved(rules, delivery, repositoryId, step)
+          return place === undefined
+            ? saved
+            : withStepMoved(saved, delivery, repositoryId, step.id, place.moment, place.after)
+        }),
       stepRemoved: (repositoryId, stepId) =>
         commit((rules) => withStepRemoved(rules, delivery, repositoryId, stepId)),
       stepAdded: (repositoryId, moment, after, step) =>
@@ -252,6 +261,8 @@ function dialogContextOf({
     },
     remotesOf: (repositoryId) =>
       link.remotes(repositoryId).then((remotes) => remotes.map((one) => one.name)),
+    reviewersOf: (projectId) => link.reviewers(projectId),
+    copy,
     close,
   }
 }
@@ -329,6 +340,7 @@ export function DeliveryPart({
       delivery,
       draft: working.draft,
       commit,
+      copy,
       close: () => show(null),
     })
     show(deliveryDialogOf(target, context))
@@ -367,6 +379,12 @@ export function DeliveryPart({
           ])
           .then(setView, (failure: Error) => setRefused(sentenceOf(failure)))
       }}
+      onRemoveDependency={(dependency) =>
+        act(
+          (where) => (draft) =>
+            withDependencyRemoved(draft, where, idOf(dependency.repository), idOf(dependency.on)),
+        )
+      }
       onRemoveCleanup={(id) => act(() => (draft) => withCleanupRemoved(draft, id))}
       onCheckAgain={(path) => {
         setChecking((before) => [...before, path])

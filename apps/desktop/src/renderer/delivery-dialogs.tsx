@@ -6,9 +6,9 @@
  */
 
 import type { DeliveryAction, DeliveryMoment } from '@hemera/core/domain'
-import type { Command, ForcedForge, ForgeName, Project } from '@hemera/ipc'
+import type { Command, ForcedForge, ForgeName, Project, ReviewersListed } from '@hemera/ipc'
 import {
-  CATALOGUE,
+  DELIVERY_CLEANUP_KINDS,
   DeliveryRepositoryForm,
   DeliveryStepForm,
   FormFoot,
@@ -17,6 +17,7 @@ import {
   ReviewersForm,
   STEP_WORDS,
   TemplateForm,
+  deliveryPlaceOf,
   filled,
   newStep,
   templateRefusal,
@@ -28,11 +29,14 @@ import {
   type Moment,
   type PushDraft,
   type Reviewer,
+  type ReviewersListing,
   type SettingsForm,
+  type StepAnchor,
 } from '@hemera/ui'
 import { IconGitMerge } from '@hemera/ui/icons'
 import { type ReactNode, useSyncExternalStore } from 'react'
 
+import { stepKindsOn } from './delivery-settings-model.ts'
 import { type ProviderStore, providerStore } from './ticket-providers-model.ts'
 
 /** What a dialog holds: its draft, whether it is being written, and why it was refused. */
@@ -81,7 +85,12 @@ export interface DialogContext {
     readonly push: (draft: PushDraft) => Promise<void>
     readonly reviewers: (reviewers: ReadonlyArray<Reviewer>) => Promise<void>
     readonly repository: (repositoryId: string, draft: DeliveryRepositoryDraft) => Promise<void>
-    readonly stepSaved: (repositoryId: string, step: DeliveryAction) => Promise<void>
+    /** A step written, and moved to the place named when it is given. */
+    readonly stepSaved: (
+      repositoryId: string,
+      step: DeliveryAction,
+      place?: { readonly moment: DeliveryMoment; readonly after: string | null },
+    ) => Promise<void>
     readonly stepRemoved: (repositoryId: string, stepId: string) => Promise<void>
     readonly stepAdded: (
       repositoryId: string,
@@ -94,6 +103,9 @@ export interface DialogContext {
   }
   /** The remotes of a repository, read when its dialog opens. */
   readonly remotesOf: (repositoryId: string) => Promise<ReadonlyArray<string>>
+  /** Who can review the Project's pull requests, asked of the forge when the dialog opens. */
+  readonly reviewersOf: (projectId: string) => Promise<ReviewersListed>
+  readonly copy: (line: string) => void
   readonly close: () => void
 }
 
@@ -168,11 +180,58 @@ function PushBody({ store }: { store: Store<PushDraft> }): ReactNode {
   return <PushForm draft={draft} onChange={(next) => store.set({ draft: next })} />
 }
 
-function ReviewersBody({ store }: { store: Store<Reviewer[]> }): ReactNode {
+/** What the forge answered of who can review, as the form lists it. */
+interface Listed {
+  readonly listing: ReviewersListing
+  readonly candidates: ReadonlyArray<Reviewer>
+}
+
+function ReviewersBody({
+  store,
+  listed,
+}: {
+  store: Store<Reviewer[]>
+  listed: ProviderStore<Listed>
+}): ReactNode {
   const { draft } = useStored(store)
-  // No forge call lists the reviewers a forge offers yet: only those chosen can be removed.
+  const { listing, candidates } = useStored(listed)
   return (
-    <ReviewersForm chosen={draft} candidates={[]} onChange={(next) => store.set({ draft: next })} />
+    <ReviewersForm
+      chosen={draft}
+      candidates={candidates}
+      listing={listing}
+      onChange={(next) => store.set({ draft: next })}
+    />
+  )
+}
+
+/** The forge asked once who can review, again on Check again; its answer kept in the store. */
+function askReviewers(listed: ProviderStore<Listed>, context: DialogContext): void {
+  listed.set({ listing: { state: 'reading' }, candidates: [] })
+  const cannot = (sentence: string, fix: string | null): Listed => ({
+    candidates: [],
+    listing: {
+      state: 'cannot',
+      sentence,
+      fix: fix ?? undefined,
+      onCheckAgain: () => askReviewers(listed, context),
+      onCopy: context.copy,
+    },
+  })
+  void context.reviewersOf(context.project.id).then(
+    (answer) =>
+      listed.set(
+        answer.kind === 'listed'
+          ? {
+              listing: { state: 'ready' },
+              candidates: answer.reviewers.map((one) => ({
+                handle: one.handle,
+                name: one.name ?? undefined,
+              })),
+            }
+          : cannot(answer.sentence, answer.fix),
+      ),
+    (failure: Error) => listed.set(cannot(failure.message, null)),
   )
 }
 
@@ -205,11 +264,13 @@ function StepBody({
   commands,
   refused,
   adding,
+  placing,
 }: {
   store: Store<DeliveryStepDraft>
   commands: ReadonlyArray<string>
   refused: string | undefined
   adding: Parameters<typeof DeliveryStepForm>[0]['adding']
+  placing?: ReadonlyArray<StepAnchor> | undefined
 }): ReactNode {
   const { draft } = useStored(store)
   return (
@@ -219,6 +280,7 @@ function StepBody({
       commands={commands}
       refused={refused}
       adding={adding}
+      placing={placing}
     />
   )
 }
@@ -285,10 +347,10 @@ function repositoryDialog(path: string, context: DialogContext): SettingsForm | 
   }
 }
 
-/** The steps a new one may come after, each in its moment. */
-const anchorsOf = (rules: DeliveryRulesShown, path: string) =>
+/** The steps a step may come after, each in its moment, the step itself apart. */
+const anchorsOf = (rules: DeliveryRulesShown, path: string, apart?: string) =>
   (rules.repositories.find((one) => one.path === path)?.steps ?? [])
-    .filter((one) => one.origin !== 'omitted')
+    .filter((one) => one.origin !== 'omitted' && one.step.id !== apart)
     .map((one) => ({
       id: one.step.id,
       label: STEP_WORDS[one.step.config.kind],
@@ -315,7 +377,11 @@ function stepDialog(
           store={store}
           commands={commands}
           refused={undefined}
-          adding={{ kinds: CATALOGUE, moments: true, after: anchorsOf(rules, form.repository) }}
+          adding={{
+            kinds: stepKindsOn(forge),
+            moments: true,
+            after: anchorsOf(rules, form.repository),
+          }}
         />
       ),
       footer: (
@@ -341,15 +407,24 @@ function stepDialog(
   const before = context.actionOf(repository.id, form.id)
   if (existing === undefined || before === undefined) return null
   const name = STEP_WORDS[existing.step.config.kind]
+  const found = deliveryPlaceOf(shown.steps, existing)
+  const place = { moment: found.moment ?? existing.moment, after: found.after ?? null }
   const store = dialog<DeliveryStepDraft>({
     start: existing.step.start,
     config: existing.step.config,
+    ...place,
   })
   return {
     title: `${name} · ${form.repository} · ${MOMENT_WORDS[existing.moment]}`,
     icon,
     body: (
-      <StepBody store={store} commands={commands} refused={existing.refused} adding={undefined} />
+      <StepBody
+        store={store}
+        commands={commands}
+        refused={existing.refused}
+        adding={undefined}
+        placing={anchorsOf(rules, form.repository, form.id)}
+      />
     ),
     footer: (
       <Foot
@@ -359,11 +434,19 @@ function stepDialog(
           existing.origin === 'added' ? `Remove ${name}` : `Leave out ${name} in ${form.repository}`
         }
         onRemove={() => edit.stepRemoved(repository.id, form.id)}
-        write={(draft) =>
-          edit
-            .stepSaved(repository.id, context.toAction(draft, form.id, forge, before))
+        write={(draft) => {
+          const moment = draft.moment ?? place.moment
+          const after = draft.after === undefined ? place.after : draft.after
+          // Save moves the step only when its place changed: across moments too.
+          const moved = moment !== place.moment || after !== place.after
+          return edit
+            .stepSaved(
+              repository.id,
+              context.toAction(draft, form.id, forge, before),
+              moved ? { moment: MOMENTS[moment], after } : undefined,
+            )
             .then(() => true)
-        }
+        }}
       />
     ),
   }
@@ -385,7 +468,7 @@ function cleanupDialog(
           store={store}
           commands={commands}
           refused={undefined}
-          adding={{ kinds: CATALOGUE, after: [] }}
+          adding={{ kinds: DELIVERY_CLEANUP_KINDS, after: [] }}
         />
       ),
       footer: (
@@ -445,10 +528,12 @@ export function deliveryDialogOf(
     }
     case 'reviewers': {
       const store = dialog<Reviewer[]>([...rules.pullRequests.reviewers])
+      const listed = providerStore<Listed>({ listing: { state: 'reading' }, candidates: [] })
+      askReviewers(listed, context)
       return {
         title: 'Reviewers',
         icon,
-        body: <ReviewersBody store={store} />,
+        body: <ReviewersBody store={store} listed={listed} />,
         footer: (
           <Foot
             store={store}

@@ -15,6 +15,7 @@ import {
   IconPlayerPlay,
   IconPlayerStop,
   IconRefresh,
+  IconShieldCheck,
   IconTag,
   IconTerminal,
   IconTrash,
@@ -41,6 +42,8 @@ export function stepIcon(kind: StepKind): ReactNode {
       return <IconChecklist size="sm" />
     case 'remote-action':
       return <IconPlayerPlay size="sm" />
+    case 'approve-deployment':
+      return <IconShieldCheck size="sm" />
     case 'published':
       return <IconTag size="sm" />
     case 'command':

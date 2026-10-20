@@ -1,7 +1,19 @@
 import { newStep } from './delivery-form-options.ts'
 import type { PushDraft, RepositoryDraft, StepDraft } from './delivery-forms.tsx'
-import type { DeliveryRules, Reviewer } from './delivery-model.ts'
+import type { DeliveryRules, RecipeStep, Reviewer } from './delivery-model.ts'
 import type { DeliveryTarget } from './delivery-rules.tsx'
+
+/** Where a placed step stands: its moment, and the step it follows there, null for first. */
+export function placeOf(
+  steps: readonly RecipeStep[],
+  found: RecipeStep,
+): Pick<StepDraft, 'moment' | 'after'> {
+  const before = steps
+    .slice(0, steps.indexOf(found))
+    .filter((one) => one.moment === found.moment && one.origin !== 'omitted')
+    .at(-1)
+  return { moment: found.moment, after: before?.step.id ?? null }
+}
 
 export interface Drafts {
   template: string
@@ -39,11 +51,13 @@ export function seed(target: DeliveryTarget | null, rules: DeliveryRules | null)
     }
   }
   if (target.kind === 'step') {
-    const found = rules.repositories
-      .find((one) => one.path === target.repository)
-      ?.steps.find((one) => one.step.id === target.id)
+    const steps = rules.repositories.find((one) => one.path === target.repository)?.steps ?? []
+    const found = steps.find((one) => one.step.id === target.id)
     if (found !== undefined)
-      return { ...drafts, step: { start: found.step.start, config: found.step.config } }
+      return {
+        ...drafts,
+        step: { start: found.step.start, config: found.step.config, ...placeOf(steps, found) },
+      }
   }
   if (target.kind === 'cleanup') {
     const found = rules.cleanup.find((one) => one.id === target.id)

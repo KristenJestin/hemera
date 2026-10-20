@@ -22,7 +22,12 @@ import { describe, expect, test, vi } from 'vite-plus/test'
 
 import {
   type DeliveryWorld,
+  actionIn,
   actionOf,
+  configOf,
+  stepKindsOn,
+  withDependencyRemoved,
+  withStepMoved,
   deliveryProjectOf,
   shownOf,
   withCleanupAdded,
@@ -650,5 +655,168 @@ describe('A change of the delivery rules, checked then saved', () => {
       problems: [],
       edited: false,
     })
+  })
+})
+
+describe('The gestures of the delivery rules (#502)', () => {
+  test('reordering a placed step in its dialog: a preset step moved across moments keeps its settings', () => {
+    const clicked = withStepSaved(defaultDeliveryRules(), DELIVERY, 'r-api', {
+      id: 'ci',
+      kind: 'ci',
+      mode: 'click',
+    })
+    const moved = withStepMoved(clicked, DELIVERY, 'r-api', 'ci', 'preparation', 'pull-request')
+    expect(stepsOf(moved, 'api')).toEqual([
+      'review:commit:commit-by-hemera:preset',
+      'review:push:push:preset',
+      'review:pull-request:pull-request:preset',
+      'review:ci:ci:changed',
+      'waves:merge:merge:preset',
+    ])
+    expect(
+      shownRepository(moved, 'api').steps.find((one) => one.step.id === 'ci')?.step.start,
+    ).toBe('click')
+    // Back to the preset puts it back in its place, as its preset has it.
+    expect(stepsOf(withStepReset(moved, 'r-api', 'ci'), 'api')).toEqual(
+      stepsOf(defaultDeliveryRules(), 'api'),
+    )
+  })
+
+  test('reordering a placed step: first in its moment, then saved and left out where it stands', () => {
+    const first = withStepMoved(defaultDeliveryRules(), DELIVERY, 'r-api', 'ci', 'waves', null)
+    expect(stepsOf(first, 'api').slice(3)).toEqual([
+      'waves:ci:ci:changed',
+      'waves:merge:merge:preset',
+    ])
+    const saved = withStepSaved(first, DELIVERY, 'r-api', { id: 'ci', kind: 'ci', mode: 'click' })
+    expect(actionIn(saved, DELIVERY, 'r-api', 'ci')).toEqual({
+      id: 'ci',
+      kind: 'ci',
+      mode: 'click',
+    })
+    expect(stepsOf(saved, 'api').slice(3)).toEqual([
+      'waves:ci:ci:changed',
+      'waves:merge:merge:preset',
+    ])
+    const out = withStepRemoved(saved, DELIVERY, 'r-api', 'ci')
+    expect(stepsOf(out, 'api').slice(3)).toEqual([
+      'waves:merge:merge:preset',
+      'waves:ci:ci:omitted',
+    ])
+  })
+
+  test('reordering a step of its own: moved to another moment, after the step named', () => {
+    const added = withStepAdded(defaultDeliveryRules(), DELIVERY, 'r-api', 'tasks', null, {
+      id: 'check',
+      kind: 'confirm',
+      mode: 'click',
+      what: 'The release is checked',
+    })
+    const moved = withStepMoved(added, DELIVERY, 'r-api', 'check', 'waves', 'merge')
+    expect(stepsOf(moved, 'api')).toEqual([
+      'review:commit:commit-by-hemera:preset',
+      'review:push:push:preset',
+      'review:pull-request:pull-request:preset',
+      'waves:merge:merge:preset',
+      'waves:check:confirm:added',
+      'waves:ci:ci:preset',
+    ])
+  })
+
+  test('a refusal of a template or a cleanup step is said at its line', () => {
+    const problems: DeliveryProblem[] = [
+      {
+        code: 'unknown-template-variable',
+        repositoryId: 'r-api',
+        stepId: null,
+        field: 'commitTemplate',
+        sentence: 'The commit template of api uses an unknown variable: {titel}.',
+      },
+      {
+        code: 'step-after-workspace-removed',
+        repositoryId: null,
+        stepId: 'notify',
+        sentence:
+          'Cleanup runs “notify” after removing the Workspace, but nothing runs once it is gone.',
+      },
+    ]
+    const draft = withCleanupAdded(defaultDeliveryRules(), {
+      id: 'notify',
+      kind: 'command',
+      mode: 'auto',
+      commandId: 'c-bump',
+    })
+    const shown = shownOf(world({ draft, problems }))
+    expect(shown.refusals.templates).toEqual({
+      commit: 'The commit template of api uses an unknown variable: {titel}.',
+    })
+    expect(shown.rules.cleanup.find((one) => one.id === 'notify')?.refused).toBe(
+      'Cleanup runs “notify” after removing the Workspace, but nothing runs once it is gone.',
+    )
+    expect(shown.elsewhere).toBeUndefined()
+  })
+
+  test('removing an accepted dependency takes it out of the rules the engine saves', () => {
+    const accepted = withAcceptedForTest(defaultDeliveryRules())
+    const removed = withDependencyRemoved(accepted, DELIVERY, 'r-api', 'r-web')
+    expect(
+      removed.waves.repositories.find((one) => one.repositoryId === 'r-api')?.deliversAfter,
+    ).toEqual([])
+    expect(shownOf(world({ draft: removed })).rules.dependencies).toEqual([])
+  })
+
+  test('approving a deployment is its own kind, and goes to the engine and back as it was', () => {
+    const approve: DeliveryAction = {
+      id: 'approve',
+      kind: 'remote-action',
+      mode: 'click',
+      action: { type: 'approve-deployment', environment: 'production' },
+    }
+    const draft = withStepAdded(defaultDeliveryRules(), DELIVERY, 'r-api', 'waves', 'ci', approve)
+    const shown = shownRepository(draft, 'api').steps.find((one) => one.step.id === 'approve')
+    expect(shown?.step.config).toEqual({ kind: 'approve-deployment', environment: 'production' })
+    expect(
+      actionOf({ kind: 'approve-deployment', environment: 'production' }, 'click', 'approve', {
+        commands: [],
+        forge: 'github',
+        before: undefined,
+      }),
+    ).toEqual(approve)
+  })
+
+  test('an action on the remote keeps its workflow and gains its inputs', () => {
+    const config = {
+      kind: 'remote-action',
+      action: 'release.yml',
+      inputs: 'channel=stable\nnotes = yes\n',
+    } as const
+    const action = actionOf(config, 'click', 'release', {
+      commands: [],
+      forge: 'github',
+      before: undefined,
+    })
+    expect(action).toEqual({
+      id: 'release',
+      kind: 'remote-action',
+      mode: 'click',
+      action: {
+        type: 'run-workflow',
+        workflow: 'release.yml',
+        inputs: { channel: 'stable', notes: 'yes' },
+      },
+    })
+    expect(configOf(action, [])).toEqual({
+      kind: 'remote-action',
+      action: 'release.yml',
+      inputs: 'channel=stable\nnotes=yes',
+    })
+  })
+
+  test('approve a deployment is absent for a forge without it', () => {
+    expect(stepKindsOn('github')).toContain('approve-deployment')
+    for (const forge of ['bitbucket-cloud', 'bitbucket-datacenter', 'none', 'unknown'] as const) {
+      expect(stepKindsOn(forge)).not.toContain('approve-deployment')
+      expect(stepKindsOn(forge)).toContain('remote-action')
+    }
   })
 })
