@@ -277,7 +277,10 @@ const ALL_READY: ReadonlyArray<FakeRule> = [
 describe('The comments of a pull request come from the forge with their place, thread and state', () => {
   test('GitHub: inline comments with path, lines, side, commit and resolved thread; general comments; review summaries', async () => {
     const fake = fakeForge(ALL_READY)
-    const comments = await withForge(fake, (repository) => readComments(repository('shop'), 7))
+    const { slug, comments } = await withForge(fake, (repository) =>
+      readComments(repository('shop'), 7),
+    )
+    expect(slug).toBe('acme/shop')
     expect(comments).toEqual([
       {
         id: '101',
@@ -354,7 +357,10 @@ describe('The comments of a pull request come from the forge with their place, t
 
   test('Bitbucket Cloud: inline comments with their line, thread and resolution; a deleted one says so', async () => {
     const fake = fakeForge(ALL_READY)
-    const comments = await withForge(fake, (repository) => readComments(repository('api'), 4))
+    const { slug, comments } = await withForge(fake, (repository) =>
+      readComments(repository('api'), 4),
+    )
+    expect(slug).toBe('acme-team/api')
     expect(comments).toEqual([
       expect.objectContaining({
         id: '11',
@@ -374,7 +380,10 @@ describe('The comments of a pull request come from the forge with their place, t
 
   test('Bitbucket Data Center: an anchor on the old side, a general comment, the thread resolved, the version', async () => {
     const fake = fakeForge(ALL_READY)
-    const comments = await withForge(fake, (repository) => readComments(repository('dc'), 9))
+    const { slug, comments } = await withForge(fake, (repository) =>
+      readComments(repository('dc'), 9),
+    )
+    expect(slug).toBe('shop/web')
     expect(comments).toEqual([
       expect.objectContaining({
         id: '21',

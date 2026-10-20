@@ -404,24 +404,36 @@ const fromDataCenter = (
     }
   })
 
+/** A pull request's comments as read now, with the repository it is of on its forge. */
+export interface ForgeComments {
+  /** `owner/repo` on the forge; empty when the remote names none. */
+  readonly slug: string
+  readonly comments: ReadonlyArray<ForgeComment>
+}
+
 /** The comments of a pull request, read now: every comment the forge lists, in its order. */
 export const readComments = (repositoryId: string, number: number) =>
   ForgePort.use((port) =>
     port.operate(repositoryId, (target, run) =>
       Effect.gen(function* () {
-        if (target.cli === 'gh') return yield* fromGithub(target, number, run)
+        const { owner, slug } = target.identity
+        const read = (comments: ReadonlyArray<ForgeComment>): ForgeComments => ({
+          slug: owner === null || slug === null ? '' : `${owner}/${slug}`,
+          comments,
+        })
+        if (target.cli === 'gh') return read(yield* fromGithub(target, number, run))
         const answer = yield* answered(
           target,
           yield* run(['pr', 'comments', String(number), ...target.place, '--json']),
         )
         if (target.forge === 'bitbucket-cloud') {
-          const read = readBktCloud(answer.stdout)
-          if (Option.isNone(read)) return yield* unreadable(target, answer)
-          return fromCloud(read.value.comments ?? [])
+          const cloud = readBktCloud(answer.stdout)
+          if (Option.isNone(cloud)) return yield* unreadable(target, answer)
+          return read(fromCloud(cloud.value.comments ?? []))
         }
-        const read = readBktDc(answer.stdout)
-        if (Option.isNone(read)) return yield* unreadable(target, answer)
-        return fromDataCenter(read.value.comments ?? [])
+        const dc = readBktDc(answer.stdout)
+        if (Option.isNone(dc)) return yield* unreadable(target, answer)
+        return read(fromDataCenter(dc.value.comments ?? []))
       }),
     ),
   )
