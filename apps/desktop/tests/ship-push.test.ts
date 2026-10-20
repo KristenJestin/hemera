@@ -401,7 +401,7 @@ describe('Ship pushes the frozen trees', () => {
   )
 
   test(
-    'two presses still ship and push once',
+    'two presses still ship and push once, and a repository with nothing new is not pushed',
     async () => {
       const world = shipWorld()
       const { run } = engineOf(world)
@@ -411,7 +411,9 @@ describe('Ship pushes the frozen trees', () => {
           Effect.gen(function* () {
             const mission = yield* shipReady(world)
             recordPushes(world)
-            yield* changedInBoth(mission)
+            // Only api changed since Review's push: web has nothing new to push.
+            writeFileSync(join(mission.api, 'invoices.ts'), 'export const invoices = [1]\n')
+            yield* OutsideChanges.use((outside) => outside.compare(mission.missionId, null))
             yield* until(
               Effect.map(
                 Effect.all([preview(mission.missionId), preview(mission.missionId)]),
@@ -432,9 +434,8 @@ describe('Ship pushes the frozen trees', () => {
         ),
       )
       expect(seen.outcomes.filter(Result.isSuccess)).toHaveLength(1)
-      for (const name of ['api', 'web']) {
-        expect(pushesTo(world, name, seen.mission.branch)).toBe(1)
-      }
+      expect(pushesTo(world, 'api', seen.mission.branch)).toBe(1)
+      expect(pushesTo(world, 'web', seen.mission.branch)).toBe(0)
       expect(world.pullRequests()).toHaveLength(2)
     },
     SLOW,
