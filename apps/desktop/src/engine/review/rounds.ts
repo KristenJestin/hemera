@@ -1569,6 +1569,8 @@ export const roundsLayer = (settings: RoundsSettings) =>
       const grilledCaughtUp = (missionId: string) =>
         Effect.gen(function* () {
           yield* ensureGriller(missionId)
+          // The need holds the Planner like every other caller: its Retry comes back here.
+          if (yield* workspaceWaits(missionId)) return
           const prepared = yield* provided(prepareDeliveries(missionId))
           const left = (yield* provided(queuedForPlanner(missionId))).filter(
             (queued) => !prepared.some((ready_) => ready_.id === queued.id),

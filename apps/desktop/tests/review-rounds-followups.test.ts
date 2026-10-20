@@ -462,6 +462,63 @@ describe('A feedback withdrawn after its mission started', () => {
   )
 })
 
+describe('The Planner at a start while the Workspace need waits', () => {
+  test(
+    'queued deliveries do not open the Planner of a round at an engine start while its missing-Workspace need waits, even with the Workspace back; Retry opens it',
+    SLOW,
+    async () => {
+      const first = rounding(data, work)
+      const left = await first.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* reviewed(work)
+            yield* written(missionId, remark('The CSV has no header row.'))
+            const spare = yield* written(missionId, remark('The export button is grey.'))
+            const later = yield* written(missionId, remark('The file name has no date.'))
+            const folder = yield* workspaceOf(missionId)
+            renameSync(folder, `${folder}.away`)
+            yield* fix(missionId)
+            yield* until(
+              Effect.map(getMission(missionId), (mission) => mission.needs.length > 0),
+              LONG,
+            )
+            // Queued for a Planner that does not run.
+            yield* withdrawn(spare.id)
+            yield* until(
+              Effect.map(deliveredTo(missionId, 'round-planner'), (told) => told.length > 0),
+              LONG,
+            )
+            renameSync(`${folder}.away`, folder)
+            return { missionId, later: later.id, needs: (yield* getMission(missionId)).needs }
+          }),
+        ),
+      )
+      const after = rounding(data, work, { resumed: true })
+      const seen = await after.run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = left
+            // A later event followed means the start's catch-up has ended.
+            yield* withdrawnAndTold(missionId, left.later)
+            const planners = (yield* liveOf(missionId)).filter(
+              (row) => row.role === 'round-planner',
+            )
+            const waiting = (yield* getMission(missionId)).needs
+            yield* retryNeed(waiting[0]?.id ?? '')
+            const planner = yield* roundPlannerOf(missionId)
+            return { planners, waiting, planner: planner.session }
+          }),
+        ),
+      )
+      expect(seen.planners).toEqual([])
+      expect(seen.waiting.map((one) => one.id)).toEqual(left.needs.map((one) => one.id))
+      expect(seen.planner.role).toBe('round-planner')
+    },
+  )
+})
+
 /** The test of the Markdown export: it fails until `export.ts` holds `markdown`. */
 const MARKDOWN_TEST = [
   "import { test } from 'node:test'",
