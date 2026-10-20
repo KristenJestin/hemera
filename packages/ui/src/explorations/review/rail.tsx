@@ -8,7 +8,8 @@ import { Button, IconButton } from '../../components/button/button.tsx'
 import { Input, Textarea } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
-import { type MarkState, StatusMark } from '../../components/status-mark/status-mark.tsx'
+import type { MarkState } from '../../components/status-mark/mark-legends.ts'
+import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { Legend } from '../../components/tooltip/legend.tsx'
 import {
   IconAlertTriangle,
