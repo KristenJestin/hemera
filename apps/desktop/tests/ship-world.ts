@@ -230,16 +230,34 @@ export const shipEngine = (
   world: ShipWorld,
   hold: (at: ShipMoment) => Effect.Effect<void> = () => Effect.void,
 ) =>
-  sessionsEngine(world.data, builderAgents, {
-    roles: [HELPER],
-    tools: { home: world.work },
-    building: {
-      outside: { compareEveryMillis: 3_600_000, baseEveryMillis: 3_600_000 },
-      checks: worldChecks(world),
-    },
-    forge: { env: world.fake.env },
-    ship: { hold },
-  })
+  {
+    const engine = sessionsEngine(world.data, builderAgents, {
+      roles: [HELPER],
+      tools: { home: world.work },
+      building: {
+        outside: { compareEveryMillis: 3_600_000, baseEveryMillis: 3_600_000 },
+        checks: worldChecks(world),
+      },
+      forge: { env: world.fake.env },
+      ship: { hold },
+    })
+    // DIAG #522: the engine's lines when a Ship test fails.
+    return {
+      ...engine,
+      run: <A, E>(
+        program: Parameters<typeof engine.run<A, E>>[0],
+      ): Promise<A> =>
+        engine.run((started) =>
+          program(started).pipe(
+            Effect.tapCause(() =>
+              Effect.sync(() =>
+                console.error(`DIAG522 engine lines:\n${started.lines.join('\n')}`),
+              ),
+            ),
+          ),
+        ),
+    }
+  }
 
 /** A hold that stops a Ship at one moment, for good, and says it did. */
 export const stopAt = (moment: ShipMoment) => {
@@ -425,6 +443,15 @@ export const pushedIn = (missionId: string, name: string, state: RepositoryPush[
       (pushes) => pushes.repositories.find((one) => one.repository === name)?.state === state,
     ),
     LONG,
+  ).pipe(
+    // DIAG #522
+    Effect.tapCause(() =>
+      Effect.flatMap(Pushes.use((pushes) => pushes.pushes(missionId)), (pushes) =>
+        Effect.sync(() =>
+          console.error(`DIAG522 pushedIn ${name} ${state}: ${JSON.stringify(pushes)}`),
+        ),
+      ).pipe(Effect.ignore),
+    ),
   )
 
 /**
