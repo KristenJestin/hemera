@@ -413,6 +413,102 @@ describe('An index that cannot be read for its submodules is said, never read as
     },
   )
 
+  /**
+   * Every path's stat as it is, but the index's: `breaks` times, right after its stat is taken for
+   * a read, a folder is put in its place, so the read that follows fails; at the next stat, Git's
+   * new index is renamed over it, written whole beside it (a new stat). `stats` counts the index's.
+   */
+  const replacing = (index: string, breaks: number) => {
+    const fresh = readFileSync(index)
+    const seen = { stats: 0, breaks }
+    const statOf: StatOf = (path) => {
+      if (path !== index) return lstatSync(path, { bigint: true })
+      seen.stats += 1
+      const broken = lstatSync(index).isDirectory()
+      if (broken) {
+        rmSync(index, { recursive: true })
+        writeFileSync(`${index}.lock`, fresh)
+        renameSync(`${index}.lock`, index)
+      }
+      const stat = lstatSync(index, { bigint: true })
+      if (!broken && seen.breaks > 0) {
+        seen.breaks -= 1
+        rmSync(index)
+        mkdirSync(index)
+      }
+      return stat
+    }
+    return { seen, statOf }
+  }
+
+  /** Acme's index as is, or as a link to one outside: the index, and the file read for it. */
+  const indexes = [
+    ['an index', () => ({ ...indexed(), linked: false })],
+    [
+      'a linked index',
+      () => {
+        const { main, index } = indexed()
+        const target = join(work, 'index')
+        renameSync(index, target)
+        symlinkSync(target, index)
+        return { main, index: target, linked: true }
+      },
+    ],
+  ] as const
+
+  describe.each(indexes)('%s Git replaces while it is read (#533)', (_, made) => {
+    test.each([1, 3])('replaced at %i reads in a row, it is read again and not said', (breaks) => {
+      const { main, index, linked } = made()
+      const { seen, statOf } = replacing(index, breaks)
+      const shapes = shapesOf([main], home, [], statOf)
+      expect(seen.breaks).toBe(0)
+      const said = shapes.get(join(main, '.git', 'index'))
+      if (linked) expect(said?.text).toContain('This index is a link')
+      else expect(said).toBeUndefined()
+      expect([...shapes.keys()]).toContain(join(main, 'vendor', '.git', 'config'))
+    })
+
+    test('replaced at every read, it is read four times, then said: the rereads end', () => {
+      const { main, index } = made()
+      const { seen, statOf } = replacing(index, Number.POSITIVE_INFINITY)
+      const shapes = shapesOf([main], home, [], statOf)
+      // Four reads, each after its stat, and one stat after each failure but the last.
+      expect(seen.stats).toBe(7)
+      expect(shapes.get(join(main, '.git', 'index'))?.text).toContain('could not read this index')
+      expect([...shapes.keys()]).not.toContain(join(main, 'vendor', '.git', 'config'))
+    })
+
+    test('failing to read at a stat that stays the same, it is said, read once', () => {
+      const { main, index } = made()
+      writeFileSync(index, 'not an index\n')
+      let stats = 0
+      const counted: StatOf = (path) => {
+        if (path === index) stats += 1
+        return lstatSync(path, { bigint: true })
+      }
+      expect(saidOf(main, counted)?.text).toContain('does not know')
+      expect(stats).toBe(2)
+    })
+  })
+
+  test('an index Git removes after a read that failed is read again: none, as Git reads no index (#533)', () => {
+    const { main, index } = indexed()
+    let stats = 0
+    const removing: StatOf = (path) => {
+      if (path !== index) return lstatSync(path, { bigint: true })
+      stats += 1
+      if (stats === 2) rmSync(index, { recursive: true })
+      const stat = lstatSync(index, { bigint: true })
+      if (stats === 1) {
+        rmSync(index)
+        mkdirSync(index)
+      }
+      return stat
+    }
+    expect(saidOf(main, removing)).toBeUndefined()
+    expect(stats).toBe(3)
+  })
+
   test('an unreadable index is said the same way each time, so it asks once', () => {
     const { main, index } = indexed()
     writeFileSync(index, 'not an index\n')

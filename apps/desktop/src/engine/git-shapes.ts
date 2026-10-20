@@ -123,6 +123,8 @@ const shapeOf = (kind: Shape['kind'], digest: string, text: string | null = null
 const SETTLED_NS = 2_000_000_000n
 /** At most this many files are remembered; past it, the memory starts again. */
 const REMEMBERED = 100_000
+/** How many times an index Git replaced while it was read is read again before it is said (#533). */
+const REREADS = 3
 
 /**
  * The shapes of the files of hooks folders hashed once, by path, with the stat they had. One whose
@@ -382,9 +384,11 @@ function indexOf(bytes: Buffer, hash: number): IndexRead | null {
  * read again only once the index's stat changed, as a hooks folder's files are. A Git folder with no index
  * names none, as Git reads it. A linked index is said, so it asks once, and since Git follows it,
  * the index it leads to is read for what Git walks into, every time: it can be rewritten behind
- * the link's own stat (#500).
+ * the link's own stat (#500). A read that fails while Git renames a new index over the one it
+ * read (every commit does) reads the index again as it stands now, up to `REREADS` times: only
+ * one that fails at the stat it still has, or past them, is said (#533).
  */
-function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): IndexNames {
+function gitlinksAt(gitDir: string, hash: number, statOf: StatOf, rereads = REREADS): IndexNames {
   const path = join(gitDir, 'index')
   const said = (read: Gitlinks, linked: boolean): IndexNames =>
     Result.isSuccess(read)
@@ -407,7 +411,11 @@ function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): IndexNames {
     } catch (cause) {
       return said(Result.fail(`where it leads could not be read (${codeOf(cause)})`), true)
     }
-    return said(readGitlinks(gitDir, real, led, hash), true)
+    const read = readGitlinks(gitDir, real, led, hash)
+    if (Result.isFailure(read) && rereads > 0 && replacedSince(real, statKey(led), statOf)) {
+      return gitlinksAt(gitDir, hash, statOf, rereads - 1)
+    }
+    return said(read, true)
   }
   const stat = statKey(named)
   const known = indexed.get(path)
@@ -419,8 +427,19 @@ function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): IndexNames {
   if (Result.isSuccess(read)) {
     if (indexed.size >= REMEMBERED) indexed.clear()
     indexed.set(path, { stat, settled, gitlinks: read.success })
+  } else if (rereads > 0 && replacedSince(path, stat, statOf)) {
+    return gitlinksAt(gitDir, hash, statOf, rereads - 1)
   }
   return said(read, false)
+}
+
+/** Whether a path no longer has this stat: replaced, gone, or its stat refused now. */
+function replacedSince(path: string, stat: string, statOf: StatOf): boolean {
+  try {
+    return statKey(statOf(path)) !== stat
+  } catch {
+    return true
+  }
 }
 
 /** What an index of this stat names, its shared part's included, or why it could not be read. */
