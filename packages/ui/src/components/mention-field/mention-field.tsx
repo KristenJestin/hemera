@@ -1,17 +1,17 @@
 import { type ReactNode, Suspense, use } from 'react'
 
 import { Skeleton } from '../loading/loading.tsx'
+import { loadMentionEditor, mentionEditorArrived } from './load-mention-editor.ts'
 import { AREA, FieldBox, type MentionFieldProps } from './mention-parts.tsx'
 
+export { MentionBadge, type MentionFieldProps } from './mention-parts.tsx'
 export {
   kindOf,
-  MentionBadge,
   type Mentionable,
-  type MentionFieldProps,
   type MentionKind,
   type MentionRef,
   mentionsFor,
-} from './mention-parts.tsx'
+} from './mention-model.tsx'
 
 /**
  * The mention field: where a message is written — the Chat's composer, Discuss, an answer, a
@@ -36,27 +36,9 @@ export {
  *   at its start, then whatever stands before Send.
  */
 
-type Editor = (props: MentionFieldProps) => ReactNode
-
-/** The editor once it has arrived; nothing until then. */
-let arrived: Editor | undefined
-let arriving: Promise<Editor> | undefined
-
-/**
- * Fetches the editor, once: a field asks for it as it first draws, and a caller that knows a field
- * is coming — a story, a page about to open — can ask ahead, so the field draws ready.
- */
-export function loadMentionEditor(): Promise<Editor> {
-  arriving ??= import('./mention-editor.tsx').then(({ MentionEditor }) => {
-    arrived = MentionEditor
-    return MentionEditor
-  })
-  return arriving
-}
-
 /** One element whatever the moment, so the editor that arrives is never drawn twice. */
 function Loaded(props: MentionFieldProps): ReactNode {
-  const Field = arrived ?? use(loadMentionEditor())
+  const Field = mentionEditorArrived() ?? use(loadMentionEditor())
   return <Field {...props} />
 }
 

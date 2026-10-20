@@ -8,7 +8,7 @@
  * linked worktree of each standing for the Workspace's repositories.
  */
 
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { asc, eq } from 'drizzle-orm'
@@ -45,9 +45,15 @@ function repositoryOf(name: string) {
   return { main, worktree, base: git(main, 'rev-parse', 'origin/main') }
 }
 
+/**
+ * A mission of a Project over `folder`, its repositories those the suite made under its `main`: a
+ * snapshot reads only the Git folders of its Project's repositories (#439).
+ */
 const missionOf = (folder: string) =>
   Effect.gen(function* () {
-    const project = yield* createProject({ name: 'Acme', mainCheckout: folder, repositories: [] })
+    const made = join(folder, 'main')
+    const repositories = existsSync(made) ? readdirSync(made).map((name) => `main/${name}`) : []
+    const project = yield* createProject({ name: 'Acme', mainCheckout: folder, repositories })
     const mission = yield* createMission({
       projectId: project.id,
       idea: { sentence: 'Write the READMEs', ticket: null },

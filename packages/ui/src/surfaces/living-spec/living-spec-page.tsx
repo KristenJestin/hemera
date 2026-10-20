@@ -14,6 +14,46 @@ import { BeforeDomains, ReadingChip } from './living-spec-parts.tsx'
 import { Doubt, RequirementCard, RequirementSkeletons } from './living-spec-requirement.tsx'
 import type { LivingDomain, LivingRequirement, LivingSpecPageProps } from './living-spec-types.ts'
 
+/** The page's head: how many domains and requirements, the reading chip and what else can be done. */
+function LivingSpecHeader({ props }: { props: LivingSpecPageProps }): ReactNode {
+  const { projectName, data } = props
+  const names = Object.fromEntries((data?.domains ?? []).map((one) => [one.id, one.name]))
+  const requirementCount = Object.values(data?.requirements ?? {}).reduce(
+    (sum, list) => sum + list.filter((one) => !one.removed).length,
+    0,
+  )
+  return (
+    <PageHeader
+      lead={<ProjectMark name={projectName} />}
+      title="Living spec"
+      about={
+        data === null || data.domains.length === 0
+          ? undefined
+          : `${String(data.domains.length)} domains · ${String(requirementCount)} requirements`
+      }
+      actions={
+        data === null ? undefined : (
+          <>
+            <ReadingChip
+              projectName={projectName}
+              data={data}
+              names={names}
+              onReview={props.onOpenDomain}
+              onRetry={props.onRead}
+            />
+            {data.domains.length > 0 && (
+              <Menu
+                label="More about the living spec"
+                groups={[[{ label: 'Read the whole Project again', onSelect: props.onRead }]]}
+              />
+            )}
+          </>
+        )
+      }
+    />
+  )
+}
+
 /**
  * The living spec of a Project, domain by domain. The domains are a list down the left, the way the
  * settings list their sections; one domain is open beside it, with its actions at its head: what
@@ -26,42 +66,10 @@ import type { LivingDomain, LivingRequirement, LivingSpecPageProps } from './liv
  */
 export function LivingSpecPage(props: LivingSpecPageProps): ReactNode {
   const { projectName, data, error } = props
-  const names = Object.fromEntries((data?.domains ?? []).map((one) => [one.id, one.name]))
-  const requirementCount = Object.values(data?.requirements ?? {}).reduce(
-    (sum, list) => sum + list.filter((one) => !one.removed).length,
-    0,
-  )
   const domain = data?.domains.find((one) => one.id === props.opened) ?? data?.domains[0]
   return (
     <Page>
-      <PageHeader
-        lead={<ProjectMark name={projectName} />}
-        title="Living spec"
-        about={
-          data === null || data.domains.length === 0
-            ? undefined
-            : `${String(data.domains.length)} domains · ${String(requirementCount)} requirements`
-        }
-        actions={
-          data === null ? undefined : (
-            <>
-              <ReadingChip
-                projectName={projectName}
-                data={data}
-                names={names}
-                onReview={props.onOpenDomain}
-                onRetry={props.onRead}
-              />
-              {data.domains.length > 0 && (
-                <Menu
-                  label="More about the living spec"
-                  groups={[[{ label: 'Read the whole Project again', onSelect: props.onRead }]]}
-                />
-              )}
-            </>
-          )
-        }
-      />
+      <LivingSpecHeader props={props} />
       {data === null && error !== undefined && (
         <ErrorState
           title={`Hemera could not read the living spec of ${projectName}`}

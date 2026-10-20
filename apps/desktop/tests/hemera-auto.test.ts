@@ -6,6 +6,7 @@
  */
 
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 
 import {
@@ -69,7 +70,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await jev.close()
-  removeFolders()
+  await removeFolders()
 })
 
 interface World {
@@ -129,6 +130,25 @@ const withJev = <A, E>(
       return { answer, questions: questions.asked.map((one) => one.reason), lines: started.lines }
     }),
   )
+}
+
+/**
+ * A server on the port of `url` that answers 401 to every request, as the engine's tool server
+ * answers a token it does not know.
+ */
+const answering401 = async (url: string) => {
+  const server = createServer((_request, response) => {
+    response.writeHead(401, { 'content-type': 'application/json' })
+    response.end('{"error":"unauthorized"}')
+  })
+  await new Promise<void>((done) => server.listen(Number(new URL(url).port), '127.0.0.1', done))
+  return {
+    close: () =>
+      new Promise<void>((done) => {
+        server.closeAllConnections()
+        server.close(() => done())
+      }),
+  }
 }
 
 const write = (grantId: string, path = 'notes.md') =>
@@ -267,7 +287,7 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     ])
   })
 
-  test.each<[string, Reply | 'closed', string, string]>([
+  test.each<[string, Reply | 'refused', string, string]>([
     ['too many requests', { status: 429, body: '' }, 'Jev answered HTTP 429', 'failure=http 429'],
     ['a server error', { status: 502, body: 'x' }, 'Jev answered HTTP 502', 'failure=http 502'],
     [
@@ -282,9 +302,9 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
       'Jev’s answer could not be read',
       'failure=response',
     ],
-    ['a network that refuses', 'closed', 'Jev could not be reached', 'failure=network'],
+    ['a network that refuses', 'refused', 'Jev could not be reached', 'failure=network'],
   ])('%s asks, the failure said in its category', async (_case, reply, reason, logged) => {
-    if (reply === 'closed') await jev.close()
+    if (reply === 'refused') jev.refuse()
     else jev.answer = () => reply
     const { questions, lines } = await withJev(({ builder }) => write(builder))
     expect(questions).toEqual([
@@ -293,6 +313,19 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     const line = lines.find((one) => one.startsWith('permissions:') && one.includes('fs_write'))
     expect(line).toContain(logged)
     expect(line).toContain(': ask by rules')
+  })
+
+  test('the category follows what answered: a 401 on Jev’s freed port is a refused key', async () => {
+    await jev.close()
+    const stranger = await answering401(jev.url)
+    try {
+      const { questions } = await withJev(({ builder }) => write(builder))
+      expect(questions).toEqual([
+        'No rule of this Project allows this write for the Builder, and Jev refused the saved key.',
+      ])
+    } finally {
+      await stranger.close()
+    }
   })
 
   test('an action whose destination holds a registered secret is not sent, and asks', async () => {
@@ -306,6 +339,28 @@ describe('Every failure of Jev asks; never an allow on an error path', () => {
     expect(questions).toEqual([
       'No rule of this Project allows this write for the Builder, and the call could not be sent to Jev whole.',
     ])
+  })
+
+  test('an action whose field names a variable holds is sent to Jev with its names unchanged, and does not ask (#404)', async () => {
+    jev.answer = () => scored(0.4, 0.1, 0)
+    const { answer, questions } = await withJev(({ builder }) =>
+      Effect.gen(function* () {
+        // The engine fixed every name of the action Jev is sent: none is a secret.
+        yield* Secrets.useSync((secrets) =>
+          secrets.register('suite', ['platform', 'inside', 'tool']),
+        )
+        return yield* write(builder)
+      }),
+    )
+    expect(answer.ok).toBe(true)
+    expect(questions).toEqual([])
+    expect(jev.received).toHaveLength(1)
+    expect(Object.keys(sent().state.action)).toEqual(['tool', 'path', 'platform', 'inside'])
+    expect(sent().state.action).toMatchObject({
+      tool: 'fs_write',
+      path: '~/acme/notes.md',
+      inside: true,
+    })
   })
 })
 

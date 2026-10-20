@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+collected 3 items
+
+other/test_one.py .                                                      [ 33%]
+tests/test_a.py F.                                                       [ 66%]
+
+=================================== FAILURES ===================================
+__________________________________ test_saves __________________________________
+
+    def test_other():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_a.py:2: AssertionError
+- generated xml file: /work/acme/api/report.xml -
+=========================== short test summary info ============================
+FAILED tests/test_a.py::test_saves - assert 1 == 2
+========================= 1 failed, 2 passed in 0.01s ==========================

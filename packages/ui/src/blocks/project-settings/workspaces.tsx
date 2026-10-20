@@ -7,6 +7,7 @@ import { SectionHead } from '../../components/section-head/section-head.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconFolderOpen, IconGitBranch, IconX } from '../../icons.ts'
 import { FieldSkeleton, Section } from './parts.tsx'
+import { workspaceBranchOf, workspaceFolderOf } from './workspaces-model.ts'
 
 /**
  * Where a Project's Workspaces are made on disk, and what their branches start with: a section of
@@ -57,16 +58,6 @@ function Reset({ what, onReset }: { what: string; onReset: () => void }): ReactN
 /** A value as it was typed: an empty field is the default. */
 function chosen(value: string): string | null {
   return value.trim() === '' ? null : value
-}
-
-/** The branch a mission's Workspace is made on: the prefix, then a slash unless it ends with one. */
-export function workspaceBranchOf(prefix: string, mission: string): string {
-  return prefix.endsWith('/') ? `${prefix}${mission}` : `${prefix}/${mission}`
-}
-
-/** The folder a mission's Workspace is made in, under the Workspaces folder. */
-export function workspaceFolderOf(folder: string, mission: string): string {
-  return `${folder.replace(/[/\\]+$/, '')}/${mission}`
 }
 
 const EXAMPLE = 'flex flex-col gap-1.5 border-t border-border px-4 py-3'

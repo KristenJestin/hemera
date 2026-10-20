@@ -4,12 +4,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { badgesOffBaseline, keepsItsLines } from './badge-baseline.ts'
 import { FOUND_FILES, MENTIONABLES } from './mention-field-fixtures.ts'
-import {
-  loadMentionEditor,
-  type Mentionable,
-  MentionField,
-  MentionFieldSkeleton,
-} from './mention-field.tsx'
+import { loadMentionEditor } from './load-mention-editor.ts'
+import { type Mentionable, MentionField, MentionFieldSkeleton } from './mention-field.tsx'
 
 /**
  * The mention field: the Chat's composer, Discuss, an answer, a Review remark, the first field of

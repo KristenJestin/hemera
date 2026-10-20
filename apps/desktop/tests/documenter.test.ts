@@ -280,7 +280,10 @@ describe('"No change" is accepted only with a reason specific to this change', (
           const outcome = yield* Fiber.join(fiber)
           const view = yield* buildingNow(mission.id)
           const evidenceId = view.documenter[0]?.evidenceId ?? ''
-          const journal = yield* Memory.use((memory) => memory.journal(mission.id, null))
+          const journalled = Memory.use((memory) => memory.journal(mission.id, null))
+          // The Journal is a projection of the committed events: it follows them, a moment later.
+          yield* until(Effect.map(journalled, (page) => JSON.stringify(page).includes(REASON)))
+          const journal = yield* journalled
           return {
             refused,
             kept,

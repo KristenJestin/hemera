@@ -12,8 +12,10 @@ import {
   landedAfterSetup,
   linkedSettings,
   open,
+  openChatOf,
   placeOf,
   sectionOf,
+  shownProjectOf,
   show,
   trailOf,
   type Names,
@@ -55,6 +57,14 @@ describe('The window’s routes', () => {
     expect(focusOf(linked.route)).toBe(true)
     expect(focusOf(go(START, { kind: 'settings', section: 'models' }).route)).toBe(false)
     expect(focusOf(go(START, { kind: 'settings' }).route)).toBe(false)
+  })
+
+  test('a proof past its time limit opens the Checks of its Project’s settings', () => {
+    expect(go(START, linkedSettings({ projectId: 'acme', section: 'checks' })).route).toEqual({
+      kind: 'projectSettings',
+      id: 'acme',
+      section: 'checks',
+    })
   })
 
   test('Home filtered to a Project says it after Home, which leads back to every need', () => {
@@ -174,5 +184,25 @@ describe('A setup launched from a Project’s settings', () => {
     expect(landedAfterSetup(elsewhere, 'acme')).toBe(elsewhere)
     const home = go(START, { kind: 'home' })
     expect(landedAfterSetup(home, 'acme')).toBe(home)
+  })
+})
+
+describe('What the window shows of a route', () => {
+  test('the Project a route shows is the one its page, settings, chat or living Spec is of', () => {
+    expect(shownProjectOf({ kind: 'project', id: 'acme' })).toBe('acme')
+    expect(shownProjectOf({ kind: 'projectSettings', id: 'acme' })).toBe('acme')
+    expect(shownProjectOf({ kind: 'chat', projectId: 'acme', id: 'invoices' })).toBe('acme')
+    expect(shownProjectOf({ kind: 'livingSpec', projectId: 'acme' })).toBe('acme')
+  })
+
+  test('Home, Settings and a mission show no Project of their own', () => {
+    expect(shownProjectOf({ kind: 'home' })).toBeNull()
+    expect(shownProjectOf({ kind: 'settings' })).toBeNull()
+    expect(shownProjectOf(ACME_12)).toBeNull()
+  })
+
+  test('the chat open is the one a chat route names, and none for any other route', () => {
+    expect(openChatOf({ kind: 'chat', projectId: 'acme', id: 'invoices' })).toBe('invoices')
+    expect(openChatOf({ kind: 'project', id: 'acme' })).toBeNull()
   })
 })

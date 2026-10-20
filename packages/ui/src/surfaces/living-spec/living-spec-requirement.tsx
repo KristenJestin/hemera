@@ -8,7 +8,12 @@ import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconAlertTriangle, IconHistory, IconPencil, IconX } from '../../icons.ts'
 import { History, Scenarios } from './living-spec-parts.tsx'
 import { originWords } from './living-spec-model.ts'
-import type { LivingChange, LivingOrigin, LivingRequirement } from './living-spec-types.ts'
+import type {
+  LivingChange,
+  LivingOrigin,
+  LivingPending,
+  LivingRequirement,
+} from './living-spec-types.ts'
 
 /** The agent's doubt, in its own words, in the warning tone. */
 export function Doubt({ text }: { text: string }): ReactNode {
@@ -66,36 +71,26 @@ function Origin({
   )
 }
 
-export interface RequirementCardProps {
-  requirement: LivingRequirement
-  /** What was read of the history, whether it is folded or not; absent: not read. */
-  history: 'loading' | readonly LivingChange[] | undefined
-  busy: boolean
-  onHistory: (requirementId: string) => void
-  onDrop: (requirementId: string) => void
-  onOrigin: (origin: NonNullable<LivingOrigin>) => void
+interface RequirementHeadProps extends Pick<
+  RequirementCardProps,
+  'requirement' | 'busy' | 'onDrop' | 'onOrigin'
+> {
+  /** Whether its history is open. */
+  open: boolean
+  onToggle: () => void
 }
 
-/**
- * A requirement. Proposed, it is a dashed draft named `proposed`, with Drop; validated, a solid
- * card with its History folding open in place. A re-read's proposal stands beside it, two columns.
- */
-export function RequirementCard({
+/** A requirement's head: its id and origin, and Drop while it is proposed, else its History. */
+function RequirementHead({
   requirement,
-  history,
   busy,
-  onHistory,
+  open,
+  onToggle,
   onDrop,
   onOrigin,
-}: RequirementCardProps): ReactNode {
-  const [open, setOpen] = useState(false)
+}: RequirementHeadProps): ReactNode {
   const proposed = requirement.state === 'proposed'
-  const { pending } = requirement
-  const toggle = (): void => {
-    if (!open) onHistory(requirement.id)
-    setOpen(!open)
-  }
-  const head = (
+  return (
     <div className="flex min-w-0 items-center gap-2">
       {proposed && (
         <span className="flex text-warning">
@@ -129,12 +124,74 @@ export function RequirementCard({
               icon={<IconHistory size="sm" />}
               aria-label={`History of ${requirement.id}`}
               aria-expanded={open}
-              onClick={toggle}
+              onClick={onToggle}
             />
           </Tooltip>
         )}
       </span>
     </div>
+  )
+}
+
+/** What a re-read proposes beside the requirement: its replacement, or its removal and why. */
+function ProposedChange({ pending }: { pending: LivingPending }): ReactNode {
+  return (
+    <>
+      <span className="flex items-center gap-1.5 text-xs font-medium text-warning-muted-foreground">
+        <IconPencil size="sm" aria-hidden="true" />
+        {pending.kind === 'replace' ? 'Proposed instead' : 'Proposed for removal'}
+      </span>
+      {pending.kind === 'replace' ? (
+        <>
+          <p className={TEXT}>{pending.text}</p>
+          <Scenarios scenarios={pending.scenarios} />
+          {pending.uncertainty !== '' && <Doubt text={pending.uncertainty} />}
+        </>
+      ) : (
+        <p className={TEXT}>{pending.reason}</p>
+      )}
+    </>
+  )
+}
+
+export interface RequirementCardProps {
+  requirement: LivingRequirement
+  /** What was read of the history, whether it is folded or not; absent: not read. */
+  history: 'loading' | readonly LivingChange[] | undefined
+  busy: boolean
+  onHistory: (requirementId: string) => void
+  onDrop: (requirementId: string) => void
+  onOrigin: (origin: NonNullable<LivingOrigin>) => void
+}
+
+/**
+ * A requirement. Proposed, it is a dashed draft named `proposed`, with Drop; validated, a solid
+ * card with its History folding open in place. A re-read's proposal stands beside it, two columns.
+ */
+export function RequirementCard({
+  requirement,
+  history,
+  busy,
+  onHistory,
+  onDrop,
+  onOrigin,
+}: RequirementCardProps): ReactNode {
+  const [open, setOpen] = useState(false)
+  const proposed = requirement.state === 'proposed'
+  const { pending } = requirement
+  const toggle = (): void => {
+    if (!open) onHistory(requirement.id)
+    setOpen(!open)
+  }
+  const head = (
+    <RequirementHead
+      requirement={requirement}
+      busy={busy}
+      open={open}
+      onToggle={toggle}
+      onDrop={onDrop}
+      onOrigin={onOrigin}
+    />
   )
   const body = (
     <>
@@ -175,19 +232,7 @@ export function RequirementCard({
         {body}
       </article>
       <article className={PROPOSED} aria-label="Proposed">
-        <span className="flex items-center gap-1.5 text-xs font-medium text-warning-muted-foreground">
-          <IconPencil size="sm" aria-hidden="true" />
-          {pending.kind === 'replace' ? 'Proposed instead' : 'Proposed for removal'}
-        </span>
-        {pending.kind === 'replace' ? (
-          <>
-            <p className={TEXT}>{pending.text}</p>
-            <Scenarios scenarios={pending.scenarios} />
-            {pending.uncertainty !== '' && <Doubt text={pending.uncertainty} />}
-          </>
-        ) : (
-          <p className={TEXT}>{pending.reason}</p>
-        )}
+        <ProposedChange pending={pending} />
       </article>
     </div>
   )

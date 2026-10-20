@@ -1,6 +1,8 @@
 /**
  * What the chips of the catalogue promise, read off their sources: a LiveChip is drawn for a run
  * that goes on, so pressing it always opens something (its glance), or does something (its press).
+ * The one exception is a chip about something nobody can act on (an agent Hemera could not stop,
+ * #320): it says what it is in words of its own (`legend`), in its tooltip.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -41,8 +43,10 @@ describe('Every LiveChip drawn for a run opens something', () => {
     expect(drawn.length).toBeGreaterThan(0)
   })
 
-  test('each is given a glance or a press', () => {
-    const mute = drawn.filter(({ chip }) => !/\bglance=/.test(chip) && !/\bonPress=/.test(chip))
+  test('each is given a glance or a press, or words of its own when nothing can be done', () => {
+    const mute = drawn.filter(
+      ({ chip }) => !/\bglance=/.test(chip) && !/\bonPress=/.test(chip) && !/\blegend=/.test(chip),
+    )
     expect(mute.map(({ file }) => file)).toEqual([])
   })
 })

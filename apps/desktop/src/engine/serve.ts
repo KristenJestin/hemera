@@ -12,8 +12,12 @@ import {
   DiffRpcs,
   DocRecipesRpcs,
   ProofsRpcs,
+  ReviewRpcs,
+  FeedbackUser,
   AutoReviewRpcs,
   EngineApartRpcs,
+  ForgeRpcs,
+  DeliveryRulesRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
   type EngineStatus,
@@ -36,7 +40,18 @@ import {
 import { buildingChanges, launchMission, preparationOf } from './building/launch.ts'
 import { OutsideChanges } from './building/outside.ts'
 import { Diffs } from './review/diffs.ts'
+import { Review, type ReviewService } from './review/feedback.ts'
+import { Rounds } from './review/rounds.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
+import { ForgePort } from './forges/port.ts'
+import {
+  acceptDependencies,
+  missionCopies,
+  preparationChangedSinceCopy,
+  readDeliveryRules,
+  saveDeliveryRules,
+  validateDeliveryRules,
+} from './delivery-rules.ts'
 import {
   dismissService,
   missionServices,
@@ -124,9 +139,11 @@ import {
   acceptChecks,
   listChecks,
   moveCheck,
+  proofLimitOf,
   proposedChecks,
   removeCheck,
   saveCheck,
+  setProofLimit,
 } from './project-checks.ts'
 import {
   acceptDocRecipes,
@@ -140,6 +157,7 @@ import { listResources, saveResources } from './resources/declarations.ts'
 import { ExclusiveResources } from './resources/reservations.ts'
 import { markModel, modelMarksOf, roleModelsOf, setRoleModel } from './sessions/cascade.ts'
 import { instructionFilesOf } from './sessions/instructions.ts'
+import { keptAgentChanges } from './sessions/kept.ts'
 import { ownerOf, sessionsIn } from './sessions/store.ts'
 import { threadOf } from './sessions/thread.ts'
 import { SESSION_STATES } from '@hemera/core/domain'
@@ -218,6 +236,20 @@ import {
   workspaceChanges,
   workspaceStatus,
 } from './workspaces.ts'
+
+/**
+ * What the window regaining the focus checks again, each on its own (#362): one that fails is
+ * written down under its name, and skips none of the others.
+ */
+export const eachOnItsOwn = <E>(
+  checks: ReadonlyArray<readonly [string, Effect.Effect<void, E>]>,
+  log: Log,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    checks,
+    ([name, check]) => check.pipe(observed(`mission.focused: ${name}`, log), Effect.ignoreCause),
+    { discard: true },
+  )
 
 /** A Chat as its Project's list shows it. */
 const chatSummary = (chat: Chat, working: boolean) => ({
@@ -853,26 +885,86 @@ export const engineHandlers = (
     'mission.serviceDismiss': ({ missionId, runId }) =>
       use(dismissService(missionId, runId)).pipe(observed('mission.serviceDismiss', log)),
     'mission.focused': () =>
-      use(
-        Effect.andThen(
-          OutsideChanges.use((outside) => outside.focused),
-          Diffs.use((diffs) => diffs.focused),
-        ),
+      eachOnItsOwn(
+        [
+          ['outside', use(OutsideChanges.use((outside) => outside.focused))],
+          ['diffs', use(Diffs.use((diffs) => diffs.focused))],
+          // The forge CLIs not ready are checked again when the window regains the focus (#253).
+          ['forge', use(ForgePort.use((forge) => forge.focused))],
+        ],
+        log,
       ).pipe(observed('mission.focused', log)),
     'mission.changed': () =>
       follow(Stream.unwrap(OutsideChanges.useSync((outside) => outside.changes))).pipe(
         observedStream('mission.changed', log),
       ),
+    'mission.keptAgents': ({ missionId }) =>
+      follow(keptAgentChanges(missionId)).pipe(observedStream('mission.keptAgents', log)),
   })
   return Layer.mergeAll(
     core,
     apart,
     checksHandlers(profile, log),
     docRecipesHandlers(profile, log),
+    forgeHandlers(profile, log),
+    deliveryRulesHandlers(profile, log),
     diffHandlers(profile, log),
     proofsHandlers(profile, log),
     autoReviewHandlers(profile, log),
+    reviewHandlers(profile, log),
   )
+}
+
+/** Review's feedback (#341), a layer of its own (see `EngineServedRpcs`); the user is the caller. */
+const reviewHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  const user = FeedbackUser.make({})
+  const review = <A, E>(call: (service: ReviewService) => Effect.Effect<A, E>) =>
+    use(Review.use(call))
+  return ReviewRpcs.toLayer({
+    'review.state': ({ missionId }) =>
+      review((one) => one.state(missionId)).pipe(observed('review.state', log)),
+    'review.feedbackAdd': ({ missionId, kind, body, anchor, images }) =>
+      review((one) => one.feedbackAdd(missionId, { kind, body, anchor, images }, user)).pipe(
+        observed('review.feedbackAdd', log),
+      ),
+    'review.feedbackEdit': ({ feedbackId, body, version }) =>
+      review((one) => one.feedbackEdit(feedbackId, body, version, user)).pipe(
+        observed('review.feedbackEdit', log),
+      ),
+    'review.feedbackWithdraw': ({ feedbackId }) =>
+      review((one) => one.feedbackWithdraw(feedbackId, user)).pipe(
+        observed('review.feedbackWithdraw', log),
+      ),
+    'review.feedbackResolve': ({ feedbackId }) =>
+      review((one) => one.feedbackResolve(feedbackId, user)).pipe(
+        observed('review.feedbackResolve', log),
+      ),
+    'review.feedbackFollowUp': ({ feedbackId, body, images }) =>
+      review((one) => one.feedbackFollowUp(feedbackId, body, images, user)).pipe(
+        observed('review.feedbackFollowUp', log),
+      ),
+    'review.imageAdd': ({ missionId, name, bytes }) =>
+      review((one) => one.imageAdd(missionId, name, bytes)).pipe(observed('review.imageAdd', log)),
+    'review.commentedVersion': ({ feedbackId }) =>
+      review((one) => one.commentedVersion(feedbackId)).pipe(
+        observed('review.commentedVersion', log),
+      ),
+    'review.changes': ({ missionId }) =>
+      follow(Stream.unwrap(Review.useSync((one) => one.changes(missionId)))).pipe(
+        observedStream('review.changes', log),
+      ),
+    'review.fix': ({ missionId }) =>
+      use(Rounds.use((rounds) => rounds.fix(missionId))).pipe(observed('review.fix', log)),
+    'review.round': ({ missionId, number }) =>
+      use(Rounds.use((rounds) => rounds.round(missionId, number))).pipe(
+        observed('review.round', log),
+      ),
+    'review.startMissionFrom': ({ feedbackId }) =>
+      use(Rounds.use((rounds) => rounds.startMissionFrom(feedbackId))).pipe(
+        observed('review.startMissionFrom', log),
+      ),
+  })
 }
 
 /** The proofs (#144), a layer of their own (see `EngineServedRpcs`). */
@@ -917,6 +1009,10 @@ const checksHandlers = (profile: StartedProfile, log: Log) => {
       use(removeCheck(projectId, id)).pipe(observed('checks.remove', log)),
     'checks.move': ({ projectId, id, rank }) =>
       use(moveCheck(projectId, id, rank)).pipe(observed('checks.move', log)),
+    'checks.proofLimit': ({ projectId }) =>
+      use(proofLimitOf(projectId)).pipe(observed('checks.proofLimit', log)),
+    'checks.setProofLimit': ({ projectId, minutes }) =>
+      use(setProofLimit(projectId, minutes)).pipe(observed('checks.setProofLimit', log)),
   })
 }
 
@@ -936,6 +1032,50 @@ const docRecipesHandlers = (profile: StartedProfile, log: Log) => {
       use(removeDocRecipe(projectId, id)).pipe(observed('docRecipes.remove', log)),
     'docRecipes.move': ({ projectId, id, rank }) =>
       use(moveDocRecipe(projectId, id, rank)).pipe(observed('docRecipes.move', log)),
+  })
+}
+
+/** The forge of each repository (#253), a layer of its own (see `EngineForgeRpcs`). */
+const forgeHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return ForgeRpcs.toLayer({
+    'forge.status': ({ projectId }) =>
+      use(ForgePort.use((forge) => forge.status(projectId))).pipe(observed('forge.status', log)),
+    'forge.checkAgain': ({ projectId, repositoryId }) =>
+      use(ForgePort.use((forge) => forge.checkAgain(projectId, repositoryId))).pipe(
+        observed('forge.checkAgain', log),
+      ),
+    'forge.setForced': ({ projectId, repositoryId, forge: forced, host }) =>
+      use(ForgePort.use((forge) => forge.setForced(projectId, repositoryId, forced, host))).pipe(
+        observed('forge.setForced', log),
+      ),
+    'forge.changes': ({ projectId }) =>
+      follow(Stream.unwrap(ForgePort.useSync((forge) => forge.changes(projectId)))).pipe(
+        observedStream('forge.changes', log),
+      ),
+  })
+}
+
+/** A Project's delivery rules (#340), a layer of their own (see `EngineDeliveryRulesRpcs`). */
+const deliveryRulesHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return DeliveryRulesRpcs.toLayer({
+    'deliveryRules.read': ({ projectId }) =>
+      use(readDeliveryRules(projectId)).pipe(observed('deliveryRules.read', log)),
+    'deliveryRules.validate': ({ projectId, draft }) =>
+      use(validateDeliveryRules(projectId, draft)).pipe(observed('deliveryRules.validate', log)),
+    'deliveryRules.save': ({ projectId, draft, version }) =>
+      use(saveDeliveryRules(projectId, draft, version)).pipe(observed('deliveryRules.save', log)),
+    'deliveryRules.acceptDependencies': ({ projectId, edges }) =>
+      use(acceptDependencies(projectId, edges)).pipe(
+        observed('deliveryRules.acceptDependencies', log),
+      ),
+    'deliveryRules.missionCopies': ({ missionId }) =>
+      use(missionCopies(missionId)).pipe(observed('deliveryRules.missionCopies', log)),
+    'deliveryRules.preparationChangedSinceCopy': ({ missionId }) =>
+      use(preparationChangedSinceCopy(missionId)).pipe(
+        observed('deliveryRules.preparationChangedSinceCopy', log),
+      ),
   })
 }
 

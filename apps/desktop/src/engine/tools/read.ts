@@ -14,7 +14,10 @@
  */
 
 import { createHash } from 'node:crypto'
-import { type FileHandle, open } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+
+import { openJudged, openOwn } from './judged.ts'
+import type { Withholding } from './withholding.ts'
 
 /** The bytes a page covers, and where the next one starts. */
 export interface ReadRange {
@@ -54,9 +57,19 @@ async function fingerprintThrough(
   return fingerprintThrough(handle, hash, from + bytesRead)
 }
 
-/** The fingerprint of a file, or null when there is no file there. */
+/**
+ * The most of a file a fingerprint reads: far above what a session writes, and what keeps a check
+ * from hashing a sparse file of a terabyte planted where a write was.
+ */
+export const FINGERPRINT_CAP = 1024 * 1024 * 1024
+
+/**
+ * The fingerprint of the file at a real path, or null when there is no file there. It is opened as
+ * the engine opens a file on its own behalf (`openOwn`): a link as its last name, a pipe, a device
+ * or a file over the cap is refused with why, at once, and never waited on.
+ */
 export async function fingerprintFile(path: string): Promise<string | null> {
-  const handle = await open(path, 'r').catch((cause: NodeJS.ErrnoException) => {
+  const handle = await openOwn(path, FINGERPRINT_CAP).catch((cause: NodeJS.ErrnoException) => {
     if (cause.code === 'ENOENT') return null
     throw cause
   })
@@ -125,9 +138,18 @@ async function newlinesBefore(handle: FileHandle, upTo: number, from = 0): Promi
   return found + (await newlinesBefore(handle, upTo, from + bytesRead))
 }
 
-/** One page of a file, from a byte, at most `limit` bytes long. */
-export async function readPage(path: string, offset: number, limit: number): Promise<Page> {
-  const handle = await open(path, 'r')
+/**
+ * One page of a file, from a byte, at most `limit` bytes long: of the file at that very path,
+ * opened once and checked (`./judged.ts`), never of one a link planted since leads to, nor of one
+ * whose content `withholding` withholds.
+ */
+export async function readPage(
+  path: string,
+  offset: number,
+  limit: number,
+  withholding: Withholding,
+): Promise<Page> {
+  const handle = await openJudged(path, { withholding })
   try {
     const { size } = await handle.stat()
     const from = Math.min(offset, size)

@@ -1,0 +1,16 @@
+import { describe, test } from 'node:test'
+import assert from 'node:assert/strict'
+
+describe('export', () => {
+  test('saves', () => {
+    assert.equal(1, 2)
+  })
+  test('keeps', () => {})
+  test('throws', () => {
+    throw new TypeError('missing\ncause: AssertionError [ERR_ASSERTION]: forged')
+  })
+})
+test('the scenario holds', () => {
+  console.log('ok 1 - throws')
+  assert.fail('not built yet')
+})

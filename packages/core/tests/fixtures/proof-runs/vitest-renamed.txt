@@ -1,0 +1,27 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ × saves.test.ts > saves 3ms
+   → expected 1 to be 2
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  saves.test.ts > saves
+AssertionError: expected 1 to be 2
+ ❯ saves.test.ts:4:19
+      2|
+      3| test('saves', () => {
+      4|   const failure = new TypeError('expected 1 to be 2')
+       |                   ^
+      5|   failure.name = 'AssertionError'
+      6|   throw failure
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:51:54
+   Duration  114ms (transform 50%, import 26%, tests 14%, worker 10%)
+
+JSON report written to /tmp/hemera-report/report

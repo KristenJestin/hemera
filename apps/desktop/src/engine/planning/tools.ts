@@ -214,6 +214,10 @@ export const askWaveTool = (grant: Grant, args: ToolArguments<'ask_wave'>) => {
     section: one.section,
     fromFinding: one.from_finding,
     replaces: one.replaces,
+    about:
+      one.conflict === undefined
+        ? undefined
+        : { kind: 'conflict' as const, feedbackId: one.conflict.trim() },
   }))
   return settled(askWave(writer, asked), (done) => {
     const named = done.ids.map((id) => {

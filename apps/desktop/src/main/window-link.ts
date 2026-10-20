@@ -18,6 +18,8 @@ import {
   ChecksRpcs,
   DiffRpcs,
   DocRecipesRpcs,
+  ForgeRpcs,
+  DeliveryRulesRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
@@ -907,6 +909,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           streamClosedAs(gone),
           observedStream('mission.changed', log),
         ),
+      'mission.keptAgents': (request) =>
+        engine['mission.keptAgents'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('mission.keptAgents', log),
+        ),
     }),
     // The Project's checks (#143) and doc recipes (#146), each a layer of its own.
     ChecksRpcs.toLayer({
@@ -922,6 +929,16 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['checks.remove'](request).pipe(closedAs(gone), observed('checks.remove', log)),
       'checks.move': (request) =>
         engine['checks.move'](request).pipe(closedAs(gone), observed('checks.move', log)),
+      'checks.proofLimit': (request) =>
+        engine['checks.proofLimit'](request).pipe(
+          closedAs(gone),
+          observed('checks.proofLimit', log),
+        ),
+      'checks.setProofLimit': (request) =>
+        engine['checks.setProofLimit'](request).pipe(
+          closedAs(gone),
+          observed('checks.setProofLimit', log),
+        ),
     }),
     DocRecipesRpcs.toLayer({
       'docRecipes.list': (request) =>
@@ -945,6 +962,53 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         ),
       'docRecipes.move': (request) =>
         engine['docRecipes.move'](request).pipe(closedAs(gone), observed('docRecipes.move', log)),
+    }),
+    // The forge of each repository (#253), a layer of its own.
+    ForgeRpcs.toLayer({
+      'forge.status': (request) =>
+        engine['forge.status'](request).pipe(closedAs(gone), observed('forge.status', log)),
+      'forge.checkAgain': (request) =>
+        engine['forge.checkAgain'](request).pipe(closedAs(gone), observed('forge.checkAgain', log)),
+      'forge.setForced': (request) =>
+        engine['forge.setForced'](request).pipe(closedAs(gone), observed('forge.setForced', log)),
+      'forge.changes': (request) =>
+        engine['forge.changes'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('forge.changes', log),
+        ),
+    }),
+    // A Project's delivery rules (#340), a layer of their own.
+    DeliveryRulesRpcs.toLayer({
+      'deliveryRules.read': (request) =>
+        engine['deliveryRules.read'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.read', log),
+        ),
+      'deliveryRules.validate': (request) =>
+        engine['deliveryRules.validate'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.validate', log),
+        ),
+      'deliveryRules.save': (request) =>
+        engine['deliveryRules.save'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.save', log),
+        ),
+      'deliveryRules.acceptDependencies': (request) =>
+        engine['deliveryRules.acceptDependencies'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.acceptDependencies', log),
+        ),
+      'deliveryRules.missionCopies': (request) =>
+        engine['deliveryRules.missionCopies'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.missionCopies', log),
+        ),
+      'deliveryRules.preparationChangedSinceCopy': (request) =>
+        engine['deliveryRules.preparationChangedSinceCopy'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.preparationChangedSinceCopy', log),
+        ),
     }),
     // The live diff of a mission (#249), a layer of its own.
     DiffRpcs.toLayer({

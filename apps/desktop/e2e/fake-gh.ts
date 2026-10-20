@@ -13,7 +13,12 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
 /** The spec files that run on a fake `gh`. */
-export const FAKE_GH_SPECS: readonly string[] = ['start-mission.e2e.ts', 'ticket-providers.e2e.ts']
+export const FAKE_GH_SPECS: readonly string[] = [
+  'delivery-rules.e2e.ts',
+  'delivery-rules.restarted.e2e.ts',
+  'start-mission.e2e.ts',
+  'ticket-providers.e2e.ts',
+]
 
 /** Whether this platform runs the fake: a shell script, which Windows does not run. */
 export const RUNS_FAKE_GH = process.platform !== 'win32'
@@ -33,3 +38,20 @@ export function writeFakeGh(spec: string, script: string): string {
   chmodSync(join(folder, 'gh'), 0o755)
   return folder
 }
+
+/**
+ * The fake `gh`: its version, and its sign-in for a host, which it has once the file `signed-in`
+ * stands beside it. It reaches no network and answers nothing else.
+ */
+export const GH_SIGNED_IN_BY_FILE = `#!/bin/sh
+here=$(dirname "$0")
+case "$1" in
+  --version) echo "gh version 2.60.0 (2026-10-01)"; exit 0 ;;
+  auth)
+    if [ -f "$here/signed-in" ]; then echo "Logged in to github.com account octo"; exit 0; fi
+    echo "You are not logged into any GitHub hosts. To log in, run: gh auth login" >&2
+    exit 1 ;;
+esac
+echo "this fake answers only --version and auth status" >&2
+exit 1
+`

@@ -1,0 +1,40 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+stdout | forge2.test.ts > loads
+ FAIL  forge2.test.ts > saves
+AssertionError: expected 1 to be 2 // Object.is equality
+
+ ❯ forge2.test.ts (2 tests | 1 failed) 7ms
+   ✓ saves 1ms
+   × loads 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  forge2.test.ts > loads
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ forge2.test.ts:6:13
+      4| test('loads', () => {
+      5|   console.log(' FAIL  forge2.test.ts > saves\nAssertionError: expected…
+      6|   expect(1).toBe(2)
+       |             ^
+      7| })
+      8|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  10:17:48
+   Duration  113ms (transform 43%, import 24%, tests 23%, worker 10%)
+
+JSON report written to /work/acme/api/report.json
+JUNIT report written to /work/acme/api/report.xml

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="3" failures="2" errors="0" time="0.007386691">
+    <testsuite name="export.test.ts" timestamp="2026-10-16T08:13:05.413Z" hostname="ci" tests="3" failures="2" errors="0" skipped="0" time="0.007386691">
+        <testcase classname="export.test.ts" name="export &gt; saves" time="0.005593541">
+            <failure message="expected 1 to be 2 // Object.is equality" type="AssertionError">
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ export.test.ts:5:15
+            </failure>
+        </testcase>
+        <testcase classname="export.test.ts" name="export &gt; keeps" time="0.00028079">
+        </testcase>
+        <testcase classname="export.test.ts" name="export &gt; throws" time="0.000435032">
+            <failure message="missing.run is not a function" type="TypeError">
+TypeError: missing.run is not a function
+ ❯ export.test.ts:13:50
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

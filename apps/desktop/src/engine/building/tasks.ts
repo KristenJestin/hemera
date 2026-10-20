@@ -47,6 +47,7 @@ import { passViewOf, passesIn } from './documenter-store.ts'
 import { requirementProofsIn } from './proof-store.ts'
 import type { NewEvent } from '../journal.ts'
 import { missionRow } from '../planning/store.ts'
+import { roundDecisionsIn, roundDecisionsSaid, roundPointsIn } from '../review/round-store.ts'
 import { Secrets } from '../secrets.ts'
 import { Database, type EngineTransaction, refusedWhile } from '../storage/database.ts'
 import {
@@ -697,7 +698,16 @@ export const viewIn = (reader: Reader, building: BuildingRow) =>
       missionId: building.missionId,
       buildingId: building.id,
       label: building.label,
-      round: null,
+      // A round's Building names its round and its live points (#468).
+      round:
+        building.round === null
+          ? null
+          : {
+              number: building.round,
+              points: (yield* roundPointsIn(reader, building.missionId, building.round))
+                .filter((one) => !one.removed)
+                .map((one) => one.id),
+            },
       state: STATES.find((one) => one === building.state) ?? 'active',
       phase: building.phase,
       // CT-41: the percentage counts the Spec's tasks and the special tasks, the counts apart.
@@ -817,7 +827,19 @@ export const buildingPartOf = (missionId: string) =>
         const tasks = yield* tasksIn(transaction, building.id)
         // The special tasks of the automatic review are listed apart, never as the Spec's (CT-41).
         const special = tasks.filter((task) => task.origin === 'review')
-        const decisions = (yield* decisionsIn(transaction, building.id)).map(decisionViewOf)
+        // Every Building's decisions since the Freeze: a round's Building follows the first (#468).
+        const everyBuilding = yield* transaction
+          .select({ id: buildings.id })
+          .from(buildings)
+          .where(eq(buildings.missionId, missionId))
+          .orderBy(asc(buildings.startedAt))
+          .pipe(Effect.mapError(refusedWhile('reading the Buildings')))
+        const decisions = (yield* Effect.forEach(everyBuilding, (one) =>
+          decisionsIn(transaction, one.id),
+        ))
+          .flat()
+          .map(decisionViewOf)
+        const fromRounds = roundDecisionsSaid(yield* roundDecisionsIn(transaction, missionId))
         const decided = decisions.map((one, at) =>
           [
             `- D${String(at + 1)} (${one.tasks.join(', ') || 'no task'}, ${one.state}): ${one.question}`,
@@ -851,6 +873,9 @@ export const buildingPartOf = (missionId: string) =>
           ...(special.length === 0
             ? []
             : ['', '## Special tasks', '', special.map(planLine).join('\n')]),
+          ...(fromRounds === null
+            ? []
+            : ['', '## Decisions taken in Review rounds', '', fromRounds]),
         ].join('\n')
       }),
     )

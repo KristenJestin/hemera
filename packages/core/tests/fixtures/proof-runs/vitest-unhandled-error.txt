@@ -1,0 +1,41 @@
+
+ RUN  v5.0.1 /work/acme/api
+
+ ❯ export.test.ts (2 tests | 1 failed) 57ms
+   × saves 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  export.test.ts > saves
+Unknown Error: not implemented
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+AssertionError: expected 1 to be 2 // Object.is equality
+ ❯ Timeout._onTimeout export.test.ts:2:61
+      1| import { expect, test } from 'vite-plus/test'
+      2| test('one is one', async () => { setTimeout(() => expect(1).toBe(2), 1…
+       |                                                             ^
+      3| test('saves', () => { throw 'not implemented' })
+      4|
+ ❯ listOnTimeout node:internal/timers:605:17
+ ❯ processTimers node:internal/timers:541:7
+
+This error originated in "export.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The last test to run before this error was "one is one". This means either:
+- the error was thrown while Vitest was running this test, or
+- the error was thrown after the test completed, and this was the most recent test at that point.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+     Errors  1 error
+   Start at  10:52:53
+   Duration  1.72s (transform 82%, tests 6%, worker 5%, import 5%, environment 1%)
+

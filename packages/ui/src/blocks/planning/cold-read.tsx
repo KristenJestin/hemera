@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+// react-doctor-disable-next-line use-lazy-motion -- a desktop bundle read from disk, not a page load: `m` would need a LazyMotion around every window and story
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -126,6 +127,55 @@ export function FreshnessLine({ freshness }: { freshness: Freshness }): ReactNod
 
 const SEVERITIES: readonly Severity[] = ['blocking', 'warning', 'suggestion']
 
+interface ColdReadBodyProps {
+  pass: ColdReadPass
+  busy: boolean
+  freshness: Freshness
+  /** The pass's findings, by severity. */
+  findings: readonly Finding[]
+  onDismiss: ColdReadReportProps['onDismiss']
+}
+
+/** What the report says under its header: why the pass failed, that it runs, or what it found. */
+function ColdReadBody({
+  pass,
+  busy,
+  freshness,
+  findings,
+  onDismiss,
+}: ColdReadBodyProps): ReactNode {
+  if (pass.state === 'failed') {
+    return (
+      <p className="px-4 py-3 text-sm break-words text-destructive">
+        The cold read failed: {pass.failure}
+      </p>
+    )
+  }
+  if (busy) {
+    return (
+      <p aria-busy="true" className="px-4 py-3 text-sm break-words text-muted-foreground">
+        {pass.state === 'waiting_for_slot'
+          ? 'It starts as soon as an agent is free.'
+          : 'A fresh reader goes through the whole Spec, without the conversation that wrote it. What it finds comes here, and Freeze waits for it.'}
+      </p>
+    )
+  }
+  return (
+    <>
+      <FreshnessLine freshness={freshness} />
+      {findings.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-muted-foreground">Nothing found.</p>
+      ) : (
+        <ul aria-label="Findings" className="flex flex-col border-t border-border">
+          {findings.map((finding) => (
+            <FindingRow key={finding.id} finding={finding} onDismiss={onDismiss} />
+          ))}
+        </ul>
+      )}
+    </>
+  )
+}
+
 export interface ColdReadReportProps {
   /** The mission's passes, the first first: the report is the last one's. */
   passes: readonly ColdReadPass[]
@@ -182,30 +232,13 @@ export function ColdReadReport({
           />
         }
       >
-        {pass.state === 'failed' ? (
-          <p className="px-4 py-3 text-sm break-words text-destructive">
-            The cold read failed: {pass.failure}
-          </p>
-        ) : busy ? (
-          <p aria-busy="true" className="px-4 py-3 text-sm break-words text-muted-foreground">
-            {pass.state === 'waiting_for_slot'
-              ? 'It starts as soon as an agent is free.'
-              : 'A fresh reader goes through the whole Spec, without the conversation that wrote it. What it finds comes here, and Freeze waits for it.'}
-          </p>
-        ) : (
-          <>
-            <FreshnessLine freshness={freshness} />
-            {findings.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-muted-foreground">Nothing found.</p>
-            ) : (
-              <ul aria-label="Findings" className="flex flex-col border-t border-border">
-                {findings.map((finding) => (
-                  <FindingRow key={finding.id} finding={finding} onDismiss={onDismiss} />
-                ))}
-              </ul>
-            )}
-          </>
-        )}
+        <ColdReadBody
+          pass={pass}
+          busy={busy}
+          freshness={freshness}
+          findings={findings}
+          onDismiss={onDismiss}
+        />
       </Frame>
     </section>
   )

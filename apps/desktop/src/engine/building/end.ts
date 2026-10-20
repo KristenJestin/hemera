@@ -22,7 +22,17 @@
  * (the last green's, which holds the proofs' turn).
  */
 
-import { existsSync, renameSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { join, relative } from 'node:path'
 
 import {
   CONTRADICTION_OPTIONS,
@@ -35,13 +45,14 @@ import {
   RESULT_IS_RIGHT,
   ROOT_REPOSITORY,
   SESSION_STATES,
+  SPECIAL_TASK_PREFIX,
   SPEC_IS_RIGHT,
   specialTaskId,
   specialTaskOf,
 } from '@hemera/core/domain'
 import type { Need } from '@hemera/ipc'
 import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
-import { Cause, Effect, Layer, Option, Predicate, Stream } from 'effect'
+import { Cause, Effect, Layer, Option, Predicate, Schema, Stream } from 'effect'
 
 import type { Log } from '../../main/diagnostic.ts'
 import { DomainEvents } from '../domain-events.ts'
@@ -49,7 +60,15 @@ import { AutomationGate } from '../gate.ts'
 import type { NewEvent } from '../journal.ts'
 import { Memory } from '../memory/index.ts'
 import { getMission, moveIn as moveMissionIn } from '../missions.ts'
-import { DeliveryFailed, type NeedHandler, createNeedIn, needService } from '../needs.ts'
+import {
+  DeliveryFailed,
+  type NeedHandler,
+  NeedOwners,
+  answersToHand,
+  createNeedIn,
+  deliverAnswers,
+  needService,
+} from '../needs.ts'
 import { ProfileHome } from '../profile-home.ts'
 import { type Runs, stopAgentRuns } from '../runs.ts'
 import { Secrets } from '../secrets.ts'
@@ -72,18 +91,33 @@ import {
   needs,
   reviewChangedAfter,
   reviewFindings,
+  sessionDeliveries,
 } from '../storage/schema.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { mutate } from '../transaction.ts'
-import { BuildingEnd } from './builder.ts'
+import { BuildingEnd, redsAnsweredId } from './builder.ts'
 import { checkResultsIn } from './attempts.ts'
 import { Checkpoints } from './checkpoints.ts'
 import { BuildDesk } from './desk.ts'
 import { Documenter, type DocumenterMode, stoppedByHemera } from './documenter.ts'
 import { type PassRow, filesOfPass, passesIn } from './documenter-store.ts'
 import { STOPPED_AT_THE_END } from './helper-store.ts'
-import { currentTreesIn, finalChecksIn, scenarioProofsIn, modeOf, stateOf } from './proof-store.ts'
-import { AutoReview, repositoryFolderOf, reviewFolderOf } from './review.ts'
+import {
+  type Tree,
+  currentTreesIn,
+  finalChecksIn,
+  scenarioProofsIn,
+  modeOf,
+  stateOf,
+  upToDate,
+} from './proof-store.ts'
+import {
+  AutoReview,
+  insideCopy,
+  repositoryFolderOf,
+  reviewFolderOf,
+  withheldFromReviewers,
+} from './review.ts'
 import {
   REVIEW_NEEDS,
   type ReviewFindingRow,
@@ -93,6 +127,7 @@ import {
   reviewerOf,
 } from './review-store.ts'
 import { Snapshots } from './snapshots.ts'
+import { roundAnsweredIn, unansweredSourcesIn } from '../review/round-store.ts'
 import {
   type BuildingBase,
   type BuildingRow,
@@ -117,6 +152,7 @@ export const RETRY = 'Retry'
 
 /** The steps of the end, in their order, as `buildings.phase` keeps them. */
 export const END_PHASES = [
+  'answers',
   'documenter',
   'final_checks',
   'checkpoint',
@@ -152,12 +188,56 @@ type Needs =
   | Memory
   | Runs
   | ToolAccess
+  | NeedOwners
   | Effect.Services<ReturnType<typeof getMission>>
+
+const readString = Schema.decodeUnknownOption(Schema.String)
 
 const basesOf = (building: BuildingRow): ReadonlyArray<BuildingBase> =>
   Option.getOrElse(bases.read(building.bases), () => [])
 
 const placeOf = (base: BuildingBase) => ({ name: base.repository, folder: base.folder })
+
+/**
+ * What no reviewer reads in a copy of the checkpoint, whichever tool reaches it: a file withheld
+ * from the reviewers (a `.env` committed on the branch) and a link that really leads out of the
+ * copy, each replaced by a line saying so. The folders are walked by hand: a link is judged as a
+ * link and never walked through, so a link out is replaced before anything beyond it is reached,
+ * and a link back into the copy is not walked again.
+ */
+export const withheldIn = (copy: string) => {
+  const root = realpathSync.native(copy)
+  /** Whether a link leads into the copy, where it resolves on the disk; a broken one does not. */
+  const leadsIn = (link: string) => {
+    try {
+      const target = realpathSync.native(link)
+      return target === root || insideCopy(root, target)
+    } catch {
+      return false
+    }
+  }
+  const walk = (folder: string) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const path = join(folder, entry.name)
+      if (entry.isDirectory()) {
+        walk(path)
+        continue
+      }
+      const named = relative(copy, path).replaceAll('\\', '/')
+      if (!withheldFromReviewers(named) && (!entry.isSymbolicLink() || leadsIn(path))) continue
+      const standIn = `content withheld: ${named}\n`
+      // Withheld already (a copy reused): left as it is, under a reviewer that may be reading it.
+      const already =
+        entry.isFile() &&
+        statSync(path).size === Buffer.byteLength(standIn) &&
+        readFileSync(path, 'utf8') === standIn
+      if (already) continue
+      rmSync(path, { force: true })
+      writeFileSync(path, standIn)
+    }
+  }
+  walk(copy)
+}
 
 const answerOf = (need: Need): string | null => {
   const answer = need.answer
@@ -179,22 +259,39 @@ const questionOf = (finding: ReviewFindingRow): string =>
     .filter((one) => one !== null)
     .join('\n')
 
-/** A special task born from a finding, added available when nothing holds it. */
+/**
+ * A special task born from a finding, added available when nothing holds it; with what the user
+ * wrote when they answered its contradiction in their own words.
+ */
 const specialTaskIn = (
   transaction: EngineTransaction,
   building: BuildingRow,
   finding: ReviewFindingRow,
+  written: string | null = null,
 ) =>
   Effect.gen(function* () {
     const secrets = yield* Secrets
     const tasks = yield* tasksIn(transaction, building.id)
-    const number = tasks.filter((one) => one.origin === 'review').length + 1
+    // Per mission (#147): the next number follows the highest of every Building of the mission.
+    const numbered = yield* transaction
+      .select({ id: buildingTasks.id })
+      .from(buildingTasks)
+      .innerJoin(buildings, eq(buildings.id, buildingTasks.buildingId))
+      .where(and(eq(buildings.missionId, building.missionId), eq(buildingTasks.origin, 'review')))
+      .pipe(Effect.mapError(refusedWhile('reading the special tasks')))
+    const highest = numbered.map((one) =>
+      Number.parseInt(one.id.slice(SPECIAL_TASK_PREFIX.length), 10),
+    )
+    const number = Math.max(0, ...highest.filter(Number.isInteger)) + 1
     const id = specialTaskId(number)
     const rank = Math.max(0, ...tasks.map((one) => one.rank)) + 1
-    const written = specialTaskOf(finding)
+    const task = specialTaskOf(finding)
+    const result = written === null ? task.result : `${task.result}\nThe user answered: ${written}`
+    // `review_report` keeps a path's repository; a row without one is read in the only repository.
+    const only = basesOf(building)
     const repository =
       finding.repository ??
-      (finding.path === null ? null : (basesOf(building)[0]?.repository ?? null))
+      (finding.path === null || only.length !== 1 ? null : (only[0]?.repository ?? null))
     const targets =
       repository === null || finding.path === null
         ? []
@@ -207,8 +304,8 @@ const specialTaskIn = (
         rank,
         origin: 'review',
         decisionId: null,
-        title: secrets.mask(written.title),
-        result: secrets.mask(written.result),
+        title: secrets.mask(task.title),
+        result: secrets.mask(result),
         requirements: '[]',
         scenarios: '[]',
         targets: secrets.mask(JSON.stringify(targets)),
@@ -229,12 +326,30 @@ const specialTaskIn = (
         task: id,
         finding: finding.number,
         reviewer: finding.reviewer,
-        title: written.title,
+        title: task.title,
       }),
     }
   })
 
-export const buildingEndLayer = (log: Log) => {
+/**
+ * Where a suite holds the end: as it takes in the end of a Builder's turn, as a pass over its
+ * steps begins and ends, once the review checkpoint is taken, as the exit begins, and in each pass
+ * of the exit's stops once the runs are stopped, before the calls are waited for, and on each side
+ * of the proofs read for what is left stale. Nothing otherwise.
+ */
+export type EndHold = (
+  at:
+    | 'turned'
+    | 'advancing'
+    | 'advanced'
+    | 'checkpoint_taken'
+    | 'exiting'
+    | 'settling'
+    | 'proofs_reading'
+    | 'retries_reading',
+) => Effect.Effect<void>
+
+export const buildingEndLayer = (log: Log, hold: EndHold = () => Effect.void) => {
   let apply: NeedHandler['deliver'] | null = null
   const handler: NeedHandler = {
     deliver: (need, transaction) =>
@@ -253,12 +368,33 @@ export const buildingEndLayer = (log: Log) => {
       const said = (line: string) => Effect.sync(() => log(`end of a Building: ${line}`))
       /** The Buildings whose driver runs, and whether it is asked to run again. */
       const running = new Map<string, boolean>()
+      /**
+       * The sources each round's end last named to its Builder as waiting for an answer (#468),
+       * the delivery that named them, and how many times that set was told.
+       */
+      const answersTold = new Map<
+        string,
+        { readonly set: string; readonly delivery: string; readonly times: number }
+      >()
       /** The Buildings whose documenter's pass this engine started and still waits on. */
       const documenting = new Set<string>()
       /** The Buildings whose proofs this engine refreshed, with the trees it refreshed them on. */
-      const refreshed = new Map<string, string>()
-      /** The Buildings whose Builder this engine brought back once as their end waited at refresh. */
+      const refreshed = new Map<string, ReadonlyArray<Tree>>()
+      /**
+       * The Buildings whose Builder this end started again, since the exit last stopped it or the
+       * user last retried: one that stops once more is the user's to start again.
+       */
       const broughtBack = new Set<string>()
+      /**
+       * The end of the last Builder turn this engine heard, by Building: what is read when its
+       * record could not be written, so a turn that ended is never waited for again.
+       */
+      const turnedHere = new Map<string, string>()
+      /** The end of the Builder's last turn: as kept, or as this engine heard it, the later. */
+      const turnedOf = (buildingId: string, kept: string | null) => {
+        const heard = turnedHere.get(buildingId) ?? null
+        return kept === null || (heard !== null && heard > kept) ? heard : kept
+      }
 
       const buildingRow = (buildingId: string) =>
         Effect.gen(function* () {
@@ -356,7 +492,11 @@ export const buildingEndLayer = (log: Log) => {
       const copyOf = (building: BuildingRow, checkpointId: string) =>
         Effect.gen(function* () {
           const folder = reviewFolderOf(dataFolder, building.id)
-          if (existsSync(folder)) return folder
+          if (existsSync(folder)) {
+            // A copy kept from an engine that did not withhold it is withheld before it is read.
+            yield* Effect.sync(() => withheldIn(folder))
+            return folder
+          }
           const database = yield* Database
           const trees = yield* database
             .select()
@@ -378,6 +518,7 @@ export const buildingEndLayer = (log: Log) => {
             )
           }
           yield* Effect.sync(() => {
+            withheldIn(partial)
             rmSync(folder, { recursive: true, force: true })
             // A copy is whole or absent: one stopped half-way is made again.
             renameSync(partial, folder)
@@ -424,20 +565,58 @@ export const buildingEndLayer = (log: Log) => {
       /**
        * Whether a red of the final checks waits on the Builder, from what is stored, so a restart
        * neither judges its fix early nor waits for a turn that already ended: the attempt the red
-       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder
-       * ended since it opened.
+       * opened for the Builder, not begun (as `cutScopes` reads it), and no turn of the Builder on
+       * that red ended yet. The red is delivered under the attempt's id: still queued, it waits;
+       * taken, it waits for a turn that ended after it was taken, so a turn that started before
+       * it is never counted. A red with no delivery kept (a stop between the two) waits for a
+       * turn that ended after the attempt opened. The user's answer to three reds waits the same
+       * way until a judgement follows it (#309): the Builder acts on it before the reds are judged.
        */
       const waitsOnBuilder = (building: BuildingRow) =>
         Effect.gen(function* () {
           const database = yield* Database
-          const open = (yield* attemptsIn(database, building.id)).findLast(
-            (one) =>
-              one.taskId === null &&
-              one.scope === 'end' &&
-              one.subject === null &&
-              one.endedAt === null,
+          const attempts = (yield* attemptsIn(database, building.id)).filter(
+            (one) => one.taskId === null && one.scope === 'end' && one.subject === null,
           )
-          if (open === undefined || open.number === 1) return false
+          const open = attempts.findLast((one) => one.endedAt === null)
+          /** Whether the Builder took what it was handed, and ended a turn after it. */
+          const handed = (id: string, opened: string) =>
+            Effect.gen(function* () {
+              const turned = turnedOf(
+                building.id,
+                (yield* buildingRow(building.id))?.builderTurnedAt ?? null,
+              )
+              const [told] = yield* database
+                .select({ state: sessionDeliveries.state, sentAt: sessionDeliveries.sentAt })
+                .from(sessionDeliveries)
+                .where(eq(sessionDeliveries.id, id))
+                .pipe(Effect.mapError(refusedWhile('reading what was delivered to the Builder')))
+              if (told?.state === 'queued') return true
+              const since = told?.sentAt ?? opened
+              return turned === null || turned <= since
+            })
+          if (open === undefined) {
+            const [answered] = yield* database
+              .select({ needId: buildingDecisions.needId, at: buildingDecisions.answeredAt })
+              .from(buildingDecisions)
+              .where(
+                and(
+                  eq(buildingDecisions.buildingId, building.id),
+                  eq(buildingDecisions.kind, 'error'),
+                  eq(buildingDecisions.scope, 'end'),
+                  isNull(buildingDecisions.subject),
+                  eq(buildingDecisions.state, 'answered'),
+                ),
+              )
+              .orderBy(desc(buildingDecisions.answeredAt))
+              .limit(1)
+              .pipe(Effect.mapError(refusedWhile('reading the answers to three reds')))
+            const at = answered?.at ?? null
+            if (answered === undefined || at === null) return false
+            if (attempts.some((one) => one.startedAt > at)) return false
+            return yield* handed(redsAnsweredId(answered.needId), at)
+          }
+          if (open.number === 1) return false
           if ((yield* checkResultsIn(database, open.id)).length > 0) return false
           const checking = yield* database
             .select({ name: buildingCheckRuns.name })
@@ -445,8 +624,21 @@ export const buildingEndLayer = (log: Log) => {
             .where(eq(buildingCheckRuns.attemptId, open.id))
             .pipe(Effect.mapError(refusedWhile('reading the checks running')))
           if (checking.length > 0) return false
-          const turned = (yield* buildingRow(building.id))?.builderTurnedAt ?? null
-          return turned === null || turned < open.startedAt
+          return yield* handed(open.id, open.startedAt)
+        })
+
+      /** Whether the Builder took a delivery and ended a turn after it. */
+      const turnedSince = (building: BuildingRow, deliveryId: string) =>
+        Effect.gen(function* () {
+          const database = yield* Database
+          const [told] = yield* database
+            .select({ sentAt: sessionDeliveries.sentAt })
+            .from(sessionDeliveries)
+            .where(eq(sessionDeliveries.id, deliveryId))
+            .pipe(Effect.mapError(refusedWhile('reading what was delivered to the Builder')))
+          const turned = turnedOf(building.id, building.builderTurnedAt)
+          const sent = told?.sentAt ?? null
+          return sent !== null && turned !== null && turned > sent
         })
 
       /** Whether the last result of a final check is red. */
@@ -464,6 +656,51 @@ export const buildingEndLayer = (log: Log) => {
           const database = yield* Database
           const missionId = building.missionId
           switch (phase) {
+            case 'answers': {
+              // A round's end starts once every source of its points is answered (#468).
+              const started = buildingEvent(missionId, 'building.end_started', {
+                label: building.label,
+              })
+              const left =
+                building.round === null
+                  ? []
+                  : yield* unansweredSourcesIn(database, missionId, building.round)
+              if (left.length === 0) {
+                answersTold.delete(building.id)
+                return yield* moveOn(building, 'documenter', [started])
+              }
+              // Told for each set left: an answer that comes leaves a smaller set to name. A
+              // Builder that ends its turn on it with the set unchanged is told once more, then the
+              // user is asked, as for the documenter and the reviewers; Retry tells it again.
+              const set = left.join('\u0000')
+              const told = answersTold.get(building.id)
+              const times = told?.set === set ? told.times : 0
+              if (
+                told !== undefined &&
+                times > 0 &&
+                !(yield* turnedSince(building, told.delivery))
+              ) {
+                return yield* withBuilder(building)
+              }
+              if (times >= 2) {
+                answersTold.delete(building.id)
+                yield* raise(
+                  building,
+                  `The Builder ended its turn twice without answering ${left.join(', ')} with feedback_answer: Retry tells it again.`,
+                )
+                return false
+              }
+              const delivery = yield* Sessions.use((sessions) =>
+                sessions.deliver({
+                  owner: { kind: 'mission', missionId },
+                  target: { role: 'builder' },
+                  kind: 'answers',
+                  body: `The round does not end while a source has no answer: answer ${left.join(', ')} with feedback_answer, saying what you did or why nothing changed. Only the user resolves them.`,
+                }),
+              )
+              answersTold.set(building.id, { set, delivery, times: times + 1 })
+              return yield* withBuilder(building)
+            }
             case 'documenter': {
               if (documenting.has(building.id)) return false
               const last = (yield* passesIn(database, building.id)).at(-1)
@@ -479,7 +716,7 @@ export const buildingEndLayer = (log: Log) => {
               return yield* moveOn(building, 'final_checks')
             }
             case 'final_checks': {
-              if (yield* waitsOnBuilder(building)) return false
+              if (yield* waitsOnBuilder(building)) return yield* withBuilder(building)
               const verdict = yield* BuildDesk.use((desk) =>
                 desk.judgeScope(missionId, 'end', null),
               )
@@ -493,7 +730,7 @@ export const buildingEndLayer = (log: Log) => {
                     events: [buildingEvent(missionId, 'building.final_checks', { verdict })],
                   }),
                 )
-                return false
+                return yield* withBuilder(building)
               }
               return yield* moveOn(building, 'checkpoint', [
                 buildingEvent(missionId, 'building.final_checks', { verdict }),
@@ -512,27 +749,25 @@ export const buildingEndLayer = (log: Log) => {
                       baseRef: null,
                       baseCommit: base.commit,
                     })),
+                    // Kept with the checkpoint, in its transaction: a stop leaves no orphan.
+                    (transaction, taken) =>
+                      transaction
+                        .update(buildings)
+                        .set({ reviewCheckpointId: taken })
+                        .where(
+                          and(eq(buildings.id, building.id), isNull(buildings.reviewCheckpointId)),
+                        )
+                        .pipe(
+                          Effect.mapError(refusedWhile('keeping the review checkpoint')),
+                          Effect.as([
+                            buildingEvent(missionId, 'review.checkpoint_taken', {
+                              checkpoint: taken,
+                            }),
+                          ]),
+                        ),
                   ),
                 ))
-              if (building.reviewCheckpointId === null) {
-                yield* mutate('keeping the review checkpoint', (transaction) =>
-                  transaction
-                    .update(buildings)
-                    .set({ reviewCheckpointId: checkpointId })
-                    .where(and(eq(buildings.id, building.id), isNull(buildings.reviewCheckpointId)))
-                    .pipe(
-                      Effect.mapError(refusedWhile('keeping the review checkpoint')),
-                      Effect.as({
-                        result: undefined,
-                        events: [
-                          buildingEvent(missionId, 'review.checkpoint_taken', {
-                            checkpoint: checkpointId,
-                          }),
-                        ],
-                      }),
-                    ),
-                )
-              }
+              yield* hold('checkpoint_taken')
               yield* copyOf(building, checkpointId)
               return yield* moveOn(building, 'review')
             }
@@ -580,7 +815,7 @@ export const buildingEndLayer = (log: Log) => {
               const tasks = yield* tasksIn(database, building.id)
               const special = tasks.filter((one) => one.origin === 'review')
               if (special.some((one) => one.state !== 'done' && one.state !== 'skipped'))
-                return false
+                return yield* withBuilder(building)
               const findings = yield* reviewFindingsIn(database, building.id)
               if (findings.some((one) => one.fate === 'decision' || one.fate === null)) return false
               return yield* moveOn(building, 'documenter_delta')
@@ -643,7 +878,7 @@ export const buildingEndLayer = (log: Log) => {
               const stale = last === undefined ? [] : yield* staleLeft(building)
               if (
                 last === undefined ||
-                (stale.length > 0 && last !== (yield* treesOf(missionId)))
+                (stale.length > 0 && !upToDate(last, yield* currentTreesIn(database, missionId)))
               ) {
                 yield* refresh(building)
               } else if (stale.length > 0) {
@@ -663,6 +898,13 @@ export const buildingEndLayer = (log: Log) => {
               if (yield* unsettled(building)) return yield* withBuilder(building)
               if ((yield* getMission(missionId)).needs.length > 0)
                 return yield* withBuilder(building)
+              // An answer not handed over yet is handed now: what it moves drives the end again.
+              if (yield* answerHanding(yield* Database, missionId)) {
+                yield* deliverAnswers
+                return false
+              }
+              // An answer to the Builder holds the exit until a turn of the Builder on it ended.
+              if (yield* answerWaits(yield* Database, building)) return yield* withBuilder(building)
               return yield* exit(building)
             }
           }
@@ -734,7 +976,8 @@ export const buildingEndLayer = (log: Log) => {
 
       /**
        * What is stale and waits for no one: each automated proof made stale with no failed run
-       * waiting for its fix, and each final check that is not red but ran on an older tree.
+       * waiting for its fix nor a Retry running it again, and each final check that is not red but
+       * ran on an older tree.
        */
       const staleLeft = (building: BuildingRow) =>
         Effect.gen(function* () {
@@ -742,12 +985,22 @@ export const buildingEndLayer = (log: Log) => {
           const fixing = (yield* attemptsIn(database, building.id))
             .filter((one) => one.scope === 'proof' && one.endedAt === null)
             .map((one) => one.subject)
-          const proofs = (yield* scenarioProofsIn(database, building.id))
+          // Who a Retry runs again is read on both sides of the proofs (#306): a Retry says its
+          // scenario runs before it commits the proof back to rerun, and says it no longer runs only
+          // once its run is recorded. A Retry between the reads is in one of the two lists.
+          const before = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
+          yield* hold('proofs_reading')
+          const rows = yield* scenarioProofsIn(database, building.id)
+          yield* hold('retries_reading')
+          const after = yield* BuildDesk.use((desk) => desk.rerunning(building.missionId))
+          const retrying = [...before, ...after]
+          const proofs = rows
             .filter(
               (row) =>
                 modeOf(row) === 'automated' &&
                 stateOf(row) === 'to_rerun' &&
-                !fixing.includes(row.scenario),
+                !fixing.includes(row.scenario) &&
+                !retrying.includes(row.scenario),
             )
             .map((row) => row.scenario)
           const checks = (yield* finalChecksIn(database, building.missionId, building.id))
@@ -756,38 +1009,114 @@ export const buildingEndLayer = (log: Log) => {
           return [...proofs, ...checks]
         })
 
-      /** The mission's current trees, as one key: a snapshot that saw a change changes it. */
-      const treesOf = (missionId: string) =>
-        Effect.gen(function* () {
-          const current = yield* currentTreesIn(yield* Database, missionId)
-          return JSON.stringify([...current].toSorted(([a], [b]) => a.localeCompare(b)))
-        })
-
       /**
-       * The stale proofs and final checks run again, once per tree: the trees are read before the
-       * refresh, so a write that lands during it makes the next step refresh again.
+       * The stale proofs and final checks run again, once per tree: the trees kept are those the
+       * refresh's own snapshot took, so the next step never refreshes again what it just saw, and a
+       * write a later snapshot saw makes it refresh again.
        */
       const refresh = (building: BuildingRow) =>
         Effect.gen(function* () {
-          refreshed.set(building.id, yield* treesOf(building.missionId))
-          yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
+          const done = yield* BuildDesk.use((desk) => desk.refreshProofs(building.missionId))
+          refreshed.set(building.id, done.trees)
         })
 
       /**
-       * The end waits at its last step: the Builder works meanwhile. A restart does not resume it
-       * there (the exit could be under way), so the end does, before it next exits: once per
-       * engine, not at every drive, so a Builder that stopped again (a provider limit, a start that
-       * failed) is the user's to start again.
+       * The end waits on the Builder: a red of the final checks, a special task, a proof to fix, a
+       * question or its answer. A Builder that stopped is started again, once: a resume counts only
+       * when it started a lineage, so a Builder live at the first wait is still brought back when it
+       * stops later. One that stops again with no need of its own (an agent that cannot be spoken
+       * to, a start that failed), or that cannot be started, holds the end on an error need, whose
+       * Retry starts it again: never a loop of resumes, never a wait on nothing. A need about its
+       * sessions (a provider limit) is the user's already, and its Retry starts it.
        */
       const withBuilder = (building: BuildingRow) =>
-        Effect.suspend(() => {
-          if (broughtBack.has(building.id)) return Effect.succeed(false)
-          broughtBack.add(building.id)
-          return Effect.as(
-            BuildDesk.use((desk) => desk.ensureBuilder(building.missionId)),
-            false,
+        Effect.gen(function* () {
+          const missionId = building.missionId
+          if (!broughtBack.has(building.id)) {
+            const brought = yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
+            if (brought === 'started') broughtBack.add(building.id)
+            if (brought === 'no_workspace') {
+              // Retry would meet the same: the user is told what is missing.
+              yield* raise(
+                building,
+                'The Builder cannot be started: its Building has no Workspace any more.',
+              )
+              return false
+            }
+            if (brought !== 'stopped') return false
+          } else if ((yield* BuildDesk.use((desk) => desk.builderNow(missionId))) !== 'stopped') {
+            return false
+          }
+          broughtBack.delete(building.id)
+          yield* raise(
+            building,
+            'The Builder stopped and could not be brought back: Retry starts it again.',
+          )
+          return false
+        })
+
+      /**
+       * Whether an answer to the Builder waits for it, once the end is called: still queued, or
+       * taken by a turn that has not ended yet, whenever it was given (#348). Answers to other
+       * agents are theirs.
+       */
+      const answerWaits = (
+        reader: Database['Service'] | EngineTransaction,
+        building: BuildingRow,
+      ) =>
+        Effect.gen(function* () {
+          const called = building.endCalledAt
+          if (called === null) return false
+          const lineages = (yield* reader
+            .select({ lineage: agentSessions.lineage })
+            .from(agentSessions)
+            .where(
+              and(
+                eq(agentSessions.ownerKind, 'mission'),
+                eq(agentSessions.ownerId, building.missionId),
+                eq(agentSessions.role, 'builder'),
+              ),
+            )
+            .pipe(Effect.mapError(refusedWhile('reading the Builder’s sessions')))).map(
+            (one) => one.lineage,
+          )
+          const answers = (yield* reader
+            .select()
+            .from(sessionDeliveries)
+            .where(
+              and(
+                eq(sessionDeliveries.ownerKind, 'mission'),
+                eq(sessionDeliveries.ownerId, building.missionId),
+                eq(sessionDeliveries.kind, 'answer'),
+                inArray(sessionDeliveries.state, ['queued', 'sent']),
+              ),
+            )
+            .pipe(Effect.mapError(refusedWhile('reading the answers to the Builder')))).filter(
+            (one) =>
+              one.targetRole === 'builder' ||
+              (one.targetLineage !== null && lineages.includes(one.targetLineage)),
+          )
+          if (answers.length === 0) return false
+          const [row] = yield* reader
+            .select({ turned: buildings.builderTurnedAt })
+            .from(buildings)
+            .where(eq(buildings.id, building.id))
+            .pipe(Effect.mapError(refusedWhile('reading the Building')))
+          const turned = turnedOf(building.id, row?.turned ?? null)
+          return answers.some(
+            (one) => one.sentAt === null || turned === null || turned <= one.sentAt,
           )
         })
+
+      /**
+       * Whether an answer the user gave on the mission is not handed to its owner yet: invisible
+       * among the pending needs, and not yet an answer to the Builder, it holds the exit (#348).
+       * Exactly what a hand-over round hands over, so the round always moves what holds it.
+       */
+      const answerHanding = (reader: Database['Service'] | EngineTransaction, missionId: string) =>
+        NeedOwners.use((owners) => answersToHand(reader, owners, missionId)).pipe(
+          Effect.map((left) => left.length > 0),
+        )
 
       /** Whether an automated proof is not proven, or a final check is red or stale. */
       const unsettled = (building: BuildingRow) =>
@@ -803,12 +1132,14 @@ export const buildingEndLayer = (log: Log) => {
         })
 
       /**
-       * The mission's whole tree stops: every session, children first, and every command its agents
-       * started. Then the calls already executing end, and what one started meanwhile (a helper's
-       * session, a command) is stopped in turn, and its calls waited for: nothing of theirs lands
-       * after this. A call the user allowed runs no more from the first stop, whoever of the tree
-       * asked it, until a Builder works on the mission again. What was queued for them is kept, for
-       * a Builder the exit sends back; the exit's commit sets it aside.
+       * The mission's whole tree stops: every session, children first, every command its agents
+       * started, and every run Hemera started for one of their calls (a `proof_run`, the checks of
+       * `task_finished`), so the wait for those calls never lasts a run's own limit (#309). Then the
+       * calls already executing end, and what one started meanwhile (a helper's session, a command,
+       * a run) is stopped in turn, and its calls waited for: nothing of theirs lands after this. A
+       * call the user allowed runs no more from the first stop, whoever of the tree asked it, until
+       * a Builder works on the mission again. What was queued for them is kept, for a Builder the
+       * exit sends back; the exit's commit sets it aside.
        */
       const stopAll = (missionId: string) =>
         Effect.gen(function* () {
@@ -822,10 +1153,12 @@ export const buildingEndLayer = (log: Log) => {
             sessions.stopTree({ kind: 'mission', missionId }, STOPPED_AT_THE_END, 'kept'),
           ).pipe(
             Effect.andThen(stopAgentRuns(missionId)),
+            Effect.andThen(hold('settling')),
             Effect.andThen(ToolAccess.use((access) => access.settled(missionId))),
           )
-          yield* once
-          yield* once
+          // A session born during the stops is not of the tree read above: while they run, no call
+          // of the mission starts a run, whoever asks, so none is waited for to its limit (#309).
+          yield* ToolAccess.use((access) => access.stopping(missionId, Effect.andThen(once, once)))
         })
 
       /**
@@ -842,12 +1175,19 @@ export const buildingEndLayer = (log: Log) => {
         Effect.gen(function* () {
           const database = yield* Database
           const missionId = building.missionId
+          yield* hold('exiting')
           yield* stopAll(missionId)
+          // What the exit stopped, the end brings back once more.
+          broughtBack.delete(building.id)
           // A question a stopped call raised as the tree stopped holds the exit until answered, with
-          // the Builder back to take its answer.
-          if ((yield* getMission(missionId)).needs.length > 0) {
-            yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
-            return false
+          // the Builder back to take its answer; an answer that reached it as it stopped, too.
+          if (
+            (yield* getMission(missionId)).needs.length > 0 ||
+            (yield* answerHanding(database, missionId)) ||
+            (yield* answerWaits(database, building))
+          ) {
+            yield* deliverAnswers
+            return yield* withBuilder(building)
           }
           const snapshots = yield* Snapshots
           const ends: Array<{ readonly base: BuildingBase; readonly tree: string }> = []
@@ -861,7 +1201,7 @@ export const buildingEndLayer = (log: Log) => {
           }
           if (yield* unsettled(building)) {
             yield* said('a write landed after the last checks: they run again before Review')
-            yield* BuildDesk.use((desk) => desk.ensureBuilder(missionId))
+            yield* withBuilder(building)
             yield* refresh(building)
             return false
           }
@@ -937,7 +1277,12 @@ export const buildingEndLayer = (log: Log) => {
                   ),
                 )
                 .pipe(Effect.mapError(refusedWhile('reading the sessions')))
-              if (!exiting || live.length > 0) return { result: 'again' as const, events: [] }
+              // No answer is left to hand over here: once the tree is stopped twice, nothing raises a
+              // need answered through a hand-over (a `commit` need `commitsLeft` may raise is
+              // retried, never handed over). An answer may still reach the Builder meanwhile.
+              if (!exiting || live.length > 0 || (yield* answerWaits(transaction, current))) {
+                return { result: 'again' as const, events: [] }
+              }
               const [mission] = yield* transaction
                 .select({ id: missions.id, stage: missions.stage, round: missions.round })
                 .from(missions)
@@ -967,6 +1312,11 @@ export const buildingEndLayer = (log: Log) => {
                   .onConflictDoNothing()
                   .pipe(Effect.mapError(refusedWhile('keeping what changed after the review')))
               }
+              // The round it built is answered with the move back to Review (#468).
+              const answered =
+                building.round === null
+                  ? []
+                  : yield* roundAnsweredIn(transaction, missionId, building.round)
               return {
                 result: 'ended' as const,
                 events: [
@@ -975,6 +1325,7 @@ export const buildingEndLayer = (log: Log) => {
                     label: building.label,
                     changedAfter: changed.length,
                   }),
+                  ...answered,
                 ],
               }
             }),
@@ -1029,11 +1380,15 @@ export const buildingEndLayer = (log: Log) => {
             return Effect.void
           }
           running.set(buildingId, false)
-          const once: Effect.Effect<void> = advance(buildingId).pipe(
+          const once: Effect.Effect<void> = Effect.andThen(
+            hold('advancing'),
+            advance(buildingId),
+          ).pipe(
             provided,
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.void : stepFailed(buildingId, cause),
             ),
+            Effect.andThen(hold('advanced')),
             Effect.andThen(
               Effect.suspend(() => {
                 if (running.get(buildingId) === true) {
@@ -1094,8 +1449,10 @@ export const buildingEndLayer = (log: Log) => {
               .pipe(Effect.mapError(refusedWhile('keeping a finding’s fate')))
             return events
           }
-          if (answer === SPEC_IS_RIGHT) {
-            events.push((yield* specialTaskIn(transaction, building, finding)).event)
+          // An answer in the user's own words asks the code to change, as they say: the Spec stands.
+          const written = Predicate.isTagged(answered.answer, 'Written') ? kept : null
+          if (answer === SPEC_IS_RIGHT || written !== null) {
+            events.push((yield* specialTaskIn(transaction, building, finding, written)).event)
             events.push(...(yield* settleIn(transaction, building)).events)
             return events
           }
@@ -1134,9 +1491,16 @@ export const buildingEndLayer = (log: Log) => {
 
       const events = yield* DomainEvents.use((domain) => domain.subscribe)
       const follow = events.pipe(
-        Stream.filter((event) => event.entityKind === 'mission'),
-        Stream.runForEach((event) =>
-          driveMission(event.entityId).pipe(
+        Stream.map((event) => {
+          if (event.entityKind === 'mission') return event.entityId
+          // A Builder session that ended or failed, once written: a start that failed before it
+          // had a turn, or a failure written after its turn's end was heard, says so only here.
+          if (event.type !== 'session.stopped' || event.payload['role'] !== 'builder') return null
+          return Option.getOrNull(readString(event.payload['missionId']))
+        }),
+        Stream.filter((missionId) => missionId !== null),
+        Stream.runForEach((missionId) =>
+          driveMission(missionId).pipe(
             provided,
             Effect.catchCause((cause) => said(`an event was not followed: ${String(cause)}`)),
           ),
@@ -1149,19 +1513,32 @@ export const buildingEndLayer = (log: Log) => {
             const session = yield* getSession(turn.sessionId)
             if (session.role !== 'builder' || session.owner.kind !== 'mission') return
             const building = yield* activeBuildingIn(yield* Database, session.owner.missionId)
-            if (building === null || endPhaseOf(building.phase) === null) return
-            // Kept, so a red the Builder fixes is judged after this turn even across a restart.
+            if (building === null) return
+            // Kept whatever the phase, so an answer the Builder took before the end is called is
+            // known as taken (#348); only an end under way is driven.
+            const ending = endPhaseOf(building.phase) !== null
+            if (ending) yield* hold('turned')
+            // When it ended, never when it is heard: a red or an answer its session sent next was
+            // taken after it, whatever this listener was busy with.
+            const at = turn.at
+            turnedHere.set(building.id, at)
+            // Kept, so a red the Builder fixes is judged after this turn even across a restart; a
+            // record that fails still leaves the turn heard, and the end driven.
             yield* mutate('keeping the end of the Builder’s turn', (transaction) =>
               transaction
                 .update(buildings)
-                .set({ builderTurnedAt: now() })
+                .set({ builderTurnedAt: at })
                 .where(eq(buildings.id, building.id))
                 .pipe(
                   Effect.mapError(refusedWhile('keeping the end of the Builder’s turn')),
                   Effect.as({ result: undefined, events: [] }),
                 ),
+            ).pipe(
+              Effect.catchCause((cause) =>
+                said(`the end of a Builder's turn was not kept: ${String(cause)}`),
+              ),
             )
-            yield* drive(building.id)
+            if (ending) yield* drive(building.id)
           }).pipe(
             provided,
             Effect.catchCause((cause) => said(`a turn's end was not followed: ${String(cause)}`)),
@@ -1181,10 +1558,17 @@ export const buildingEndLayer = (log: Log) => {
         }
       })
 
+      // Once the start brought back its Builders, each end under way is driven again: one told to
+      // wait for the start learns what it could not bring back.
+      const resumed = BuildDesk.use((desk) => desk.resumed).pipe(Effect.andThen(resume))
+
       yield* AutomationGate.use((gate) => gate.pass).pipe(
         Effect.andThen(Memory.use((memory) => memory.ready)),
         Effect.andThen(
-          Effect.all([follow, turns, resume], { concurrency: 'unbounded', discard: true }),
+          Effect.all([follow, turns, resume, resumed], {
+            concurrency: 'unbounded',
+            discard: true,
+          }),
         ),
         provided,
         Effect.catchCause((cause) => said(`the end stopped: ${String(cause)}`)),
@@ -1199,16 +1583,24 @@ export const buildingEndLayer = (log: Log) => {
                 const building = yield* activeBuildingIn(transaction, missionId)
                 if (building === null) return { result: null, events: [] }
                 if (building.phase !== 'tasks') return { result: building.id, events: [] }
+                // A round's end waits first for every source to be answered (#468).
+                const round = building.round !== null
                 yield* transaction
                   .update(buildings)
-                  .set({ phase: 'documenter' })
+                  .set({ phase: round ? 'answers' : 'documenter' })
                   .where(eq(buildings.id, building.id))
                   .pipe(Effect.mapError(refusedWhile('starting the end of the Building')))
                 return {
                   result: building.id,
                   events: [
                     buildingEvent(missionId, 'building.tasks_done'),
-                    buildingEvent(missionId, 'building.end_started', { label: building.label }),
+                    ...(round
+                      ? []
+                      : [
+                          buildingEvent(missionId, 'building.end_started', {
+                            label: building.label,
+                          }),
+                        ]),
                   ],
                 }
               }),

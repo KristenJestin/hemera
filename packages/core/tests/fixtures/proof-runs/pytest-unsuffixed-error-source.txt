@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/acme/api
+plugins: timeout-2.4.0
+collected 2 items
+
+tests/test_export.py FF                                                  [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_one_is_one ________________________________
+
+    def test_one_is_one():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_export.py:10: AssertionError
+____________________________ test_saves_the_invoice ____________________________
+
+    def test_saves_the_invoice():
+        page = object()
+>       expect(page).to_have_title("Saved")
+        ^^^^^^^^^^^^
+
+tests/test_export.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+page = <object object at 0x7f67787815d0>
+
+    def expect(page):
+>       raise NotFound("no invoice")
+E       test_export.NotFound: no invoice
+
+tests/test_export.py:6: NotFound
+=========================== short test summary info ============================
+FAILED tests/test_export.py::test_one_is_one - assert 1 == 2
+FAILED tests/test_export.py::test_saves_the_invoice - test_export.NotFound: n...
+============================== 2 failed in 0.01s ===============================

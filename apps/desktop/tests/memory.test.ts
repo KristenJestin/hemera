@@ -234,11 +234,24 @@ describe('The Journal is a projection of the domain events', () => {
     expect(outcome.token).toMatch(/^[\w-]{43}$/)
   })
 
-  test('a page of a 10 000-line Journal is bounded and fast, and its cursor reads further back', async () => {
+  test('a page of a 10 000-line Journal costs what a page of a 1 000-line one does, and its cursor reads further back', async () => {
     const pages = await engine()(({ profile }) =>
       profile.use(
         Effect.gen(function* () {
           const { mission } = yield* acmeWithMission(work)
+          const memory = yield* Memory
+          // The cost of reading a page: the fastest of many reads, since load only ever adds.
+          const cheapest = Effect.gen(function* () {
+            yield* memory.catchUp
+            let least = Number.POSITIVE_INFINITY
+            for (let read = 0; read < 25; read += 1) {
+              const started = performance.now()
+              yield* memory.journal(mission.id, null)
+              least = Math.min(least, performance.now() - started)
+            }
+            return least
+          })
+          let small = 0
           // Ten transactions of a thousand: one insert of SQLite takes so many values at most.
           for (let thousand = 0; thousand < 10; thousand += 1) {
             yield* mutate('writing many lines', () =>
@@ -258,13 +271,12 @@ describe('The Journal is a projection of the domain events', () => {
                 })),
               }),
             )
+            if (thousand === 0) small = yield* cheapest
           }
-          const memory = yield* Memory
-          yield* memory.catchUp
-          const started = performance.now()
+          const large = yield* cheapest
           const first = yield* memory.journal(mission.id, null)
           const second = yield* memory.journal(mission.id, first.before)
-          return { first, second, millis: performance.now() - started }
+          return { first, second, small, large }
         }),
       ),
     )
@@ -272,7 +284,11 @@ describe('The Journal is a projection of the domain events', () => {
     expect(pages.first.lines[0]?.text).toBe('line 9999')
     expect(pages.second.lines).toHaveLength(JOURNAL_PAGE)
     expect(pages.second.lines[0]?.text).toBe('line 9949')
-    expect(pages.millis).toBeLessThan(500)
+    // A page is read by its index and its limit, not by the length of the Journal: ten times the
+    // lines costs less than twice as much, where a read of all of them costs four to seven times more.
+    // Measured alone the ratio is 0.5 to 0.7. A ratio, not a duration, so the machine's speed does
+    // not enter.
+    expect(pages.large / pages.small).toBeLessThan(2)
   })
 })
 

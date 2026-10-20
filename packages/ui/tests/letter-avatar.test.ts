@@ -10,7 +10,7 @@ import {
   LETTER_TONES,
   initialsOf,
   letterToneOf,
-} from '../src/components/letter-avatar/letter-avatar.tsx'
+} from '../src/components/letter-avatar/letter-names.ts'
 
 describe('The letters of an avatar', () => {
   test('a name alone with its first letter wears that letter, in capitals', () => {

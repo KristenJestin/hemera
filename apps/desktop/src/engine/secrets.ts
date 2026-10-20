@@ -15,7 +15,15 @@
  * query string, a path, a longer token) through, so the rule is on the value, not on the match.
  */
 
-import { MAIN_CHECKOUT_NAME, type Masked, maskRecord, maskText } from '@hemera/core/domain'
+import {
+  type FixedFields,
+  MAIN_CHECKOUT_NAME,
+  type Masked,
+  maskArguments,
+  maskPrinted,
+  maskPrintedPaced,
+  maskRecord,
+} from '@hemera/core/domain'
 import { and, eq, isNull } from 'drizzle-orm'
 import { Context, Effect } from 'effect'
 import type { Schema } from 'effect'
@@ -36,10 +44,28 @@ export interface SecretsRegistry {
   readonly unregister: (source: string) => void
   /** Every value registered now, once each. */
   readonly values: () => ReadonlyArray<string>
-  /** Text with every registered value masked, then the shapes of credentials. */
+  /**
+   * Text with every registered value and every shape of credential masked. A text that is JSON,
+   * whole or line by line, is masked as JSON and stays JSON (`maskPrinted`): a serialized value
+   * is never masked as plain text, where a quoted value inside a JSON string leaked and broke it.
+   * A text that is not JSON is masked as plain text masks it.
+   */
   readonly mask: (text: string) => Masked<string>
-  /** A structured value with every string in it masked, and its credential fields whole. */
-  readonly maskRecord: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
+  /** As `mask`, in slices of time: the engine answers while a long text is masked. */
+  readonly maskPaced: (text: string) => Effect.Effect<Masked<string>>
+  /**
+   * What a CLI printed, masked at least as the text whole would be, and still JSON where it was;
+   * in slices of time, as `maskPaced`.
+   */
+  readonly maskPrinted: (text: string) => Effect.Effect<Masked<string>>
+  /**
+   * A structured value the engine builds, with every string in it masked, and its credential
+   * fields whole; its names and tags kept, as its schema reads them back, and the fields `fixed`
+   * lists when they hold a literal it allows (#416).
+   */
+  readonly maskRecord: (record: Schema.JsonObject, fixed?: FixedFields) => Masked<Schema.JsonObject>
+  /** The arguments an agent sent, masked as `maskRecord` masks a record, their names and tags too. */
+  readonly maskArguments: (record: Schema.JsonObject) => Masked<Schema.JsonObject>
 }
 
 /**
@@ -65,12 +91,38 @@ export function secretsRegistry(): SecretsRegistry {
       sources.delete(source)
     },
     values,
-    mask: (text) => maskText(text, values()),
-    maskRecord: (record) => maskRecord(record, values()),
+    mask: (text) => maskPrinted(text, values()),
+    maskPaced: (text) => maskPrintedPaced(text, values()),
+    maskPrinted: (text) => maskPrintedPaced(text, values()),
+    maskRecord: (record, fixed) => maskRecord(record, values(), fixed),
+    maskArguments: (record) => maskArguments(record, values()),
   }
 }
 
 export class Secrets extends Context.Service<Secrets, SecretsRegistry>()('Secrets') {}
+
+/** How far past what is kept the head of a long text is masked: past any credential cut in two. */
+const HEAD_MARGIN = 4096
+
+/**
+ * The first `kept` characters of a text as they read masked, without masking the whole of a large
+ * one (a call's arguments, a minified line, #392): a head two margins longer is masked in slices
+ * of time, then one margin is dropped from its end. A value or a credential the cut split in two
+ * is no longer recognised, and stays in clear; it is the last characters of the head, masked or
+ * not, so the margin takes it away. The margin is longer than any credential masked by its shape,
+ * and than the longest value registered; the second one leaves `kept` characters whole unless the
+ * masks shortened the head by more than a margin, and then fewer are kept, never a piece in clear.
+ */
+export const maskedHead = (secrets: SecretsRegistry, text: string, kept: number) =>
+  Effect.gen(function* () {
+    const margin = Math.max(HEAD_MARGIN, ...secrets.values().map((value) => value.length))
+    const whole = text.length <= kept + 2 * margin
+    const masked = yield* secrets.maskPaced(whole ? text : text.slice(0, kept + 2 * margin))
+    const safe = whole ? masked.length : Math.max(0, masked.length - margin)
+    return masked.length <= kept && whole
+      ? masked
+      : secrets.mask(masked.slice(0, Math.min(kept, safe)))
+  })
 
 /** The source of a Project's own variables, or of a Workspace's. */
 export const variablesSource = (projectId: string, workspaceId: string | null): string =>
