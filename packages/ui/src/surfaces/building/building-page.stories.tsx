@@ -207,7 +207,8 @@ export const Services: Story = {
     )
     const body = within(document.body)
     const search = await waitFor(() => body.getByRole('combobox', { name: 'Search the catalogue' }))
-    await expect(search).toHaveFocus()
+    // The popover moves the focus once it has opened, after the input exists.
+    await waitFor(() => expect(search).toHaveFocus())
     await userEvent.type(search, 'mail')
     const list = body.getByRole('listbox', { name: 'The catalogue' })
     await expect(within(list).getAllByRole('option')).toHaveLength(2)
@@ -235,16 +236,16 @@ export const CataloguePicker: Story = {
     const list = await waitFor(() => body.getByRole('listbox', { name: 'The catalogue' }))
     await expect(within(list).getAllByRole('option')).toHaveLength(20)
     const search = body.getByRole('combobox', { name: 'Search the catalogue' })
+    await waitFor(() => expect(search).toHaveFocus())
     await userEvent.type(search, 'compose up m')
     await expect(within(list).getAllByRole('option')).toHaveLength(4)
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expect(args.onService).toHaveBeenCalledWith('minio', 'start')
     const action = canvas.getByRole('button', { name: 'Start a service from the catalogue…' })
     await userEvent.click(action)
-    await userEvent.type(
-      await waitFor(() => body.getByRole('combobox', { name: 'Search the catalogue' })),
-      'mail',
-    )
+    const again = await waitFor(() => body.getByRole('combobox', { name: 'Search the catalogue' }))
+    await waitFor(() => expect(again).toHaveFocus())
+    await userEvent.type(again, 'mail')
     // It hangs against its action's edge, as wide as the fold: never shifted onto the spine.
     const panel = body.getByRole('dialog', { name: 'Start a service from the catalogue' })
     const fold = within(canvasElement)
