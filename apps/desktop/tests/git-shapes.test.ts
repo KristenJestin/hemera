@@ -324,11 +324,24 @@ describe('An index that cannot be read for its submodules is said, never read as
     expect(said?.text).toContain('larger than')
   })
 
-  test('a linked index is said: it is never followed', () => {
+  test('a linked index is said, and the index it leads to is read for its submodules, as Git follows it (#500)', () => {
     const { main, index } = indexed()
     renameSync(index, join(work, 'index'))
     symlinkSync(join(work, 'index'), index)
-    expect(saidOf(main)?.text).toContain('a link, never followed')
+    expect(saidOf(main)?.text).toContain('a link')
+    expect(paths([main])).toContain(join(main, 'vendor', '.git', 'config'))
+  })
+
+  test('a linked index leading to one it cannot read is said apart from one it reads (#500)', () => {
+    const { main, index } = indexed()
+    renameSync(index, join(work, 'index'))
+    symlinkSync(join(work, 'index'), index)
+    const read = saidOf(main)
+    writeFileSync(join(work, 'index'), 'not an index\n')
+    const unread = saidOf(main)
+    expect(unread?.text).toContain('does not know')
+    expect(unread?.digest).not.toBe(read?.digest)
+    expect(paths([main])).not.toContain(join(main, 'vendor', '.git', 'config'))
   })
 
   test.each([

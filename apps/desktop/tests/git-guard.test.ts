@@ -1495,6 +1495,35 @@ describe('An index the guard cannot read for its submodules asks, never taken as
   })
 })
 
+describe('The Git guard’s follow-ups after #499 (#500)', () => {
+  /** A clean filter: a program Git runs on the files of a checkout, `git status` included. */
+  const FILTER = '[filter "x"]\n\tclean = sh ./gotcha.sh\n'
+
+  test('1. a linked index allowed once: a clean filter written afterwards into the config of an embedded repository it names stops the engine’s Git', async () => {
+    const result = await withBuilder(({ main }) =>
+      Effect.gen(function* () {
+        repository(join(main, 'vendor'))
+        git(main, 'add', 'vendor')
+        git(main, 'commit', '-q', '-m', 'vendor')
+        yield* engineStatus(main)
+        const index = join(main, '.git', 'index')
+        renameSync(index, join(work, 'index'))
+        symlinkSync(join(work, 'index'), index)
+        const held = yield* engineStatus(main)
+        const [first] = yield* asked
+        if (first !== undefined) yield* allow(first)
+        const allowed = yield* engineStatus(main)
+        appendFileSync(join(main, 'vendor', '.git', 'config'), FILTER)
+        return { held, allowed, status: yield* engineStatus(main), needs: yield* asked }
+      }),
+    )
+    expect(result.held).toContain('Hemera stopped its Git')
+    expect(result.allowed).toBe('ran')
+    expect(result.status).toContain('Hemera stopped its Git')
+    expect(shown(result.needs[0])).toContain('~/acme/vendor/.git/config')
+  })
+})
+
 describe('The engine’s Git that talks to a remote names its remote and refspec (#470)', () => {
   test('an upstream pointed at another repository, taken without asking, never moves the engine’s fetch: it fetches the remote it names', async () => {
     const result = await withBuilder(({ main }) =>
