@@ -154,13 +154,16 @@ const configNames = new Map<
   }
 >()
 
-/** The submodules an index names, by its path, with the stat it had: read again once it changed. */
+/**
+ * The submodules an index names, by its path, with the stat it had: read again once it changed. Only
+ * a read that succeeded is kept: one that failed for a moment (a lock) is tried again (#500).
+ */
 const indexed = new Map<
   string,
   {
     readonly stat: string
     readonly settled: boolean
-    readonly read: Gitlinks
+    readonly gitlinks: ReadonlyArray<string>
   }
 >()
 
@@ -375,8 +378,8 @@ function indexOf(bytes: Buffer, hash: number): IndexRead | null {
 
 /**
  * The submodules the index of a Git folder names, and its shared index's, if a split index, or why
- * it could not be read for them (not a file, past `INDEX_CAP`, an error, not parsed); read again
- * only once the index's stat changed, as a hooks folder's files are. A Git folder with no index
+ * it could not be read for them (not a file, past `INDEX_CAP`, an error, not parsed); once read,
+ * read again only once the index's stat changed, as a hooks folder's files are. A Git folder with no index
  * names none, as Git reads it. A linked index is said, so it asks once, and since Git follows it,
  * the index it leads to is read for what Git walks into, every time: it can be rewritten behind
  * the link's own stat (#500).
@@ -408,11 +411,15 @@ function gitlinksAt(gitDir: string, hash: number, statOf: StatOf): IndexNames {
   }
   const stat = statKey(named)
   const known = indexed.get(path)
-  if (known !== undefined && known.settled && known.stat === stat) return said(known.read, false)
+  if (known !== undefined && known.settled && known.stat === stat) {
+    return said(Result.succeed(known.gitlinks), false)
+  }
   const settled = settledOf(named)
   const read = readGitlinks(gitDir, path, named, hash)
-  if (indexed.size >= REMEMBERED) indexed.clear()
-  indexed.set(path, { stat, settled, read })
+  if (Result.isSuccess(read)) {
+    if (indexed.size >= REMEMBERED) indexed.clear()
+    indexed.set(path, { stat, settled, gitlinks: read.success })
+  }
   return said(read, false)
 }
 

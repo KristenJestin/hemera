@@ -394,6 +394,25 @@ describe('An index that cannot be read for its submodules is said, never read as
     expect(saidOf(main, locked)?.text).toContain('EBUSY')
   })
 
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a read of the index that failed once (its access refused, as a lock would) is tried again at the next fingerprint, its stat unchanged (#500)',
+    () => {
+      const { main, index } = indexed()
+      // The index's stat as it stood seconds ago, the same at every fingerprint: settled.
+      const real = lstatSync(index, { bigint: true })
+      const frozen = statsWith(index, () => ({
+        mode: real.mode,
+        mtimeNs: real.mtimeNs - 10_000_000_000n,
+        ctimeNs: real.ctimeNs - 10_000_000_000n,
+      }))
+      chmodSync(index, 0o000)
+      const locked = saidOf(main, frozen)
+      chmodSync(index, 0o644)
+      expect(locked?.text).toContain('EACCES')
+      expect(saidOf(main, frozen)).toBeUndefined()
+    },
+  )
+
   test('an unreadable index is said the same way each time, so it asks once', () => {
     const { main, index } = indexed()
     writeFileSync(index, 'not an index\n')
