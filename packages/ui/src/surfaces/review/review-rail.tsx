@@ -49,6 +49,7 @@ import type {
   Check,
   Proof,
   PullRequest,
+  Rerun,
   ReviewMoment,
   Round,
   Service,
@@ -103,13 +104,28 @@ export function ReviewCard({
   )
 }
 
-/** What Ship re-runs before it pushes, one line each, a red one with the end of its output. */
+/**
+ * What Ship re-runs before it pushes, one line each, a red one with the end of its output; it
+ * unfolds as Ship starts, pushing the rail down.
+ */
 export function Reruns({ moment }: { moment: ReviewMoment }): ReactNode {
-  if (moment.shipping === undefined) return null
+  const { shipping } = moment
+  return (
+    <Unfolding open={shipping !== undefined}>
+      {shipping !== undefined && (
+        <div className="pt-6">
+          <RerunList reruns={shipping.reruns} />
+        </div>
+      )}
+    </Unfolding>
+  )
+}
+
+function RerunList({ reruns }: { reruns: readonly Rerun[] }): ReactNode {
   return (
     <Frame>
       <ul aria-label="Re-run before pushing" className="flex flex-col py-1">
-        {moment.shipping.reruns.map((rerun) => (
+        {reruns.map((rerun) => (
           <li key={rerun.id} className="flex flex-col">
             <div className={ROW}>
               <StatusMark state={rerun.state} size="sm" legend />

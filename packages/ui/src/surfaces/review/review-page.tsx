@@ -39,10 +39,13 @@ export function ReviewPage({
   return (
     <div className={COLUMNS} data-stage="review">
       <aside aria-label="What happens" className={RAIL}>
-        <ReviewCard moment={moment} loading={loading} />
+        {/* The re-runs unfold under the card with their own gap, so nothing jumps before them. */}
+        <div className="flex flex-col">
+          <ReviewCard moment={moment} loading={loading} />
+          {!loading && <Reruns moment={moment} />}
+        </div>
         {!loading && (
           <>
-            <Reruns moment={moment} />
             <ForYou moment={moment} handlers={rail} mentionables={mentionables} />
             <TheRest moment={moment} handlers={rail} />
           </>

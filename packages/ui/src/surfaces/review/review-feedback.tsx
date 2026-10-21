@@ -1,4 +1,5 @@
 import { cn } from 'cn'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ClipboardEvent, type DragEvent, type ReactNode, useId, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -18,6 +19,7 @@ import {
   IconPhoto,
   IconX,
 } from '../../icons.ts'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
   Chevron,
   ID,
@@ -325,8 +327,16 @@ export function RemarkLine({
   const [following, setFollowing] = useState(false)
   const quiet = remark.state === 'resolved' || remark.state === 'withdrawn'
   const kept = (remark.images ?? []).length
+  const folding = useTransition(fold)
   return (
-    <li className="flex flex-col border-b border-border last:border-b-0">
+    // A remark written grows into its list, pushing what is under it.
+    <motion.li
+      className="flex flex-col overflow-hidden border-b border-border last:border-b-0"
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
       <div className={MARKED}>
         <Legend label={remarkLegend(remark)}>
           <StatusMark state={MARK[remark.state]} size="sm" />
@@ -449,7 +459,7 @@ export function RemarkLine({
           )}
         </div>
       </Unfolding>
-    </li>
+    </motion.li>
   )
 }
 
@@ -565,14 +575,16 @@ function RoundGroup({
       </div>
       <Unfolding open={open}>
         <ul aria-label={name} className="flex flex-col border-t border-border">
-          {remarks.map((remark) => (
-            <RemarkLine
-              key={remark.id}
-              remark={remark}
-              handlers={handlers}
-              mentionables={mentionables}
-            />
-          ))}
+          <AnimatePresence initial={false}>
+            {remarks.map((remark) => (
+              <RemarkLine
+                key={remark.id}
+                remark={remark}
+                handlers={handlers}
+                mentionables={mentionables}
+              />
+            ))}
+          </AnimatePresence>
         </ul>
       </Unfolding>
     </Frame>
@@ -633,22 +645,21 @@ export function Feedback({
         title="Feedback"
         count={loading ? undefined : remarks.filter((one) => one.state !== 'withdrawn').length}
       />
-      <Frame>
-        <div className="px-4 py-3">
-          <Composer
-            mentionables={mentionables}
-            onAdd={handlers.onAdd}
-            onAttach={handlers.onAttach}
-            onOpenDiff={() => handlers.onOpenDiff('')}
-          />
-        </div>
-      </Frame>
-      {loading ? (
-        <SkeletonRows />
-      ) : (
-        <>
-          {waiting.length > 0 && (
-            <div className="flex flex-col gap-2">
+      {/* The next round unfolds under the composer with its own gap, so nothing jumps first. */}
+      <div className="flex flex-col">
+        <Frame>
+          <div className="px-4 py-3">
+            <Composer
+              mentionables={mentionables}
+              onAdd={handlers.onAdd}
+              onAttach={handlers.onAttach}
+              onOpenDiff={() => handlers.onOpenDiff('')}
+            />
+          </div>
+        </Frame>
+        {!loading && (
+          <Unfolding open={waiting.length > 0}>
+            <div className="flex flex-col gap-2 pt-4">
               <div className="flex min-h-control-md items-center gap-3">
                 <h3 className="text-sm font-semibold">Next round</h3>
                 <span className={QUIET}>{plural(waiting.length, 'waits', 'wait')} to be sent</span>
@@ -660,29 +671,35 @@ export function Feedback({
               </div>
               <Frame>
                 <ul aria-label="Next round" className="flex flex-col">
-                  {waiting.map((remark) => (
-                    <RemarkLine
-                      key={remark.id}
-                      remark={remark}
-                      handlers={handlers}
-                      mentionables={mentionables}
-                    />
-                  ))}
+                  <AnimatePresence initial={false}>
+                    {waiting.map((remark) => (
+                      <RemarkLine
+                        key={remark.id}
+                        remark={remark}
+                        handlers={handlers}
+                        mentionables={mentionables}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </ul>
               </Frame>
             </div>
-          )}
-          {rounds.map((round, at) => (
-            <RoundGroup
-              key={round.n}
-              round={round}
-              remarks={remarks.filter((one) => one.round === round.n && one.state !== 'waiting')}
-              handlers={handlers}
-              mentionables={mentionables}
-              initiallyOpen={at === 0}
-            />
-          ))}
-        </>
+          </Unfolding>
+        )}
+      </div>
+      {loading ? (
+        <SkeletonRows />
+      ) : (
+        rounds.map((round, at) => (
+          <RoundGroup
+            key={round.n}
+            round={round}
+            remarks={remarks.filter((one) => one.round === round.n && one.state !== 'waiting')}
+            handlers={handlers}
+            mentionables={mentionables}
+            initiallyOpen={at === 0}
+          />
+        ))
       )}
     </section>
   )
