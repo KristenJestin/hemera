@@ -9,6 +9,7 @@ import {
   ImageRefused,
   ProofRefused,
   type BuildingView,
+  type MissionPushes,
   type ProofsView,
   type ReviewChange,
 } from '@hemera/ipc'
@@ -21,10 +22,13 @@ import { SILENT_LINK } from './fake-link.ts'
 import {
   feedback,
   proofsView,
+  pushes,
   question,
+  repositoryPush,
   reviewState,
   roundDetail,
   shipPreview,
+  teamComment,
 } from './review-fixtures.ts'
 
 const MISSION = { id: 'm12', projectId: 'acme', frozenAt: null }
@@ -363,5 +367,69 @@ describe('A round over the page', () => {
     await following.answer('Q7', { optionId: 'A' })
     expect(sent).toEqual(['m12 Q7 A'])
     expect(waves).toBe(before + 1)
+  })
+})
+
+describe('The pull requests and the team’s comments', () => {
+  test('the pushes keep live on their stream, a failed one is retried by its repository', async () => {
+    const listeners: Array<(heard: MissionPushes) => void> = []
+    const retried: string[] = []
+    const played = linkOf({
+      onPushes: (_missionId, listener) => {
+        listeners.push(listener)
+        return () => undefined
+      },
+      retryPush: (missionId, repository) => {
+        retried.push(`${missionId} ${repository}`)
+        return Promise.resolve(pushes())
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    for (const listener of listeners) {
+      listener(pushes({ repositories: [repositoryPush({ state: 'failed', pullRequest: null })] }))
+    }
+    expect(last()?.moment?.pulls.map((one) => [one.repository, one.state])).toEqual([
+      ['api', 'failed'],
+    ])
+    await following.pull('api', 'retry')
+    expect(retried).toEqual(['m12 api'])
+  })
+
+  test('a comment of the team is listed, read again on its change, and joins the round with my take', async () => {
+    const listeners: Array<() => void> = []
+    const sent: string[] = []
+    let lists = 0
+    const played = linkOf({
+      teamComments: () => {
+        lists += 1
+        return Promise.resolve([teamComment()])
+      },
+      onTeamComments: (_missionId, listener) => {
+        listeners.push(() => listener({ missionId: 'm12' }))
+        return () => undefined
+      },
+      takeTeamComment: (commentId, myTake) => {
+        sent.push(`take ${commentId} ${myTake}`)
+        return Promise.resolve(teamComment({ myTake }))
+      },
+      addTeamCommentToRound: (commentId) => {
+        sent.push(`round ${commentId}`)
+        return Promise.resolve(teamComment({ state: 'feedback' }))
+      },
+      dismissTeamComment: (commentId) => {
+        sent.push(`dismiss ${commentId}`)
+        return Promise.resolve(teamComment({ state: 'dismissed' }))
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    expect(last()?.moment?.team.map((one) => one.id)).toEqual(['C1'])
+    for (const listener of listeners) listener()
+    await settled()
+    expect(lists).toBe(2)
+    await following.team('C1', 'round', 'One per user.')
+    await following.team('C1', 'dismiss', '')
+    expect(sent).toEqual(['take tc-1 One per user.', 'round tc-1', 'dismiss tc-1'])
   })
 })

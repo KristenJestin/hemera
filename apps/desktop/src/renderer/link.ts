@@ -29,7 +29,10 @@ import {
   type MissionService,
   type ImageAdded,
   type MissionFromSource,
+  type MissionPushes,
   type PrelaunchView,
+  type TeamCommentView,
+  type TeamCommentsChange,
   type RoundDetailView,
   type ProofsView,
   type ScenarioProofView,
@@ -806,6 +809,26 @@ export interface Link {
     scenarioId: string,
     note: string,
   ) => Promise<ScenarioProofView>
+  /** The mission's pushes and pull requests now, then after each change. */
+  readonly onPushes: (
+    missionId: string,
+    listener: (pushes: MissionPushes) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Runs a failed or indeterminate repository's push again, doing only what is not yet true. */
+  readonly retryPush: (missionId: string, repository: string) => Promise<MissionPushes>
+  /** The team's comments on the mission's pull requests. */
+  readonly teamComments: (missionId: string) => Promise<ReadonlyArray<TeamCommentView>>
+  /** Each change of the team's comments, to read them again. */
+  readonly onTeamComments: (
+    missionId: string,
+    listener: (change: TeamCommentsChange) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The user's own take on a comment, which weighs more than the agent's reading. */
+  readonly takeTeamComment: (commentId: string, myTake: string) => Promise<TeamCommentView>
+  readonly addTeamCommentToRound: (commentId: string) => Promise<TeamCommentView>
+  readonly dismissTeamComment: (commentId: string) => Promise<TeamCommentView>
   /** What Ship would do now, and whether it may: the engine's reasons when it may not. */
   readonly shipPreview: (missionId: string) => Promise<ShipPreview>
   /** What was allowed for the mission, the revoked and fallen grants included. */
@@ -1311,6 +1334,19 @@ export function linkOver(port: Port): Link {
     refuseManualProof: (missionId, scenarioId, note) =>
       call((ready) => ready['proofs.refuseManual']({ missionId, scenarioId, note })),
     shipPreview: (missionId) => call((ready) => ready['ship.preview']({ missionId })),
+    onPushes: (missionId, listener, onEnd) =>
+      follow((ready) => ready['delivery.changes']({ missionId }), listener, anError, onEnd),
+    retryPush: (missionId, repository) =>
+      call((ready) => ready['delivery.retry']({ missionId, repository })),
+    teamComments: (missionId) => call((ready) => ready['teamComments.list']({ missionId })),
+    onTeamComments: (missionId, listener, onEnd) =>
+      follow((ready) => ready['teamComments.changes']({ missionId }), listener, anError, onEnd),
+    takeTeamComment: (commentId, myTake) =>
+      call((ready) => ready['teamComments.take']({ commentId, myTake })),
+    addTeamCommentToRound: (commentId) =>
+      call((ready) => ready['teamComments.addToRound']({ commentId })),
+    dismissTeamComment: (commentId) =>
+      call((ready) => ready['teamComments.dismiss']({ commentId })),
     close: () => {
       Effect.runFork(Scope.close(scope, Exit.void))
     },

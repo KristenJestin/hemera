@@ -38,6 +38,8 @@ export function useReview(
       acceptProposed: (proposalId, text) =>
         sent((following) => following.acceptProposed(proposalId, text)),
       dismissProposed: (proposalId) => sent((following) => following.dismissProposed(proposalId)),
+      pull: (repository, action) => sent((following) => following.pull(repository, action)),
+      team: (label, action, take) => sent((following) => following.team(label, action, take)),
       retry: () => current()?.retry(),
     },
   ]

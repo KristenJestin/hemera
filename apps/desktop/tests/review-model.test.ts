@@ -24,10 +24,13 @@ import {
 import {
   feedback,
   proofsView,
+  pushes,
   question,
+  repositoryPush,
   reviewState,
   roundDetail,
   shipPreview,
+  teamComment,
 } from './review-fixtures.ts'
 
 const read = (more: Partial<ReviewRead> = {}): ReviewRead => ({
@@ -78,6 +81,7 @@ const read = (more: Partial<ReviewRead> = {}): ReviewRead => ({
   team: [],
   preview: null,
   progress: null,
+  forges: [],
   ...more,
 })
 
@@ -599,6 +603,152 @@ describe('A round, as a small Spec', () => {
     const shown = moment.rounds[0]
     expect(shown?.building).toBe('1 of 2 tasks done')
     expect(shown?.points.map((one) => one.state)).toEqual(['done', 'running'])
+  })
+})
+
+describe('The pull requests', () => {
+  test('each repository’s push as it stands, its CI from Ship’s preview, a failure in its words', () => {
+    const moment = reviewMomentOf(
+      read({
+        pushes: pushes({
+          repositories: [
+            repositoryPush(),
+            repositoryPush({
+              repositoryId: 'repo-web',
+              repository: 'web',
+              state: 'failed',
+              message: 'remote: Permission to acme/web denied.',
+              commit: null,
+              pushedAt: null,
+              pullRequest: null,
+            }),
+            repositoryPush({
+              repositoryId: 'repo-billing',
+              repository: 'billing',
+              state: 'waiting-for-cli',
+              waitingFor: 'gh',
+              pullRequest: null,
+            }),
+            repositoryPush({
+              repositoryId: 'repo-shared',
+              repository: 'shared',
+              state: 'indeterminate',
+              pullRequest: null,
+            }),
+          ],
+        }),
+        preview: shipPreview({
+          repositories: [
+            {
+              repository: 'api',
+              branch: 'feat/acme-12',
+              files: [],
+              toRedo: { proofs: [], checks: [] },
+              pullRequest: {
+                number: 412,
+                url: 'https://github.com/acme/api/pull/412',
+                ci: 'pending',
+              },
+            },
+          ],
+        }),
+      }),
+      NOW,
+    )
+    expect(moment.pulls).toEqual([
+      {
+        repository: 'api',
+        state: 'open',
+        number: 412,
+        url: 'https://github.com/acme/api/pull/412',
+        ci: 'running',
+      },
+      { repository: 'web', state: 'failed', message: 'remote: Permission to acme/web denied.' },
+      { repository: 'billing', state: 'signedOut', command: 'gh auth login' },
+      { repository: 'shared', state: 'failed' },
+    ])
+    expect(moment.forge).toBe('GitHub')
+  })
+
+  test('the forge is the Project’s, before any pull request; none with the Local preset', () => {
+    const forge = (name: 'github' | 'bitbucket-cloud') => ({
+      repositoryId: 'repo-api',
+      path: 'api',
+      forge: name,
+      host: null,
+      owner: null,
+      slug: null,
+      forced: false,
+      cli: 'gh' as const,
+      version: null,
+      state: 'ready' as const,
+      fix: null,
+      detail: null,
+    })
+    expect(reviewMomentOf(read({ forges: [forge('bitbucket-cloud')] }), NOW).forge).toBe(
+      'Bitbucket',
+    )
+    expect(
+      reviewMomentOf(
+        read({ forges: [forge('github')], preview: shipPreview({ delivered: { at: at(11, 0) } }) }),
+        NOW,
+      ).forge,
+    ).toBeNull()
+  })
+})
+
+describe('The team’s comments', () => {
+  test('each is named in its order, with where it was written, the agent’s reading and the reply', () => {
+    const moment = reviewMomentOf(
+      read({
+        team: [
+          teamComment({
+            id: 'tc-2',
+            createdAt: at(10, 50),
+            kind: 'inline',
+            anchor: {
+              repository: 'api',
+              path: 'src/export.ts',
+              side: 'new',
+              lines: { start: 88, end: 88 },
+              commit: null,
+              known: true,
+              excerpt: null,
+              live: null,
+            },
+            state: 'feedback',
+            myTake: 'One per user.',
+          }),
+          teamComment({ kind: 'general' }),
+        ],
+      }),
+      NOW,
+    )
+    expect(moment.team).toEqual([
+      {
+        id: 'C1',
+        author: 'ana.lopez',
+        anchor: 'the pull request',
+        text: 'Two exports at once would both hit the database.',
+        reading: 'Asks for a limit on concurrent exports.',
+        draft: 'Good catch: one export per user at a time.',
+        state: 'new',
+        url: 'https://github.com/acme/api/pull/412#discussion_r9001',
+        at: '10:40',
+      },
+      {
+        id: 'C2',
+        author: 'ana.lopez',
+        anchor: 'api/src/export.ts:88',
+        text: 'Two exports at once would both hit the database.',
+        reading: 'Asks for a limit on concurrent exports.',
+        draft: 'Good catch: one export per user at a time.',
+        state: 'inRound',
+        take: 'One per user.',
+        url: 'https://github.com/acme/api/pull/412#discussion_r9001',
+        at: '10:50',
+      },
+    ])
   })
 })
 

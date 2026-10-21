@@ -14,6 +14,7 @@ import type {
   BuildingView,
   Command,
   FeedbackView,
+  ForgeRepositoryStatus,
   MissionDiff,
   MissionPushes,
   MissionService,
@@ -53,6 +54,8 @@ export interface ReviewRead {
   readonly team: ReadonlyArray<TeamCommentView>
   readonly preview: ShipPreview | null
   readonly progress: ShipProgress | null
+  /** The forge of each repository of the Project, as the delivery rules detect it. */
+  readonly forges: ReadonlyArray<ForgeRepositoryStatus>
 }
 
 const TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -401,6 +404,114 @@ function roundsOf(read: ReviewRead, now: Date): Review.Round[] {
     .sort((one, other) => other.n - one.n)
 }
 
+// --- The pull requests and the team's comments -----------------------------------------------
+
+type PushRead = MissionPushes['repositories'][number]
+
+const CI_MARKS = {
+  passing: 'done',
+  failing: 'failed',
+  pending: 'running',
+  none: undefined,
+} as const satisfies Record<string, MarkState | undefined>
+
+function pullStateOf(push: PushRead): Review.PullRequest['state'] {
+  switch (push.state) {
+    case 'waiting-for-click':
+    case 'declined':
+      return 'click'
+    case 'running':
+      return 'running'
+    case 'waiting-for-cli':
+      return 'signedOut'
+    case 'failed':
+    case 'indeterminate':
+      return 'failed'
+    case 'done':
+      return push.pullRequest?.state === 'merged' ? 'merged' : 'open'
+  }
+}
+
+/** Each repository's push and pull request as they stand; the CI is what Ship's preview read. */
+function pullsOf(read: ReviewRead): Review.PullRequest[] {
+  return (read.pushes?.repositories ?? []).map((push) => {
+    const ci = read.preview?.repositories.find((one) => one.repository === push.repository)
+      ?.pullRequest?.ci
+    const fix = read.forges.find((one) => one.repositoryId === push.repositoryId)?.fix ?? null
+    return {
+      repository: push.repository,
+      state: pullStateOf(push),
+      number: push.pullRequest?.number,
+      url: push.pullRequest?.url,
+      ci: ci === undefined || ci === null ? undefined : CI_MARKS[ci],
+      message: push.message ?? undefined,
+      command:
+        push.state === 'waiting-for-cli' && push.waitingFor !== null
+          ? (fix ?? `${push.waitingFor} auth login`)
+          : undefined,
+      images:
+        push.images.length === 0
+          ? undefined
+          : {
+              published: push.images.some((one) => one.state === 'published'),
+              names: push.images.map((one) => one.name),
+            },
+      step: push.state === 'running' ? (push.step ?? undefined) : undefined,
+    }
+  })
+}
+
+const forgeWordsOf = (forge: string): Review.ReviewMoment['forge'] => {
+  if (forge === 'github') return 'GitHub'
+  if (forge === 'bitbucket-cloud' || forge === 'bitbucket-datacenter') return 'Bitbucket'
+  return null
+}
+
+/** The forge the pull requests go to: none with the Local preset, where Ship marks delivered. */
+function forgeOf(read: ReviewRead): Review.ReviewMoment['forge'] {
+  if (read.preview?.delivered !== null && read.preview?.delivered !== undefined) return null
+  const named = [
+    ...(read.pushes?.repositories ?? []).flatMap((one) =>
+      one.pullRequest === null ? [] : [one.pullRequest.forge],
+    ),
+    ...read.team.map((one) => one.forge),
+    ...read.forges.map((one) => one.forge),
+  ]
+  for (const forge of named) {
+    const words = forgeWordsOf(forge)
+    if (words !== null) return words
+  }
+  return null
+}
+
+const TEAM_STATES = {
+  received: 'new',
+  feedback: 'inRound',
+  dismissed: 'dismissed',
+} as const satisfies Record<TeamCommentView['state'], Review.TeamComment['state']>
+
+/** The team's comments in the order they were written: the page names them `C1`, `C2`… */
+export const teamInOrder = (team: ReadonlyArray<TeamCommentView>): TeamCommentView[] =>
+  team.toSorted((one, other) => one.createdAt.localeCompare(other.createdAt))
+
+function teamOf(team: ReadonlyArray<TeamCommentView>): Review.TeamComment[] {
+  return teamInOrder(team).map((one, index) => ({
+    id: `C${String(index + 1)}`,
+    author: one.author,
+    anchor:
+      one.anchor === null
+        ? 'the pull request'
+        : `${one.anchor.repository}/${one.anchor.path}${one.anchor.lines === null ? '' : `:${String(one.anchor.lines.start)}`}`,
+    text: one.body,
+    reading: one.reading ?? '',
+    draft: one.reply ?? '',
+    state: TEAM_STATES[one.state],
+    take: one.myTake ?? undefined,
+    url: one.url ?? undefined,
+    at: timeOf(one.createdAt),
+  }))
+}
+
 // --- The page --------------------------------------------------------------------------------
 
 const causeOf = Match.type<BlockedCause>().pipe(
@@ -483,9 +594,9 @@ export function reviewMomentOf(read: ReviewRead, now: Date): Review.ReviewMoment
     remarks,
     fixable: read.state?.fixable ?? false,
     rounds: roundsOf(read, now),
-    team: [],
-    pulls: [],
-    forge: null,
+    team: teamOf(read.team),
+    pulls: pullsOf(read),
+    forge: forgeOf(read),
     services: servicesOf(read),
     proofs: proofsOf(read),
     checks: checksOf(read),

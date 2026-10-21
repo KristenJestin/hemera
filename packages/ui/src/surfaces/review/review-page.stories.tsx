@@ -390,7 +390,10 @@ export const TeamComments: Story = {
     await expect(args.onOpenLink).toHaveBeenCalledWith(
       'https://github.com/acme/shop/pull/412#discussion_r1',
     )
-    await userEvent.type(forYou.getByRole('textbox', { name: 'My take on C1' }), 'One per user.')
+    await userEvent.type(
+      await forYou.findByRole('textbox', { name: 'My take on C1' }),
+      'One per user.',
+    )
     await userEvent.click(forYou.getByRole('button', { name: 'Add C1 to the round' }))
     await expect(args.onTeam).toHaveBeenCalledWith('C1', 'round', 'One per user.')
     await userEvent.click(forYou.getByRole('button', { name: /bram\.de-vries/ }))

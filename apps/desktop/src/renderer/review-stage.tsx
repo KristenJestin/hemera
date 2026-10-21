@@ -69,8 +69,8 @@ export function ReviewStage({
   const rail: RailHandlers = {
     onService: (name, action) => void act.service(name, action),
     onVerify: (id, verdict) => void act.verify(id, verdict),
-    onTeam: () => undefined,
-    onPull: () => undefined,
+    onTeam: (label, action, take) => void act.team(label, action, take),
+    onPull: (repository, action) => void act.pull(repository, action),
     onOpenDiff: () => open('diff'),
     onOpenLink: openLink,
     onCopy: copy,

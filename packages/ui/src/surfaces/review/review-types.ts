@@ -110,7 +110,8 @@ export interface TeamComment {
   state: 'new' | 'inRound' | 'dismissed' | 'resolved'
   /** The user's own take, which weighs more than the agent's reading. */
   take?: string | undefined
-  url: string
+  /** Its address on the forge, when the forge gave one. */
+  url?: string | undefined
   at: string
 }
 

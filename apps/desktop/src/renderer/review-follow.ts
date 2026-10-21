@@ -9,6 +9,7 @@ import type {
   AutoReviewView,
   BuildingView,
   Command,
+  ForgeRepositoryStatus,
   Mission,
   MissionDiff,
   MissionPushes,
@@ -28,7 +29,7 @@ import type { Attached, Mentionable, NewRemark, Review } from '@hemera/ui'
 import type { FollowedMission } from './building-follow.ts'
 import { mentionablesOf } from './chat-items.ts'
 import type { Link } from './link.ts'
-import { feedbackLabels, reviewMomentOf } from './review-model.ts'
+import { feedbackLabels, reviewMomentOf, teamInOrder } from './review-model.ts'
 import type { StartSeed } from './start-results.ts'
 
 /** What the Review page shows of its follower. */
@@ -69,6 +70,10 @@ export interface ReviewFollowing {
   readonly waitOnSomeone: (questionId: string, note: string | null) => Promise<void>
   readonly acceptProposed: (proposalId: string, text: string | null) => Promise<void>
   readonly dismissProposed: (proposalId: string) => Promise<void>
+  /** A failed push run again, or the forge's CLI checked again once the user signed in. */
+  readonly pull: (repository: string, action: 'retry' | 'check') => Promise<void>
+  /** A comment of the team added to the round or dismissed, with the user's take when given. */
+  readonly team: (label: string, action: 'round' | 'dismiss', take: string) => Promise<void>
   /** Reads again, after a failure. */
   readonly retry: () => void
   readonly stop: () => void
@@ -95,8 +100,9 @@ export function followReview(
   let catalogue: ReadonlyArray<Command> = []
   let missions: ReadonlyArray<Mission> = []
   let diff: MissionDiff | null = null
-  const pushes: MissionPushes | null = null
-  const team: ReadonlyArray<TeamCommentView> = []
+  let pushes: MissionPushes | null = null
+  let team: ReadonlyArray<TeamCommentView> = []
+  let forges: ReadonlyArray<ForgeRepositoryStatus> = []
   let preview: ShipPreview | null = null
   const progress: ShipProgress | null = null
   let error: string | undefined
@@ -127,6 +133,7 @@ export function followReview(
                 team,
                 preview,
                 progress,
+                forges,
               },
               clock(),
             ),
@@ -174,6 +181,14 @@ export function followReview(
       emit()
       return readDetails(read)
     }, failed)
+  const readTeam = (): Promise<void> =>
+    quietly(link.teamComments(missionId), (read) => {
+      team = read
+    })
+  const readForges = (): Promise<void> =>
+    quietly(link.forgeStatus(mission.projectId), (read) => {
+      forges = read
+    })
   const readWaves = (): Promise<void> =>
     quietly(link.waves(missionId), (read) => {
       waves = read
@@ -201,6 +216,20 @@ export function followReview(
   const start = (): void => {
     unsubscribe = [
       link.onReviewChanges(missionId, () => void readReview(), failed),
+      // The pushes come with their first state, then each change.
+      link.onPushes(
+        missionId,
+        (heard) => {
+          pushes = heard
+          emit()
+        },
+        () => undefined,
+      ),
+      link.onTeamComments(
+        missionId,
+        () => void readTeam(),
+        () => undefined,
+      ),
       // A round's questions are asked, answered and replaced as planning's are.
       link.onOpenQuestions(
         () => void readWaves(),
@@ -267,6 +296,8 @@ export function followReview(
     })
     void readServices()
     void readDiff()
+    void readTeam()
+    void readForges()
   }
 
   start()
@@ -339,6 +370,28 @@ export function followReview(
           emit()
           return null
         },
+      )
+    },
+    pull: (repository, action) => {
+      if (action === 'retry') {
+        return gesture(link.retryPush(missionId, repository), () => Promise.resolve())
+      }
+      const repositoryId =
+        pushes?.repositories.find((one) => one.repository === repository)?.repositoryId ?? null
+      return gesture(link.checkForgeAgain(mission.projectId, repositoryId), readForges)
+    },
+    team: (label, action, take) => {
+      const one = teamInOrder(team)[Number(label.slice(1)) - 1]
+      if (one === undefined) return Promise.resolve()
+      const taken =
+        take === '' || take === (one.myTake ?? '')
+          ? Promise.resolve()
+          : link.takeTeamComment(one.id, take).then(() => undefined)
+      return gesture(
+        taken.then(() =>
+          action === 'round' ? link.addTeamCommentToRound(one.id) : link.dismissTeamComment(one.id),
+        ),
+        () => Promise.all([readTeam(), readReview()]).then(() => undefined),
       )
     },
     service: (name, action) => {

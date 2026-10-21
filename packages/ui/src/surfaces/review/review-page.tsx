@@ -43,7 +43,7 @@ export function ReviewPage({
         {!loading && (
           <>
             <Reruns moment={moment} />
-            <ForYou moment={moment} handlers={rail} />
+            <ForYou moment={moment} handlers={rail} mentionables={mentionables} />
             <TheRest moment={moment} handlers={rail} />
           </>
         )}
