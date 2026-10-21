@@ -457,16 +457,21 @@ describe('An index that cannot be read for its submodules is said, never read as
   ] as const
 
   describe.each(indexes)('%s Git replaces while it is read (#533)', (_, made) => {
-    test.each([1, 3])('replaced at %i reads in a row, it is read again and not said', (breaks) => {
-      const { main, index, linked } = made()
-      const { seen, statOf } = replacing(index, breaks)
-      const shapes = shapesOf([main], home, [], statOf)
-      expect(seen.breaks).toBe(0)
-      const said = shapes.get(join(main, '.git', 'index'))
-      if (linked) expect(said?.text).toContain('This index is a link')
-      else expect(said).toBeUndefined()
-      expect([...shapes.keys()]).toContain(join(main, 'vendor', '.git', 'config'))
-    })
+    test.each([1, 3])(
+      'replaced at %i reads in a row, it is read again, its stat taken once after each failure, and not said',
+      (breaks) => {
+        const { main, index, linked } = made()
+        const { seen, statOf } = replacing(index, breaks)
+        const shapes = shapesOf([main], home, [], statOf)
+        expect(seen.breaks).toBe(0)
+        // A stat before each read, and one after each failure: the recheck is taken once per failure.
+        expect(seen.stats).toBe(1 + 2 * breaks)
+        const said = shapes.get(join(main, '.git', 'index'))
+        if (linked) expect(said?.text).toContain('This index is a link')
+        else expect(said).toBeUndefined()
+        expect([...shapes.keys()]).toContain(join(main, 'vendor', '.git', 'config'))
+      },
+    )
 
     test('replaced at every read, it is read four times, then said: the rereads end', () => {
       const { main, index } = made()
