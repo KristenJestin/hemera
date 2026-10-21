@@ -165,17 +165,25 @@ export const Grown: Story = {
     const dialog = await opened(canvasElement, 'Add')
     const box = within(dialog).getByRole('checkbox', { name: 'Track a branch' })
     const body = [...dialog.children].find((part) => part.contains(box))!
+    const content = body.firstElementChild!
     const from = body.getBoundingClientRect().height
+    // What the page held when an assertion failed: the one line a failure on a runner leaves.
+    const held = () =>
+      `body ${String(body.getBoundingClientRect().height)}, content ${String(content.getBoundingClientRect().height)}, from ${String(from)}, field ${within(dialog).queryByRole('textbox', { name: 'Branch' }) === null ? 'absent' : 'present'}`
     await userEvent.click(box)
     await expect(within(dialog).getByRole('textbox', { name: 'Branch' })).toBeInTheDocument()
+    // The body has grown once it holds what the choice brought in: waiting for it to equal its
+    // content alone is true before the content has grown too, and a play that went on from there
+    // read the body at the height it started from.
     await waitFor(() => {
-      expect(body.getBoundingClientRect().height).toBeCloseTo(
-        body.firstElementChild!.getBoundingClientRect().height,
+      expect(content.getBoundingClientRect().height, held()).toBeGreaterThan(from)
+      expect(body.getBoundingClientRect().height, held()).toBeCloseTo(
+        content.getBoundingClientRect().height,
         0,
       )
     })
-    expect(body.getBoundingClientRect().height).toBeGreaterThan(from)
-    expect(body.scrollHeight).toBe(body.clientHeight)
+    expect(body.getBoundingClientRect().height, held()).toBeGreaterThan(from)
+    expect(body.scrollHeight, held()).toBe(body.clientHeight)
     await closed()
   },
 }
