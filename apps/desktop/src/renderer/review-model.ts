@@ -30,6 +30,8 @@ import type {
 import type { MarkState, Review } from '@hemera/ui'
 import { Match } from 'effect'
 
+import { questionOf } from './planning-model.ts'
+
 /** What the Review page is read from. */
 export interface ReviewRead {
   /** The round the mission is at, as Now says it. */
@@ -312,26 +314,90 @@ const ROUND_STATES = {
   closed: 'closed',
 } as const
 
+type PointRead = RoundDetailView['points'][number]
+
+const DELTA_WORDS = { added: 'Adds', modified: 'Changes', removed: 'Removes' } as const
+
+/** A point's mark: done once the round is back, else as the tasks that carry it stand. */
+function pointStateOf(detail: RoundDetailView, point: PointRead): MarkState {
+  if (point.removed) return 'skipped'
+  if (detail.state === 'answered' || detail.state === 'closed') return 'done'
+  const tasks = detail.tasks.filter((one) => one.points.includes(point.id))
+  if (tasks.length > 0 && tasks.every((one) => one.state === 'done')) return 'done'
+  if (tasks.some((one) => one.state === 'failed')) return 'failed'
+  if (tasks.some((one) => one.state !== null && one.state !== 'todo' && one.state !== 'waiting'))
+    return 'running'
+  return 'todo'
+}
+
+/** A point written like a requirement, its sources named as the page names them. */
+function pointOf(
+  detail: RoundDetailView,
+  point: PointRead,
+  labels: ReadonlyMap<string, string>,
+): Review.RoundPoint {
+  const clarified = point.decisions.find((one) => one.kind === 'clarify')
+  const scenario = point.scenarios[0]
+  return {
+    id: point.id,
+    title: point.text,
+    kind: point.kind === 'behaviour' ? 'behaviour' : 'fix',
+    sources: point.sources.map((one) => labels.get(one) ?? one),
+    state: pointStateOf(detail, point),
+    detail:
+      point.removedReason ??
+      (point.delta === null ? '' : `${DELTA_WORDS[point.delta.change]} ${point.delta.requirement}`),
+    scenario: scenario === undefined ? undefined : `${scenario.id} · ${scenario.then}`,
+    decision: point.decisions.find((one) => one.kind === 'behaviour')?.choice,
+    conflict:
+      clarified === undefined
+        ? undefined
+        : {
+            with: point.delta?.requirement ?? '',
+            why: clarified.why,
+            outcome: 'clarified',
+            note: clarified.choice,
+          },
+  }
+}
+
+/** The waves of a round's grilling: the mission's waves, only the questions this round asked. */
+function wavesOf(read: ReviewRead, detail: RoundDetailView, now: Date): Review.Wave[] {
+  const asked = new Set(detail.questions)
+  return read.waves.flatMap((wave) => {
+    const questions = wave.questions.filter((one) => asked.has(one.id))
+    return questions.length === 0
+      ? []
+      : [{ n: wave.number, questions: questions.map((one) => questionOf(one, now)) }]
+  })
+}
+
 /** The rounds sent, the latest first; the round still collecting is the feedback itself. */
-function roundsOf(state: ReviewStateView | null): Review.Round[] {
-  return (state?.rounds ?? [])
-    .flatMap((one) =>
-      one.state === 'collecting'
-        ? []
-        : [
-            {
-              n: one.number,
-              state: ROUND_STATES[one.state],
-              waves: [],
-              points: [],
-              sentAt: timeOf(one.createdAt),
-              backAt:
-                one.state === 'answered' || one.state === 'closed'
-                  ? timeOf(one.movedAt)
-                  : undefined,
-            },
-          ],
-    )
+function roundsOf(read: ReviewRead, now: Date): Review.Round[] {
+  const labels = feedbackLabels(read.state?.feedback ?? [])
+  return (read.state?.rounds ?? [])
+    .flatMap((one) => {
+      if (one.state === 'collecting') return []
+      const detail = read.details.find((candidate) => candidate.number === one.number)
+      return [
+        {
+          n: one.number,
+          state: ROUND_STATES[one.state],
+          waves: detail === undefined ? [] : wavesOf(read, detail, now),
+          points:
+            detail === undefined
+              ? []
+              : detail.points.map((point) => pointOf(detail, point, labels)),
+          sentAt: timeOf(one.createdAt),
+          backAt:
+            one.state === 'answered' || one.state === 'closed' ? timeOf(one.movedAt) : undefined,
+          building:
+            one.state === 'building' && detail !== undefined
+              ? `${String(detail.progress.done)} of ${plural(detail.progress.tasks, 'task', 'tasks')} done`
+              : undefined,
+        },
+      ]
+    })
     .sort((one, other) => other.n - one.n)
 }
 
@@ -404,7 +470,7 @@ const NO_PREVIEW: Review.ShipPreview = {
 }
 
 /** The Review page, from the engine's reads. */
-export function reviewMomentOf(read: ReviewRead, _now: Date): Review.ReviewMoment {
+export function reviewMomentOf(read: ReviewRead, now: Date): Review.ReviewMoment {
   const remarks = remarksOf(read.state)
   const refusals = read.preview?.reasons ?? []
   return {
@@ -416,7 +482,7 @@ export function reviewMomentOf(read: ReviewRead, _now: Date): Review.ReviewMomen
     needs: [],
     remarks,
     fixable: read.state?.fixable ?? false,
-    rounds: roundsOf(read.state),
+    rounds: roundsOf(read, now),
     team: [],
     pulls: [],
     forge: null,

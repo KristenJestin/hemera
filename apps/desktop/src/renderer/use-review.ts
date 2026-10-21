@@ -32,6 +32,12 @@ export function useReview(
       resolve: (label) => sent((following) => following.resolve(label)),
       fix: () => sent((following) => following.fix()),
       startMission: (label) => current()?.startMission(label) ?? Promise.resolve(null),
+      answer: (questionId, answer) => sent((following) => following.answer(questionId, answer)),
+      waitOnSomeone: (questionId, note) =>
+        sent((following) => following.waitOnSomeone(questionId, note)),
+      acceptProposed: (proposalId, text) =>
+        sent((following) => following.acceptProposed(proposalId, text)),
+      dismissProposed: (proposalId) => sent((following) => following.dismissProposed(proposalId)),
       retry: () => current()?.retry(),
     },
   ]

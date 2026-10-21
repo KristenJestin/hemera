@@ -30,6 +30,7 @@ import {
   type ImageAdded,
   type MissionFromSource,
   type PrelaunchView,
+  type RoundDetailView,
   type ProofsView,
   type ScenarioProofView,
   type ShipPreview,
@@ -783,6 +784,8 @@ export interface Link {
   ) => Promise<FeedbackView>
   /** An image for a feedback, handed to Hemera, which keeps it in the evidence or refuses it. */
   readonly addImage: (missionId: string, name: string, bytes: Uint8Array) => Promise<ImageAdded>
+  /** One round as a small Spec: its points, tasks, decisions and the questions it asked. */
+  readonly reviewRound: (missionId: string, number: number) => Promise<RoundDetailView>
   /** Sends the feedback waiting to its round: the agent grills it, then Building · round N. */
   readonly fix: (missionId: string) => Promise<void>
   /** What a mission started from a feedback begins with: its words and its origin. */
@@ -1296,6 +1299,8 @@ export function linkOver(port: Port): Link {
     addImage: (missionId, name, bytes) =>
       call((ready) => ready['review.imageAdd']({ missionId, name, bytes })),
     fix: (missionId) => call((ready) => ready['review.fix']({ missionId })),
+    reviewRound: (missionId, number) =>
+      call((ready) => ready['review.round']({ missionId, number })),
     startMissionFrom: (feedbackId) =>
       call((ready) => ready['review.startMissionFrom']({ feedbackId })),
     commentedVersion: (feedbackId) =>

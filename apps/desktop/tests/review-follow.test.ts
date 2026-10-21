@@ -18,7 +18,14 @@ import type { Link } from '../src/renderer/link.ts'
 import { followReview, type ReviewFollowView } from '../src/renderer/review-follow.ts'
 import { at, building, diff, now, proof, service } from './building-fixtures.ts'
 import { SILENT_LINK } from './fake-link.ts'
-import { feedback, proofsView, reviewState, shipPreview } from './review-fixtures.ts'
+import {
+  feedback,
+  proofsView,
+  question,
+  reviewState,
+  roundDetail,
+  shipPreview,
+} from './review-fixtures.ts'
 
 const MISSION = { id: 'm12', projectId: 'acme', frozenAt: null }
 
@@ -47,6 +54,8 @@ function linkOf(more: Partial<Link> = {}) {
       return Promise.resolve(shipPreview())
     },
     memoryNow: () => Promise.resolve(now({ stage: 'review', round: 1 })),
+    waves: () => Promise.resolve([]),
+    reviewRound: (_missionId, number) => Promise.resolve(roundDetail({ number })),
     missionServices: () => Promise.resolve([service()]),
     catalogue: () => Promise.resolve([]),
     liveDiff: () => Promise.resolve(diff()),
@@ -293,5 +302,66 @@ describe('The feedback', () => {
       originFeedback: 'fb-b',
       said: 'Started from ACME-12, round 1',
     })
+  })
+})
+
+describe('A round over the page', () => {
+  test('each round sent is read with its questions, again when the Review or the questions change', async () => {
+    const asked: string[] = []
+    const questionListeners: Array<() => void> = []
+    const played = linkOf({
+      reviewRound: (missionId, number) => {
+        asked.push(`round ${missionId} ${String(number)}`)
+        return Promise.resolve(roundDetail({ number, questions: ['Q7'] }))
+      },
+      waves: () => {
+        asked.push('waves')
+        return Promise.resolve([{ number: 3, askedAt: at(10, 50), questions: [question()] }])
+      },
+      onOpenQuestions: (listener) => {
+        questionListeners.push(() => listener([]))
+        return () => undefined
+      },
+    })
+    played.setState(
+      reviewState({
+        rounds: [
+          { number: 1, state: 'grilling', createdAt: at(9, 0), movedAt: at(9, 30) },
+          { number: 2, state: 'collecting', createdAt: at(9, 30), movedAt: at(9, 30) },
+        ],
+      }),
+    )
+    const { last } = review(played.link)
+    await settled()
+    await settled()
+    expect(asked.toSorted()).toEqual(['round m12 1', 'waves'])
+    expect(last()?.moment?.rounds[0]?.waves[0]?.questions[0]?.id).toBe('Q7')
+    asked.length = 0
+    for (const listener of questionListeners) listener()
+    await settled()
+    expect(asked).toEqual(['waves'])
+  })
+
+  test('an answer to a round’s question goes to the engine, and the questions are read back', async () => {
+    const sent: string[] = []
+    let waves = 0
+    const played = linkOf({
+      answer: (missionId, questionId, answer) => {
+        sent.push(
+          `${missionId} ${questionId} ${'optionId' in answer ? answer.optionId : answer.text}`,
+        )
+        return Promise.resolve()
+      },
+      waves: () => {
+        waves += 1
+        return Promise.resolve([])
+      },
+    })
+    const { following } = review(played.link)
+    await settled()
+    const before = waves
+    await following.answer('Q7', { optionId: 'A' })
+    expect(sent).toEqual(['m12 Q7 A'])
+    expect(waves).toBe(before + 1)
   })
 })

@@ -6,6 +6,7 @@
 import {
   FeedbackUser,
   type FeedbackView,
+  type Question,
   type MissionPushes,
   type ProofsView,
   type RepositoryPush,
@@ -158,5 +159,32 @@ export const shipProgress = (more: Partial<ShipProgress> = {}): ShipProgress => 
   step: 'idle',
   reruns: [],
   message: null,
+  ...more,
+})
+
+export const question = (more: Partial<Question> = {}): Question => ({
+  id: 'Q7',
+  wave: 3,
+  text: 'Should the progress stay hidden for exports under a second?',
+  why: 'R4 shows it from the first row.',
+  options: [
+    { id: 'A', label: 'Clarify with a note', detail: '' },
+    { id: 'B', label: 'Withdraw the remark', detail: '' },
+    { id: 'C', label: 'Cancel the mission', detail: '' },
+  ],
+  recommended: 'A',
+  recommendedReason: 'The remark asks for less noise, not another rule.',
+  section: null,
+  fromFinding: null,
+  replaces: null,
+  replacedBy: null,
+  state: 'open',
+  waitingNote: null,
+  retiredReason: null,
+  mootDecision: null,
+  askedAt: at(10, 50),
+  answers: [],
+  drafts: [],
+  proposals: [],
   ...more,
 })

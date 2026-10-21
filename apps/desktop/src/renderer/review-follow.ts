@@ -61,6 +61,14 @@ export interface ReviewFollowing {
   readonly fix: () => Promise<void>
   /** What the start field opens with, for a mission started from a remark; null when refused. */
   readonly startMission: (label: string) => Promise<StartSeed | null>
+  /** A round's question answered, put to someone, or answered from a proposal. */
+  readonly answer: (
+    questionId: string,
+    answer: { readonly optionId: string } | { readonly text: string },
+  ) => Promise<void>
+  readonly waitOnSomeone: (questionId: string, note: string | null) => Promise<void>
+  readonly acceptProposed: (proposalId: string, text: string | null) => Promise<void>
+  readonly dismissProposed: (proposalId: string) => Promise<void>
   /** Reads again, after a failure. */
   readonly retry: () => void
   readonly stop: () => void
@@ -76,8 +84,8 @@ export function followReview(
   const missionId = mission.id
   let stopped = false
   let state: ReviewStateView | null = null
-  const details: ReadonlyArray<RoundDetailView> = []
-  const waves: ReadonlyArray<Wave> = []
+  let details: ReadonlyArray<RoundDetailView> = []
+  let waves: ReadonlyArray<Wave> = []
   let spec: Spec | null = null
   let building: BuildingView | null = null
   let review: AutoReviewView | null = null
@@ -144,12 +152,32 @@ export function followReview(
     emit()
   }
 
+  /** Each round sent, as a small Spec; a round that cannot be read keeps what was shown of it. */
+  const readDetails = (read: ReviewStateView): Promise<void> =>
+    Promise.all(
+      read.rounds
+        .filter((one) => one.state !== 'collecting')
+        .map((one) =>
+          link.reviewRound(missionId, one.number).then(
+            (detail) => detail,
+            () => details.find((known) => known.number === one.number) ?? null,
+          ),
+        ),
+    ).then((detailed) => {
+      details = detailed.filter((one) => one !== null)
+      emit()
+    })
   const readState = (): Promise<void> =>
     link.reviewState(missionId).then((read) => {
       state = read
       error = undefined
       emit()
+      return readDetails(read)
     }, failed)
+  const readWaves = (): Promise<void> =>
+    quietly(link.waves(missionId), (read) => {
+      waves = read
+    })
   const readProofs = (): Promise<void> =>
     quietly(link.proofs(missionId), (read) => {
       proofs = read
@@ -168,11 +196,16 @@ export function followReview(
     })
   /** What a change of the Review moves: the feedback and rounds, the proofs, Ship's word. */
   const readReview = (): Promise<void> =>
-    Promise.all([readState(), readProofs(), readPreview()]).then(() => undefined)
+    Promise.all([readState(), readProofs(), readPreview(), readWaves()]).then(() => undefined)
 
   const start = (): void => {
     unsubscribe = [
       link.onReviewChanges(missionId, () => void readReview(), failed),
+      // A round's questions are asked, answered and replaced as planning's are.
+      link.onOpenQuestions(
+        () => void readWaves(),
+        () => undefined,
+      ),
       link.onBuilding(
         missionId,
         (heard) => {
@@ -284,6 +317,12 @@ export function followReview(
     withdraw: (label) => onFeedback(label, (id) => link.withdrawFeedback(id)),
     resolve: (label) => onFeedback(label, (id) => link.resolveFeedback(id)),
     fix: () => gesture(link.fix(missionId), readReview),
+    answer: (questionId, answer) => gesture(link.answer(missionId, questionId, answer), readWaves),
+    waitOnSomeone: (questionId, note) =>
+      gesture(link.waitOnSomeone(missionId, questionId, note), readWaves),
+    acceptProposed: (proposalId, text) =>
+      gesture(link.acceptProposedAnswer(proposalId, text), readWaves),
+    dismissProposed: (proposalId) => gesture(link.dismissProposedAnswer(proposalId), readWaves),
     startMission: (label) => {
       const one = feedbackOf(label)
       if (one === undefined) return Promise.resolve(null)

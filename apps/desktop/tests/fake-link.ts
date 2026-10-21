@@ -246,6 +246,7 @@ export const SILENT_LINK: Link = {
   commentedVersion: never,
   addImage: never,
   fix: never,
+  reviewRound: never,
   startMissionFrom: never,
   proofs: never,
   validateManualProof: never,

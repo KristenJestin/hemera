@@ -21,7 +21,14 @@ import {
   spec,
   requirement,
 } from './building-fixtures.ts'
-import { feedback, proofsView, reviewState, shipPreview } from './review-fixtures.ts'
+import {
+  feedback,
+  proofsView,
+  question,
+  reviewState,
+  roundDetail,
+  shipPreview,
+} from './review-fixtures.ts'
 
 const read = (more: Partial<ReviewRead> = {}): ReviewRead => ({
   round: 0,
@@ -453,6 +460,145 @@ describe('The feedback by round', () => {
     )
     expect(moment.remarks[0]?.state).toBe('waiting')
     expect(moment.fixable).toBe(false)
+  })
+})
+
+describe('A round, as a small Spec', () => {
+  const rounds = reviewState({
+    rounds: [
+      { number: 1, state: 'answered', createdAt: at(9, 0), movedAt: at(10, 30) },
+      { number: 2, state: 'grilling', createdAt: at(10, 30), movedAt: at(10, 45) },
+    ],
+    feedback: [
+      feedback({ id: 'fb-a', round: 1, state: 'addressed', createdAt: at(9, 5) }),
+      feedback({ id: 'fb-b', round: 2, state: 'in_round', createdAt: at(10, 35) }),
+    ],
+  })
+  const point = {
+    id: 'R2.1',
+    text: 'The progress appears after one second only',
+    kind: 'behaviour' as const,
+    delta: { requirement: 'R4', change: 'modified' as const, livingVersion: 0 },
+    sources: ['fb-b'],
+    scenarios: [
+      {
+        id: 'S17',
+        when: 'an export lasts half a second',
+        then: 'No progress is shown',
+        mode: 'automated' as const,
+        proof: null,
+      },
+    ],
+    decisions: [],
+    removed: false,
+    removedReason: null,
+  }
+
+  test('its points are named after the remarks they came from, the way the page names them', () => {
+    const moment = reviewMomentOf(
+      read({
+        state: rounds,
+        details: [roundDetail({ number: 2, state: 'grilling', points: [point] })],
+      }),
+      NOW,
+    )
+    const shown = moment.rounds.find((one) => one.n === 2)
+    expect(shown?.points).toEqual([
+      {
+        id: 'R2.1',
+        title: 'The progress appears after one second only',
+        kind: 'behaviour',
+        sources: ['F2'],
+        state: 'todo',
+        detail: 'Changes R4',
+        scenario: 'S17 · No progress is shown',
+      },
+    ])
+  })
+
+  test('a point clarified against the Spec says the note the user chose', () => {
+    const clarified = {
+      ...point,
+      decisions: [
+        {
+          kind: 'clarify' as const,
+          point: 'R2.1',
+          feedbackId: 'fb-b',
+          choice: 'D5 replaces the row threshold of R4.',
+          alternatives: [],
+          why: 'The remark goes against R4.',
+        },
+      ],
+    }
+    const moment = reviewMomentOf(
+      read({
+        state: rounds,
+        details: [roundDetail({ number: 2, state: 'building', points: [clarified] })],
+      }),
+      NOW,
+    )
+    expect(moment.rounds.find((one) => one.n === 2)?.points[0]?.conflict).toEqual({
+      with: 'R4',
+      why: 'The remark goes against R4.',
+      outcome: 'clarified',
+      note: 'D5 replaces the row threshold of R4.',
+    })
+  })
+
+  test('its questions are those of its grilling, by waves, in Hemera’s options', () => {
+    const moment = reviewMomentOf(
+      read({
+        state: rounds,
+        details: [roundDetail({ number: 2, state: 'grilling', questions: ['Q7'] })],
+        waves: [
+          { number: 1, askedAt: at(8, 0), questions: [question({ id: 'Q1', wave: 1 })] },
+          { number: 3, askedAt: at(10, 50), questions: [question()] },
+        ],
+      }),
+      NOW,
+    )
+    const waves = moment.rounds.find((one) => one.n === 2)?.waves
+    expect(waves?.map((one) => [one.n, one.questions.map((asked) => asked.id)])).toEqual([
+      [3, ['Q7']],
+    ])
+    expect(waves?.[0]?.questions[0]?.options.map((one) => one.label)).toEqual([
+      'Clarify with a note',
+      'Withdraw the remark',
+      'Cancel the mission',
+    ])
+  })
+
+  test('a round in Building says how far it is, and its points as their tasks stand', () => {
+    const moment = reviewMomentOf(
+      read({
+        state: reviewState({
+          rounds: [{ number: 1, state: 'building', createdAt: at(9, 0), movedAt: at(9, 30) }],
+        }),
+        details: [
+          roundDetail({
+            number: 1,
+            state: 'building',
+            points: [point, { ...point, id: 'R1.2' }],
+            tasks: [
+              { id: 'T1', title: '', result: '', points: ['R2.1'], scenarios: [], state: 'done' },
+              {
+                id: 'T2',
+                title: '',
+                result: '',
+                points: ['R1.2'],
+                scenarios: [],
+                state: 'running',
+              },
+            ],
+            progress: { done: 1, tasks: 2 },
+          }),
+        ],
+      }),
+      NOW,
+    )
+    const shown = moment.rounds[0]
+    expect(shown?.building).toBe('1 of 2 tasks done')
+    expect(shown?.points.map((one) => one.state)).toEqual(['done', 'running'])
   })
 })
 

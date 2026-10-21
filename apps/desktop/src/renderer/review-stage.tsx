@@ -1,10 +1,13 @@
 import {
   ErrorState,
   ReviewPage,
+  RoundView,
   type FeedbackHandlers,
+  type MissionView,
   type RailHandlers,
   type Review,
 } from '@hemera/ui'
+import { IconMessages } from '@hemera/ui/icons'
 import type { ReactNode } from 'react'
 
 import type { StagePageProps } from './stage-pages.tsx'
@@ -43,7 +46,8 @@ const openLink = (url: string): void => {
   window.open(url, '_blank', 'noopener')
 }
 
-const noAnswer = (): Promise<void> => Promise.resolve()
+/** The id of a round's view over the Review page. */
+export const roundViewId = (n: number): string => `round:${String(n)}`
 
 /**
  * The page of a mission in Review (#254, #496): the feedback by round in the middle, the
@@ -71,11 +75,12 @@ export function ReviewStage({
     onOpenLink: openLink,
     onCopy: copy,
     question: {
-      onAnswer: noAnswer,
-      onWaitOnSomeone: noAnswer,
+      onAnswer: act.answer,
+      onWaitOnSomeone: act.waitOnSomeone,
       onCopyDraft: copy,
-      onAcceptProposed: noAnswer,
-      onDismissProposed: noAnswer,
+      onAcceptProposed: act.acceptProposed,
+      onDismissProposed: act.dismissProposed,
+      // A round's question is answered here; its discussion belongs to Planning's page.
       onDiscuss: () => undefined,
     },
   }
@@ -92,7 +97,7 @@ export function ReviewStage({
     onResolve: (label) => void act.resolve(label),
     onFix: () => void act.fix(),
     onOpenDiff: () => open('diff'),
-    onOpenRound: (n) => open(`round:${String(n)}`),
+    onOpenRound: (n) => open(roundViewId(n)),
   }
   const base =
     moment === null && view.error !== undefined ? (
@@ -112,5 +117,21 @@ export function ReviewStage({
         mentionables={view.mentionables}
       />
     )
-  return frame({ base, ballFace: false, notice: view.refused })
+  // A round's conflicts and new missions are the engine's questions, answered in its waves: a
+  // point offers no way out of its own. Building · round N is the Building page, not this one.
+  const views: MissionView[] = (moment?.rounds ?? []).map((round) => ({
+    id: roundViewId(round.n),
+    title: `Round ${String(round.n)}`,
+    icon: <IconMessages size="sm" />,
+    width: 'wide',
+    body: (
+      <RoundView
+        round={round}
+        question={rail.question}
+        onPoint={() => undefined}
+        onOpenBuilding={() => undefined}
+      />
+    ),
+  }))
+  return frame({ base, views, ballFace: false, notice: view.refused })
 }
