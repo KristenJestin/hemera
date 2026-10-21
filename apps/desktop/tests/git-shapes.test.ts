@@ -496,6 +496,35 @@ describe('An index that cannot be read for its submodules is said, never read as
     })
   })
 
+  test('a split index whose shared part Git prunes while it rewrites the index is read again, not said (#538)', () => {
+    const { main, index } = indexed()
+    git(main, 'update-index', '--split-index')
+    const shared = readdirSync(join(main, '.git')).filter((name) => name.startsWith('sharedindex.'))
+    const kept = shared.map(
+      (name) => [join(main, '.git', name), readFileSync(join(main, '.git', name))] as const,
+    )
+    const fresh = readFileSync(index)
+    let stats = 0
+    // Right after the index's first stat, its shared part is pruned, so the read that follows
+    // fails there; at the next stat, Git's new index is renamed over it, its shared part written.
+    const pruning: StatOf = (path) => {
+      if (path !== index) return lstatSync(path, { bigint: true })
+      stats += 1
+      if (stats === 2) {
+        for (const [named, bytes] of kept) writeFileSync(named, bytes)
+        writeFileSync(`${index}.lock`, fresh)
+        renameSync(`${index}.lock`, index)
+      }
+      const stat = lstatSync(index, { bigint: true })
+      if (stats === 1) for (const [named] of kept) rmSync(named)
+      return stat
+    }
+    const shapes = shapesOf([main], home, [], pruning)
+    expect(shapes.get(index)).toBeUndefined()
+    expect([...shapes.keys()]).toContain(join(main, 'vendor', '.git', 'config'))
+    expect(stats).toBe(3)
+  })
+
   test('an index Git removes after a read that failed is read again: none, as Git reads no index (#533)', () => {
     const { main, index } = indexed()
     let stats = 0
