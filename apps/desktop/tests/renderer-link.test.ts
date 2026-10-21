@@ -18,6 +18,10 @@ import {
   AutoReviewRpcs,
   DiffRpcs,
   ReviewRpcs,
+  ProofsRpcs,
+  DeliveryRpcs,
+  ShipRpcs,
+  TeamCommentsRpcs,
   CheckRefused,
   InvalidProofLimit,
   DocRecipesRpcs,
@@ -637,6 +641,32 @@ const main = async (engine: 'answers' | 'gone') => {
     AutoReviewRpcs.toLayer({
       'autoReview.read': unused,
       'autoReview.changed': () => Stream.die('the window’s link is not asked for a review here'),
+    }),
+    ProofsRpcs.toLayer({
+      'proofs.read': unused,
+      'proofs.validateManual': unused,
+      'proofs.refuseManual': unused,
+    }),
+    DeliveryRpcs.toLayer({
+      'delivery.pushes': unused,
+      'delivery.retry': unused,
+      'evidence.setPublishable': unused,
+      'delivery.changes': () =>
+        Stream.die('the window’s link is not asked for the Review page here'),
+    }),
+    ShipRpcs.toLayer({
+      'ship.preview': unused,
+      'ship.confirm': unused,
+      'ship.progress': () => Stream.die('the window’s link is not asked for the Review page here'),
+    }),
+    TeamCommentsRpcs.toLayer({
+      'teamComments.list': unused,
+      'teamComments.take': unused,
+      'teamComments.addToRound': unused,
+      'teamComments.dismiss': unused,
+      'teamComments.startMissionFrom': unused,
+      'teamComments.changes': () =>
+        Stream.die('the window’s link is not asked for the Review page here'),
     }),
   )
   const program = Effect.gen(function* () {

@@ -22,6 +22,10 @@ import {
   ForgeRpcs,
   DeliveryRulesRpcs,
   ReviewRpcs,
+  ProofsRpcs,
+  DeliveryRpcs,
+  ShipRpcs,
+  TeamCommentsRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
   type HemeraAutoStatus,
@@ -1108,6 +1112,83 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['autoReview.changed'](request).pipe(
           streamClosedAs(gone),
           observedStream('autoReview.changed', log),
+        ),
+    }),
+    // The proofs (#144), which the Review page reads and verifies by hand (#496), a layer of its own.
+    ProofsRpcs.toLayer({
+      'proofs.read': (request) =>
+        engine['proofs.read'](request).pipe(closedAs(gone), observed('proofs.read', log)),
+      'proofs.validateManual': (request) =>
+        engine['proofs.validateManual'](request).pipe(
+          closedAs(gone),
+          observed('proofs.validateManual', log),
+        ),
+      'proofs.refuseManual': (request) =>
+        engine['proofs.refuseManual'](request).pipe(
+          closedAs(gone),
+          observed('proofs.refuseManual', log),
+        ),
+    }),
+    // The pushes and pull requests (R6), which the Review page shows (#496), a layer of its own.
+    DeliveryRpcs.toLayer({
+      'delivery.pushes': (request) =>
+        engine['delivery.pushes'](request).pipe(closedAs(gone), observed('delivery.pushes', log)),
+      'delivery.retry': (request) =>
+        engine['delivery.retry'](request).pipe(closedAs(gone), observed('delivery.retry', log)),
+      'evidence.setPublishable': (request) =>
+        engine['evidence.setPublishable'](request).pipe(
+          closedAs(gone),
+          observed('evidence.setPublishable', log),
+        ),
+      'delivery.changes': (request) =>
+        engine['delivery.changes'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('delivery.changes', log),
+        ),
+    }),
+    // Ship (R9), the Review page’s gesture (#496), a layer of its own.
+    ShipRpcs.toLayer({
+      'ship.preview': (request) =>
+        engine['ship.preview'](request).pipe(closedAs(gone), observed('ship.preview', log)),
+      'ship.confirm': (request) =>
+        engine['ship.confirm'](request).pipe(closedAs(gone), observed('ship.confirm', log)),
+      'ship.progress': (request) =>
+        engine['ship.progress'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('ship.progress', log),
+        ),
+    }),
+    // The team’s comments (R8), which the Review page shows (#496), a layer of its own.
+    TeamCommentsRpcs.toLayer({
+      'teamComments.list': (request) =>
+        engine['teamComments.list'](request).pipe(
+          closedAs(gone),
+          observed('teamComments.list', log),
+        ),
+      'teamComments.take': (request) =>
+        engine['teamComments.take'](request).pipe(
+          closedAs(gone),
+          observed('teamComments.take', log),
+        ),
+      'teamComments.addToRound': (request) =>
+        engine['teamComments.addToRound'](request).pipe(
+          closedAs(gone),
+          observed('teamComments.addToRound', log),
+        ),
+      'teamComments.dismiss': (request) =>
+        engine['teamComments.dismiss'](request).pipe(
+          closedAs(gone),
+          observed('teamComments.dismiss', log),
+        ),
+      'teamComments.startMissionFrom': (request) =>
+        engine['teamComments.startMissionFrom'](request).pipe(
+          closedAs(gone),
+          observed('teamComments.startMissionFrom', log),
+        ),
+      'teamComments.changes': (request) =>
+        engine['teamComments.changes'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('teamComments.changes', log),
         ),
     }),
   )
