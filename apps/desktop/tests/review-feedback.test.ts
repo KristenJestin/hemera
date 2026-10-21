@@ -703,14 +703,25 @@ describe('The engine says what the user may settle', () => {
             yield* moveRound(missionId, 1, 'building')
             yield* Review.use((review) => review.answer(mine.id, 'The button is blue now.'))
             yield* Review.use((review) => review.answer(taken.id, 'Limited.'))
+            yield* Review.use((review) => review.answer(theirs.id, 'Renamed.'))
             yield* moveRound(missionId, 1, 'answered')
             const addressed = yield* flags(mine.id)
+            const foreignAddressed = yield* flags(theirs.id)
             const takenAddressed = yield* flags(taken.id)
             yield* Review.use((review) => review.feedbackResolve(mine.id, FeedbackUser.make({})))
             const resolved = yield* flags(mine.id)
             yield* Review.use((review) => review.feedbackWithdraw(taken.id, FeedbackUser.make({})))
             const withdrawn = yield* flags(taken.id)
-            return { waiting, foreign, takenIn, addressed, takenAddressed, resolved, withdrawn }
+            return {
+              waiting,
+              foreign,
+              takenIn,
+              addressed,
+              foreignAddressed,
+              takenAddressed,
+              resolved,
+              withdrawn,
+            }
           }),
         ),
       )
@@ -719,6 +730,7 @@ describe('The engine says what the user may settle', () => {
         foreign: ['waiting', false, false],
         takenIn: ['waiting', true, false],
         addressed: ['addressed', true, true],
+        foreignAddressed: ['addressed', false, false],
         takenAddressed: ['addressed', true, true],
         resolved: ['resolved', false, false],
         withdrawn: ['withdrawn', false, false],

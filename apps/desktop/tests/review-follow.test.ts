@@ -560,6 +560,34 @@ describe('Ship', () => {
     expect(confirmed).toEqual(['latest'])
   })
 
+  test('a confirmation opened again is not offered until its own read lands', async () => {
+    let previews = 0
+    let land: (read: ReturnType<typeof shipPreview>) => void = () => undefined
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        if (previews === 2) {
+          return Promise.resolve(shipPreview({ previewId: 'first', possible: true, reasons: [] }))
+        }
+        if (previews === 1) return Promise.resolve(shipPreview({ possible: true, reasons: [] }))
+        return new Promise((resolve) => {
+          land = resolve
+        })
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    await following.previewShip()
+    expect(last()?.confirmable).toBe(true)
+    // Closed with Not now, then opened again: the previous read no longer counts.
+    const again = following.previewShip()
+    expect(last()?.confirmable).toBe(false)
+    await expect(following.ship()).resolves.toBe(false)
+    land(shipPreview({ previewId: 'second', possible: true, reasons: [] }))
+    await again
+    expect(last()?.confirmable).toBe(true)
+  })
+
   test('a fresh read that fails leaves the confirmation unoffered, and says why', async () => {
     let previews = 0
     const played = linkOf({
