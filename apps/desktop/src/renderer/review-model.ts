@@ -306,6 +306,8 @@ function remarksOf(state: ReviewStateView | null): Review.Remark[] {
       answer: one.answer ?? undefined,
       toMission: one.answer === TO_A_MISSION ? true : undefined,
       follows: one.followsUp === null ? undefined : labels.get(one.followsUp),
+      withdrawable: one.withdrawable,
+      resolvable: one.resolvable,
       at: timeOf(one.createdAt),
     }))
 }

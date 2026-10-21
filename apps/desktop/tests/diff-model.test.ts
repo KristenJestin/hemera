@@ -263,6 +263,8 @@ const feedback = (id: string, rest: Partial<FeedbackView> = {}): FeedbackView =>
   followsUp: null,
   followedBy: [],
   answer: null,
+  withdrawable: true,
+  resolvable: false,
   createdAt: '2026-10-20T09:47:00Z',
   updatedAt: '2026-10-20T09:47:00Z',
   ...rest,

@@ -330,6 +330,26 @@ const STATE_WORDS: Record<FeedbackState, string> = {
   withdrawn: 'withdrawn',
 }
 
+/**
+ * Whether `by` settles a feedback: its author, or the user for a team member's comment they took
+ * in as their own.
+ */
+const settledBy = (row: FeedbackRow, by: FeedbackAuthor): boolean =>
+  sameAuthor(authorOf(row), by) ||
+  (Predicate.isTagged(by, 'User') && row.source?.startsWith('forge:') === true)
+
+/** Why a feedback standing at `standing` is not withdrawn, or null: only a settled one is not. */
+const withdrawRefusal = (standing: FeedbackState): string | null =>
+  standing === 'resolved' || standing === 'withdrawn'
+    ? `This feedback is ${STATE_WORDS[standing]}: it can no longer be withdrawn.`
+    : null
+
+/** Why a feedback standing at `standing` is not resolved, or null: it is once addressed. */
+const resolveRefusal = (standing: FeedbackState): string | null =>
+  standing === 'addressed'
+    ? null
+    : `This feedback is ${STATE_WORDS[standing]}: it is resolved once the agent addressed it.`
+
 /** Who did it, as the Journal says it. */
 const rangeSaid = (start: number | null, end: number | null) =>
   start === null || end === null
@@ -905,6 +925,9 @@ export const reviewLayer = (settings: ReviewSettings) =>
               followsUp: row.followsUp,
               followedBy: followers.filter((one) => one.followsUp === row.id).map((one) => one.id),
               answer: row.answer,
+              // What the gestures themselves check, said once for the window to read.
+              withdrawable: settledBy(row, USER) && withdrawRefusal(stateOf(row)) === null,
+              resolvable: settledBy(row, USER) && resolveRefusal(stateOf(row)) === null,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             })
@@ -1145,10 +1168,7 @@ export const reviewLayer = (settings: ReviewSettings) =>
                   .where(eq(reviewFeedback.id, feedbackId))
                   .pipe(Effect.mapError(refusedWhile(doing)))
                 if (row === undefined) return yield* new UnknownFeedback({ id: feedbackId })
-                // A team member's comment the user took in is theirs to settle.
-                const takenIn =
-                  Predicate.isTagged(by, 'User') && row.source?.startsWith('forge:') === true
-                if (!sameAuthor(authorOf(row), by) && !takenIn) {
+                if (!settledBy(row, by)) {
                   return yield* new FeedbackRefused({
                     reason: `Only its author ${verb} a feedback.`,
                   })
@@ -1330,11 +1350,8 @@ export const reviewLayer = (settings: ReviewSettings) =>
           gesture(feedbackId, by, 'withdrawing a feedback', 'withdraws', (row, transaction) =>
             Effect.gen(function* () {
               const standing = stateOf(row)
-              if (standing === 'resolved' || standing === 'withdrawn') {
-                return yield* refuse(
-                  `This feedback is ${STATE_WORDS[standing]}: it can no longer be withdrawn.`,
-                )
-              }
+              const refused = withdrawRefusal(standing)
+              if (refused !== null) return yield* refuse(refused)
               return yield* setState(transaction, row, 'withdrawn', 'review.feedback_withdrawn', by)
             }),
           ),
@@ -1342,11 +1359,8 @@ export const reviewLayer = (settings: ReviewSettings) =>
           gesture(feedbackId, by, 'resolving a feedback', 'resolves', (row, transaction) =>
             Effect.gen(function* () {
               const standing = stateOf(row)
-              if (standing !== 'addressed') {
-                return yield* refuse(
-                  `This feedback is ${STATE_WORDS[standing]}: it is resolved once the agent addressed it.`,
-                )
-              }
+              const refused = resolveRefusal(standing)
+              if (refused !== null) return yield* refuse(refused)
               return yield* setState(transaction, row, 'resolved', 'review.feedback_resolved', by)
             }),
           ),

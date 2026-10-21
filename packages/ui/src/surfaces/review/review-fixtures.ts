@@ -84,8 +84,15 @@ const all = (): boolean => true
 
 // --- Remarks and rounds ---------------------------------------------------------------------
 
+/** What the engine lets the user do with a remark standing at `state`, as its flags say it. */
+export const standing = (state: Remark['state']): Pick<Remark, 'withdrawable' | 'resolvable'> => ({
+  withdrawable: state !== 'resolved' && state !== 'withdrawn',
+  resolvable: state === 'addressed',
+})
+
 const remark = (given: Pick<Remark, 'id' | 'text' | 'state' | 'at'> & Partial<Remark>): Remark => ({
   kind: 'remark',
+  ...standing(given.state),
   ...given,
 })
 
@@ -750,12 +757,17 @@ function back(): ReviewMoment {
       ...edit(
         moment.remarks,
         (one) => one.state === 'addressed',
-        () => ({ state: 'resolved' as const }),
+        () => ({ state: 'resolved' as const, ...standing('resolved') }),
       ).filter((one) => one.state !== 'waiting'),
       ...edit(
         moment.remarks.filter((one) => one.state === 'waiting'),
         all,
-        (one) => ({ state: 'addressed' as const, round: 2, answer: answers.get(one.id) }),
+        (one) => ({
+          state: 'addressed' as const,
+          ...standing('addressed'),
+          round: 2,
+          answer: answers.get(one.id),
+        }),
       ),
     ],
     rounds: [
@@ -857,6 +869,18 @@ export const MOMENTS = {
             'This asks for something the Spec never wanted: a mission of its own, started from this remark.',
           toMission: true,
         }),
+      ),
+    }
+  },
+  /** Round 2 back, F7 one the engine does not let the user settle: neither Resolve nor Withdraw. */
+  notSettled: (): ReviewMoment => {
+    const moment = back()
+    return {
+      ...moment,
+      remarks: edit(
+        moment.remarks,
+        (one) => one.id === 'F7',
+        () => ({ withdrawable: false, resolvable: false }),
       ),
     }
   },

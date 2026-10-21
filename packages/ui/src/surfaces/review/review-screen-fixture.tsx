@@ -24,6 +24,7 @@ import {
   LONG_REVIEWERS,
   MOMENTS,
   type MomentName,
+  standing,
   TITLE,
 } from './review-fixtures.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
@@ -98,6 +99,7 @@ function momentOf(props: ReviewScreenProps): ReviewMoment {
     state: 'waiting',
     at: '09:58',
     anchor: LONG_PATH,
+    ...standing('waiting'),
     images: [
       {
         name: 'export-button-wrapped-at-1024-pixels-wide-in-the-billing-toolbar.png',
@@ -315,6 +317,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                     text: added.text,
                     state: 'waiting',
                     at: 'now',
+                    ...standing('waiting'),
                     images: added.images.map((name) => ({ name, size: '2 KB' })),
                     follows: added.follows,
                   },
@@ -326,11 +329,11 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
               },
               onWithdraw: (id) => {
                 props.onRemark('withdraw', { id })
-                change(id, (one) => ({ ...one, state: 'withdrawn' }))
+                change(id, (one) => ({ ...one, state: 'withdrawn', ...standing('withdrawn') }))
               },
               onResolve: (id) => {
                 props.onRemark('resolve', { id })
-                change(id, (one) => ({ ...one, state: 'resolved' }))
+                change(id, (one) => ({ ...one, state: 'resolved', ...standing('resolved') }))
               },
               onAttach: (file) => {
                 props.onAttach(file)

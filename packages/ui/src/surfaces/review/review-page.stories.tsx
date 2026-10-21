@@ -304,6 +304,29 @@ export const RoundBack: Story = {
   },
 }
 
+/**
+ * Withdraw and Resolve are the engine's word: a remark it does not let the user settle offers
+ * neither, whatever it stands at, and its neighbours keep both.
+ */
+export const RemarkTheEngineDoesNotLetSettle: Story = {
+  args: { moment: 'notSettled' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const round = within(canvas.getByRole('list', { name: 'Round 2' }))
+    await userEvent.click(round.getByRole('button', { name: /F7/ }))
+    await waitFor(() => {
+      expect(round.getByRole('button', { name: 'Follow up on F7' })).toBeVisible()
+    })
+    await expect(round.queryByRole('button', { name: 'Resolve F7' })).toBeNull()
+    await expect(round.queryByRole('button', { name: 'Withdraw F7' })).toBeNull()
+    await userEvent.click(round.getByRole('button', { name: /F6/ }))
+    await waitFor(() => {
+      expect(round.getByRole('button', { name: 'Resolve F6' })).toBeVisible()
+    })
+    await expect(round.getByRole('button', { name: 'Withdraw F6' })).toBeVisible()
+  },
+}
+
 /** A remark the agent answered with a mission of its own: the mission is started from it. */
 export const AnswerToAMission: Story = {
   args: { moment: 'toAMission' },

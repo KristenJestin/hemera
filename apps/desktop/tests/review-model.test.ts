@@ -456,6 +456,32 @@ describe('The feedback by round', () => {
     expect(moment.remarks[0]?.images).toEqual([{ name: 'header.png', size: '2 KB' }])
   })
 
+  test('Withdraw and Resolve are offered as the engine says, whatever the remark stands at', () => {
+    const moment = reviewMomentOf(
+      read({
+        state: reviewState({
+          feedback: [
+            feedback({ id: 'fb-a', state: 'addressed', withdrawable: true, resolvable: true }),
+            feedback({
+              id: 'fb-b',
+              state: 'addressed',
+              withdrawable: false,
+              resolvable: false,
+              createdAt: at(10, 5),
+            }),
+            feedback({ id: 'fb-c', state: 'waiting', resolvable: true, createdAt: at(10, 10) }),
+          ],
+        }),
+      }),
+      NOW,
+    )
+    expect(moment.remarks.map((one) => [one.id, one.withdrawable, one.resolvable])).toEqual([
+      ['F1', true, true],
+      ['F2', false, false],
+      ['F3', false, true],
+    ])
+  })
+
   test('Fix is not offered while the engine says no Fix may be pressed, whatever waits', () => {
     const moment = reviewMomentOf(
       read({

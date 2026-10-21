@@ -129,6 +129,10 @@ export const FeedbackView = Schema.Struct({
   followedBy: Schema.Array(Schema.String),
   /** The agent's answer, once addressed. */
   answer: Schema.NullOr(Schema.String),
+  /** Whether the user may withdraw it now: theirs to settle, and not yet resolved or withdrawn. */
+  withdrawable: Schema.Boolean,
+  /** Whether the user may resolve it now: theirs to settle, and addressed by the agent. */
+  resolvable: Schema.Boolean,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 })
