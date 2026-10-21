@@ -76,6 +76,11 @@ const listOf = (missionId: string) => TeamComments.use((team) => team.list(missi
 const fetched = (missionId: string) => TeamComments.use((team) => team.fetch(missionId))
 const reviewOf = (missionId: string) => Review.use((review) => review.state(missionId))
 
+/** The ids of every pending need of the Profile. */
+const pendingNeeds = Effect.map(listNeeds, (groups) =>
+  groups.flatMap((group) => group.needs.map((need) => need.id)),
+)
+
 const byComment = (views: ReadonlyArray<TeamCommentView>, commentId: string) => {
   const found = views.find((one) => one.commentId === commentId)
   if (found === undefined) throw new Error(`no team comment ${commentId}`)
@@ -639,6 +644,13 @@ describe('During Shipping, a team comment blocks nothing', () => {
           Effect.gen(function* () {
             const mission = yield* inReviewOnForge(world.work)
             yield* moved(mission.missionId, 'ship')
+            // Ship's own push waits on a click in this world: its need is there before the comments
+            // arrive, and the comments must add none to it.
+            yield* until(
+              Effect.map(pendingNeeds, (ids) => ids.length > 0),
+              LONG,
+            )
+            const needsBefore = yield* pendingNeeds
             world.set(
               state([
                 { id: 701, kind: 'general', login: SOMEONE, body: 'Can we also export to XLSX?' },
@@ -665,7 +677,8 @@ describe('During Shipping, a team comment blocks nothing', () => {
               told: page.groups
                 .filter((group) => group.missionId === mission.missionId)
                 .flatMap((group) => group.events.map((one) => one.text)),
-              needs: (yield* listNeeds).flatMap((group) => group.needs),
+              needsBefore,
+              needsAfter: yield* pendingNeeds,
               review: yield* reviewOf(mission.missionId),
               source,
               missionId: mission.missionId,
@@ -688,7 +701,7 @@ describe('During Shipping, a team comment blocks nothing', () => {
       expect(seen.review.feedback).toEqual([])
       expect(seen.kinds).toEqual(['team-comment-shipping'])
       expect(seen.told.filter((text) => /team comment/i.test(text))).toHaveLength(1)
-      expect(seen.needs).toEqual([])
+      expect(seen.needsAfter).toEqual(seen.needsBefore)
       expect(seen.source).toEqual({
         commentId: byComment(seen.list, 'issue-701').id,
         text: 'Can we also export to XLSX?',
