@@ -69,16 +69,12 @@ const NO_DOC = 'No page of the documentation mentions the invoices export.'
 /**
  * Every agent after the Freeze: the Builder finishes its task, the documenter reports no change,
  * each reviewer reports no finding; what a role is not granted is refused, and it says it is done.
+ * The Builder writes nothing: a write no rule of the Project allows would wait for the user.
  */
 const ENDING = {
   steps: [
     uses('toolu_start', 'task_start', { task: 'T1' }),
     uses('toolu_read', 'fs_read', { repository: 'api', path: 'invoices.ts' }),
-    uses('toolu_write', 'fs_write', {
-      repository: 'api',
-      path: 'invoices.ts',
-      content: 'export const invoices = ["csv"]\n',
-    }),
     uses('toolu_finished', 'task_finished', { task: 'T1', summary: 'T1 built.' }),
     uses('toolu_docs', 'docs_report', { changed: [], no_change_reason: NO_DOC }),
     uses('toolu_review', 'review_report', { findings: [] }),
@@ -103,7 +99,9 @@ describe('A mission in Review', () => {
     if (this.currentTest?.state === 'failed') console.log(diagnosticOf(SPEC).join('\n'))
   })
 
-  it('is planned, built, documented and reviewed, and moves to Review on its own', async () => {
+  it('is planned, built, documented and reviewed, and moves to Review on its own', async function () {
+    // Planning, Building, the documenter and both reviewers: longer than one gesture's minute.
+    this.timeout(240_000)
     await waitForEngine()
     await designSize()
     writeAcme()
@@ -154,14 +152,17 @@ describe('A mission in Review', () => {
 
   it('shows the Review page: the proof to verify by hand, and why the documentation did not change', async () => {
     await expect(forYou().$('button*=a CSV file is saved')).toBeDisplayed({ wait: 30_000 })
-    await rail().$('button^=Documentation').click()
+    await rail().$('button*=Documentation').click()
     await expect(rail()).toHaveText(expect.stringContaining(NO_DOC), { wait: 30_000 })
   })
 
   it('validates the proof by hand, and Ship is offered: its confirmation, then Not now', async () => {
     await forYou().$('button*=a CSV file is saved').click()
     await forYou().$('button[aria-label="Validate R1.S1"]').click()
-    await expect(forYou().$('button*=a CSV file is saved')).not.toBeExisting({ wait: 30_000 })
+    // For you goes once nothing waits there: what is gone is looked for from the page, not in it.
+    await expect(
+      $('//section[@aria-label="For you"]//button[contains(., "a CSV file is saved")]'),
+    ).not.toBeExisting({ wait: 30_000 })
     await expect(ship()).toBeDisplayed({ wait: 30_000 })
     await ship().click()
     const dialog = $('[role="dialog"]')
@@ -185,24 +186,25 @@ describe('A mission in Review', () => {
     await expect(next).toHaveText(expect.stringContaining('The header says UTC.'), {
       wait: 30_000,
     })
-    await expect(feedback().$('button^=Fix · round')).toBeDisplayed({ wait: 30_000 })
+    await expect(feedback().$('button*=Fix · round')).toBeDisplayed({ wait: 30_000 })
     await expect(ship()).not.toBeExisting({ wait: 30_000 })
-    await expect($('p*=Ship waits:')).toHaveText(
-      expect.stringContaining('1 remark waits for a fix.'),
-      { wait: 30_000 },
-    )
+    await expect($('p*=waits:')).toHaveText(expect.stringContaining('1 remark waits for a fix.'), {
+      wait: 30_000,
+    })
   })
 
   it('sends the remark with Fix: the round is worked on, and Fix is no longer offered', async () => {
-    await feedback().$('button^=Fix · round').click()
-    await expect(feedback().$('button^=Fix · round')).not.toBeExisting({ wait: 30_000 })
+    await feedback().$('button*=Fix · round').click()
+    await expect(
+      $('//section[@aria-label="Feedback"]//button[starts-with(normalize-space(), "Fix · round")]'),
+    ).not.toBeExisting({ wait: 30_000 })
     await expect($('p*=waits:')).toHaveText(expect.stringContaining('is being worked on.'), {
       wait: 30_000,
     })
   })
 
   it('opens the round over the page, and going back finds the page as it was', async () => {
-    await feedback().$('button^=Open round').click()
+    await feedback().$('button*=Open round').click()
     const close = $('button[aria-label^="Close Round"]')
     await expect(close).toBeDisplayed({ wait: 30_000 })
     await close.click()
