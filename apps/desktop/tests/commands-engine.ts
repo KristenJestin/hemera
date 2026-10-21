@@ -88,6 +88,7 @@ export function commandsEngine(
     | 'review'
     | 'hostProcesses'
     | 'runs'
+    | 'deliveries'
   > &
     Partial<Pick<ProfileParts, 'reconciliationSteps'>> = {},
   /** The engine's fibers on a test clock the program moves (`TestClock.adjust`). */

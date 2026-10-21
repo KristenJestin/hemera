@@ -25,6 +25,7 @@ import {
   ProofsRpcs,
   DeliveryRpcs,
   ShipRpcs,
+  DeliveryRunRpcs,
   TeamCommentsRpcs,
   type EngineMainRpcs,
   type EnvironmentReport,
@@ -1157,6 +1158,25 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           streamClosedAs(gone),
           observedStream('ship.progress', log),
         ),
+    }),
+    // The delivery from Ship to Done (S1), which the Shipping page shows (S7), a layer of its own.
+    DeliveryRunRpcs.toLayer({
+      'delivery.get': (request) =>
+        engine['delivery.get'](request).pipe(closedAs(gone), observed('delivery.get', log)),
+      'delivery.watch': (request) =>
+        engine['delivery.watch'](request).pipe(
+          streamClosedAs(gone),
+          observedStream('delivery.watch', log),
+        ),
+      'delivery.retryRepository': (request) =>
+        engine['delivery.retryRepository'](request).pipe(
+          closedAs(gone),
+          observed('delivery.retryRepository', log),
+        ),
+      'delivery.stop': (request) =>
+        engine['delivery.stop'](request).pipe(closedAs(gone), observed('delivery.stop', log)),
+      'delivery.refresh': (request) =>
+        engine['delivery.refresh'](request).pipe(closedAs(gone), observed('delivery.refresh', log)),
     }),
     // The team’s comments (R8), which the Review page shows (#496), a layer of its own.
     TeamCommentsRpcs.toLayer({

@@ -57,6 +57,7 @@ import { docsDeskLayer } from './building/docs-desk.ts'
 import { reviewDeskLayer } from './building/review-desk.ts'
 import { roundDeskLayer } from './review/round-desk.ts'
 import { teamCommentDeskLayer } from './review/team-comment-desk.ts'
+import { deliveryDeskLayer } from './delivery/agent-desk.ts'
 import {
   type TeamComments,
   type TeamCommentsParts,
@@ -204,6 +205,15 @@ import { Snapshots, type SnapshotsService, snapshotsLayer } from './building/sna
 import { type Diffs, diffsLayer } from './review/diffs.ts'
 import { Review, type ReviewHold, reviewLayer } from './review/feedback.ts'
 import { DELIVERY_NEEDS, Pushes, type PushesHold, pushesLayer } from './delivery/pushes.ts'
+import {
+  DELIVERY_RUN_NEEDS,
+  Deliveries,
+  type DeliveryHold,
+  deliveriesLayer,
+} from './delivery/run.ts'
+import { DELIVERY_RUN_MAPPERS } from './delivery/run-journal.ts'
+import { stepTypesLive } from './delivery/step-types.ts'
+import type { StepType } from './delivery/steps.ts'
 import { SHIP_MAPPERS } from './review/ship-journal.ts'
 import { type Ship, type ShipHold, shipLayer } from './review/ship.ts'
 import { DELIVERY_MAPPERS } from './delivery/journal.ts'
@@ -314,6 +324,19 @@ export interface ProfileParts {
     | {
         readonly git?: ((real: GitBytesSpawn) => GitBytesSpawn) | undefined
         readonly hold?: PushesHold | undefined
+      }
+    | undefined
+  /**
+   * The delivery's step types as a suite sees them, over the engine's; how often its waits are
+   * read and how long a read may take; and where a suite holds a step (S1): every 60 seconds,
+   * 30 seconds, never held otherwise.
+   */
+  readonly deliveries?:
+    | {
+        readonly types?: ReadonlyMap<string, StepType> | undefined
+        readonly pollEvery?: Duration.Input | undefined
+        readonly readLimit?: Duration.Input | undefined
+        readonly hold?: DeliveryHold | undefined
       }
     | undefined
   /** Where a suite holds a Ship (R9): never held otherwise. */
@@ -451,6 +474,7 @@ export type EngineServices =
   | Diffs
   | Review
   | Pushes
+  | Deliveries
   | Rounds
   | Ship
   | TeamComments
@@ -582,6 +606,8 @@ export const startProfile = (
     const roundContext = yield* Layer.build(roundDeskLayer)
     // Where the gate reaches the team comments' draft, served by the team comments (R8).
     const teamCommentContext = yield* Layer.build(teamCommentDeskLayer)
+    // Where the gate reaches the Delivery agent's report, served by the delivery's steps (S1).
+    const deliveryDeskContext = yield* Layer.build(deliveryDeskLayer)
     // The database as a suite sees it, wrapped around the real one (#341): one connection either way.
     const realDatabase = databaseLayer(file)
     const wrapDatabase = parts.database
@@ -613,6 +639,7 @@ export const startProfile = (
       Layer.succeedContext(reviewContext),
       Layer.succeedContext(roundContext),
       Layer.succeedContext(teamCommentContext),
+      Layer.succeedContext(deliveryDeskContext),
       specBoardLayer(log),
       Layer.succeed(ProfileHome, start),
       gitLayer(spawnGit(SYSTEM_GIT, secrets.mask, guard.spawn)),
@@ -679,6 +706,13 @@ export const startProfile = (
     })
     // One layer value: R6 and Ship (R9) share the same pushes.
     const pushesLive = pushes.layer.pipe(Layer.provide(Layer.mergeAll(diffs, checkpoints)))
+    // The delivery from Ship to Done (S1), and where its needs' answers go.
+    const deliveries = deliveriesLayer({
+      log,
+      pollEvery: parts.deliveries?.pollEvery,
+      readLimit: parts.deliveries?.readLimit,
+      hold: parts.deliveries?.hold,
+    })
     const missionParts: Partial<MissionParts> = {
       ...parts.missions,
       owners: new Map([
@@ -696,6 +730,7 @@ export const startProfile = (
         [END_NEEDS, ending.retry],
         [ROUND_NEEDS, roundNeeds],
         [DELIVERY_NEEDS, pushes.handler],
+        [DELIVERY_RUN_NEEDS, deliveries.handler],
         ...(parts.missions?.owners ?? []),
       ]),
       // The session tree's stopper, unless a part brings its own under that name.
@@ -754,6 +789,7 @@ export const startProfile = (
         ...HELPER_MAPPERS,
         ...REVIEW_MAPPERS,
         ...DELIVERY_MAPPERS,
+        ...DELIVERY_RUN_MAPPERS,
         ...SHIP_MAPPERS,
         ...(parts.memory?.mappers ?? []),
       ]),
@@ -849,6 +885,16 @@ export const startProfile = (
         ),
       ),
       pushesLive,
+      deliveries.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            diffs,
+            stepTypesLive(parts.deliveries?.types).pipe(
+              Layer.provide(Layer.mergeAll(pushesLive, snapshots)),
+            ),
+          ),
+        ),
+      ),
       // Ship (R9): the user's alone, its reruns on the proofs' runner and the Project's checks.
       shipLayer({ log, hold: parts.ship?.hold }).pipe(
         Layer.provide(
@@ -1215,6 +1261,13 @@ export const startProfile = (
     const pushEvents = yield* Context.get(context, DomainEvents).subscribe
     yield* gate.pass.pipe(
       Effect.andThen(run(Pushes.use((one) => one.follow(pushEvents)))),
+      Effect.forkScoped,
+    )
+    // The delivery (S1): followed from now, what a stop left planned and carried on once
+    // automations may run.
+    const deliveryEvents = yield* Context.get(context, DomainEvents).subscribe
+    yield* gate.pass.pipe(
+      Effect.andThen(run(Deliveries.use((one) => one.follow(deliveryEvents)))),
       Effect.forkScoped,
     )
     // Once automations may run: the reservations are settled, then again at each change (#88).

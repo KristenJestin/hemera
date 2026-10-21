@@ -22,6 +22,7 @@ import {
   DeliveryRpcs,
   ShipRpcs,
   TeamCommentsRpcs,
+  DeliveryRunRpcs,
   CheckRefused,
   InvalidProofLimit,
   DocRecipesRpcs,
@@ -667,6 +668,14 @@ const main = async (engine: 'answers' | 'gone') => {
       'teamComments.startMissionFrom': unused,
       'teamComments.changes': () =>
         Stream.die('the window’s link is not asked for the Review page here'),
+    }),
+    DeliveryRunRpcs.toLayer({
+      'delivery.get': unused,
+      'delivery.retryRepository': unused,
+      'delivery.stop': unused,
+      'delivery.refresh': unused,
+      'delivery.watch': () =>
+        Stream.die('the window’s link is not asked for the Shipping page here'),
     }),
   )
   const program = Effect.gen(function* () {

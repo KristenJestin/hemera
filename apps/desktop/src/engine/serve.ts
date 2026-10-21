@@ -25,6 +25,7 @@ import {
   SetupEditRefused,
   SetupRefused,
   ShipRpcs,
+  DeliveryRunRpcs,
   TeamCommentsRpcs,
   TesterFolderUnreadable,
 } from '@hemera/ipc'
@@ -47,6 +48,7 @@ import { Review, type ReviewService } from './review/feedback.ts'
 import { Pushes } from './delivery/pushes.ts'
 import { Ship } from './review/ship.ts'
 import { TeamComments } from './review/team-comments.ts'
+import { Deliveries } from './delivery/run.ts'
 import { Rounds } from './review/rounds.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
@@ -905,6 +907,8 @@ export const engineHandlers = (
           ['forge', use(ForgePort.use((forge) => forge.focused))],
           // The team's comments are read again at the focus (R8).
           ['team comments', use(TeamComments.use((team) => team.focused))],
+          // Every wait of the delivery is read again at the focus (S1).
+          ['delivery', use(Deliveries.use((deliveries) => deliveries.refresh))],
         ],
         log,
       ).pipe(observed('mission.focused', log)),
@@ -929,7 +933,38 @@ export const engineHandlers = (
     pushesHandlers(profile, log),
     shipHandlers(profile, log),
     teamCommentsHandlers(profile, log),
+    deliveryRunHandlers(profile, log),
   )
+}
+
+/**
+ * The delivery from Ship to Done (S1), a layer of its own (see `EngineServedRpcs`): asked by the
+ * window alone. No agent's tool reaches it.
+ */
+const deliveryRunHandlers = (profile: StartedProfile, log: Log) => {
+  const { use, follow } = profile
+  return DeliveryRunRpcs.toLayer({
+    'delivery.get': ({ missionId }) =>
+      use(Deliveries.use((deliveries) => deliveries.get(missionId))).pipe(
+        observed('delivery.get', log),
+      ),
+    'delivery.watch': ({ missionId }) =>
+      follow(Stream.unwrap(Deliveries.useSync((deliveries) => deliveries.watch(missionId)))).pipe(
+        observedStream('delivery.watch', log),
+      ),
+    'delivery.retryRepository': ({ missionId, repository }) =>
+      use(Deliveries.use((deliveries) => deliveries.retry(missionId, repository))).pipe(
+        observed('delivery.retryRepository', log),
+      ),
+    'delivery.stop': ({ missionId }) =>
+      use(Deliveries.use((deliveries) => deliveries.stop(missionId))).pipe(
+        observed('delivery.stop', log),
+      ),
+    'delivery.refresh': () =>
+      use(Deliveries.use((deliveries) => deliveries.refresh)).pipe(
+        observed('delivery.refresh', log),
+      ),
+  })
 }
 
 /**

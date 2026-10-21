@@ -4,6 +4,7 @@ import {
   EngineCoreRpcs,
   EngineDeliveryRpcs,
   EngineDeliveryRulesRpcs,
+  EngineDeliveryRunRpcs,
   EngineFeedbackRpcs,
   EngineForgeRpcs,
   EngineReviewRpcs,
@@ -28,8 +29,9 @@ export const WindowCoreRpcs = EngineCoreRpcs.merge(
 /**
  * The window's calls whole: main serves the groups of `EngineApartRpcs`, `EngineSettingsRpcs`,
  * `EngineForgeRpcs`, `EngineDeliveryRulesRpcs`, `EngineReviewRpcs` (the live diff, the automatic
- * review), `EngineFeedbackRpcs` (Review's feedback) and `EngineDeliveryRpcs` (the proofs, the
- * pushes, Ship, the team comments) as layers of their own.
+ * review), `EngineFeedbackRpcs` (Review's feedback), `EngineDeliveryRpcs` (the proofs, the
+ * pushes, Ship, the team comments) and `EngineDeliveryRunRpcs` (the delivery) as layers of their
+ * own.
  */
 export const WindowRpcs = WindowCoreRpcs.merge(
   EngineApartRpcs,
@@ -39,4 +41,5 @@ export const WindowRpcs = WindowCoreRpcs.merge(
   EngineReviewRpcs,
   EngineFeedbackRpcs,
   EngineDeliveryRpcs,
+  EngineDeliveryRunRpcs,
 )

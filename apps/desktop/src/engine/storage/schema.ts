@@ -3501,7 +3501,8 @@ export const deliveryImages = sqliteTable(
  * Ship (R9): one row per mission shipped, the record S3 checks every later change against: the
  * checkpoint Ship took, each repository's frozen tree (JSON), the versions of the rules' copies it
  * read (JSON), what the confirmation showed (JSON, masked), when, and when the mission was marked
- * delivered with the Local preset (null otherwise).
+ * delivered with the Local preset (null otherwise); and the repositories whose frozen tree differs
+ * from their base (JSON, by id), which take part in the delivery (S1), null for a Ship before it.
  */
 export const missionShips = sqliteTable('mission_ships', {
   missionId: text('mission_id')
@@ -3513,6 +3514,7 @@ export const missionShips = sqliteTable('mission_ships', {
   confirmation: text('confirmation').$type<Masked<string>>().notNull(),
   shippedAt: text('shipped_at').notNull(),
   deliveredAt: text('delivered_at'),
+  changed: text('changed'),
 })
 
 /**
@@ -3641,4 +3643,86 @@ export const teamCommentRuns = sqliteTable(
     endedAt: text('ended_at'),
   },
   (table) => [uniqueIndex('team_comment_run_of_lineage').on(table.lineage)],
+)
+
+/**
+ * A mission's delivery (S1), from Ship to Done: the version of the waves it was planned from,
+ * `running` or `stopped` (by Stop delivery or a Cancel), when it started, stopped and was delivered
+ * (every participating repository's last step done).
+ */
+export const deliveryRuns = sqliteTable('delivery_runs', {
+  missionId: text('mission_id')
+    .primaryKey()
+    .references(() => missions.id, { onDelete: 'cascade' }),
+  wavesVersion: integer('waves_version').notNull(),
+  state: text('state').notNull(),
+  startedAt: text('started_at').notNull(),
+  stoppedAt: text('stopped_at'),
+  deliveredAt: text('delivered_at'),
+  updatedAt: text('updated_at').notNull(),
+})
+
+/**
+ * A repository that takes part in a mission's delivery (S1): its name, its wave, its place in the
+ * plan, and whether it takes part for a bump only. A repository skipped has no row.
+ */
+export const deliveryRepositories = sqliteTable(
+  'delivery_repositories',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    repository: text('repository').notNull(),
+    wave: integer('wave').notNull(),
+    position: integer('position').notNull(),
+    bumpOnly: integer('bump_only', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.missionId, table.repositoryId] })],
+)
+
+/**
+ * One step of a repository's delivery (S1), by the id its copy gives it: its kind, its mode, the
+ * action as copied (JSON), where it stands (`pending`, `needs-click`, `running`, `waiting`, `done`,
+ * `failed`, `indeterminate`, `stopped`), its outcome or message (masked), why it waits (masked) and
+ * the forge CLI it waits for, the need open on it, whether the user's click let it run, what a
+ * question of its own asked (JSON), the intent of its action (CT-09), whether its wait is its own
+ * watch after it ran, and when it started and ended. An Agent step keeps its session's lineage,
+ * the tree it started from and, when the user kept what it changed, the tree they accepted (what
+ * S3's head check expects).
+ */
+export const deliverySteps = sqliteTable(
+  'delivery_steps',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    repositoryId: text('repository_id').notNull(),
+    stepId: text('step_id').notNull(),
+    position: integer('position').notNull(),
+    kind: text('kind').notNull(),
+    mode: text('mode').notNull(),
+    action: text('action').notNull(),
+    state: text('state').notNull(),
+    outcome: text('outcome').$type<Masked<string>>(),
+    message: text('message').$type<Masked<string>>(),
+    reason: text('reason').$type<Masked<string>>(),
+    waitingFor: text('waiting_for'),
+    needId: text('need_id'),
+    clicked: integer('clicked', { mode: 'boolean' }).notNull(),
+    asked: text('asked').$type<Masked<string>>(),
+    actionId: text('action_id'),
+    watching: integer('watching', { mode: 'boolean' }).notNull(),
+    lineage: text('lineage'),
+    startTree: text('start_tree'),
+    acceptedTree: text('accepted_tree'),
+    startedAt: text('started_at'),
+    endedAt: text('ended_at'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.missionId, table.repositoryId, table.stepId] }),
+    index('delivery_steps_by_need').on(table.needId),
+    index('delivery_steps_by_lineage').on(table.lineage),
+  ],
 )

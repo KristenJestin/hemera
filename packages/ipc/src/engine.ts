@@ -48,6 +48,7 @@ import { ChecksRpcs } from './checks.ts'
 import { DocRecipesRpcs } from './docs.ts'
 import { ForgeRpcs } from './forge.ts'
 import { DeliveryRpcs, DeliveryRulesRpcs } from './delivery.ts'
+import { DeliveryRunRpcs } from './delivery-run.ts'
 import { DiffRpcs } from './diff.ts'
 import { ProofsRpcs } from './proofs.ts'
 import { AutoReviewRpcs } from './review.ts'
@@ -225,6 +226,9 @@ export const EngineFeedbackRpcs = ReviewRpcs
  */
 export const EngineDeliveryRpcs = ProofsRpcs.merge(DeliveryRpcs, ShipRpcs, TeamCommentsRpcs)
 
+/** The delivery from Ship to Done (S1), which the Shipping page reads (S7): a layer of its own. */
+export const EngineDeliveryRunRpcs = DeliveryRunRpcs
+
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
   EngineSettingsRpcs,
@@ -233,6 +237,7 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineReviewRpcs,
   EngineFeedbackRpcs,
   EngineDeliveryRpcs,
+  EngineDeliveryRunRpcs,
 )
 
 /** Everything the engine serves: what main asks, which it forwards to the window. */

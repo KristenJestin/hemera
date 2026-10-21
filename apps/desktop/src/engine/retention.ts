@@ -192,6 +192,10 @@ export const TABLE_CLASSES = {
   team_comment_versions: 'permanent',
   team_comment_pushes: 'permanent',
   team_comment_runs: 'permanent',
+  // The delivery (S1): its plan, its steps and their outcomes, the mission's history.
+  delivery_runs: 'permanent',
+  delivery_repositories: 'permanent',
+  delivery_steps: 'permanent',
 } as const satisfies Record<string, RetentionClass>
 
 /**

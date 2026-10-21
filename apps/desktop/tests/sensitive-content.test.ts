@@ -480,6 +480,7 @@ const CONTENT = {
   round_ready: NOTHING,
   feedback_answer: NOTHING,
   team_comment_draft: NOTHING,
+  delivery_step_report: NOTHING,
   hemera_report: NOTHING,
   hemera_reports: NOTHING,
 } satisfies Record<ToolName, Hands>

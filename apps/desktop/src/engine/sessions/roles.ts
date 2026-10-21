@@ -26,6 +26,7 @@ import { DOCUMENTER_ROLE } from '../building/documenter-role.ts'
 import { CODE_REVIEWER_ROLE, SPEC_REVIEWER_ROLE } from '../building/review-role.ts'
 import { ROUND_PLANNER_ROLE } from '../review/round-role.ts'
 import { TEAM_COMMENT_ROLE } from '../review/team-comment-role.ts'
+import { DELIVERY_ROLE } from '../delivery/agent-role.ts'
 import type { Database, DatabaseError } from '../storage/database.ts'
 
 /** Who a session belongs to. */
@@ -115,6 +116,7 @@ export const ROLES_REGISTERED: ReadonlyArray<RoleEntry> = [
   CODE_REVIEWER_ROLE,
   ROUND_PLANNER_ROLE,
   TEAM_COMMENT_ROLE,
+  DELIVERY_ROLE,
 ]
 
 /**

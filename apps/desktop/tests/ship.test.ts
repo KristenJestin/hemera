@@ -342,12 +342,15 @@ describe('A change made outside Hemera is redone at Ship, never a refusal', () =
               reruns: yield* eventsOf(mission.missionId, 'mission.ship_rerun'),
               copied: (yield* missionCopies(mission.missionId)).map((one) => one.section),
               lines,
+              ids: (yield* getProject(mission.projectId)).repositories.map((one) => one.id),
             }
           }),
         ),
       )
       const api = seen.seen.repositories.find((one) => one.repository === 'api')
       expect(api?.files.find((one) => one.path === 'invoices.ts')?.changedOutside).toBe(true)
+      // What differs from its base is recorded with the freeze: the delivery's participants (S1).
+      expect(JSON.parse(seen.row?.changed ?? 'null')).toEqual(seen.ids)
       expect(api?.toRedo).toEqual({ proofs: [SCENARIO], checks: ['test · api'] })
       expect(seen.seen.possible).toBe(true)
       expect(seen.stage).toBe('shipping')

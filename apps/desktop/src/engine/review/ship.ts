@@ -770,6 +770,9 @@ export const shipLayer = (settings: ShipSettings) =>
           const copies = yield* missionCopies(missionId).pipe(Effect.orElseSucceed(() => []))
           const secrets = yield* Secrets
           const mission = yield* getMission(missionId)
+          const project = yield* getProject(mission.projectId).pipe(
+            Effect.catchTag('UnknownProject', Effect.die),
+          )
           // What changed since its last push, handed to the pushes as the mission is frozen.
           const push = yield* Pushes.use((pushes) => pushes.atShip(missionId)).pipe(
             Effect.catchTag('DeliveryRulesUnreadable', (failure) =>
@@ -798,6 +801,15 @@ export const shipLayer = (settings: ShipSettings) =>
               }
               const deliveredAt = allLocal(waves.copy) ? shippedAt : null
               const confirmation = secrets.mask(JSON.stringify(seen.preview))
+              // The repositories whose frozen tree differs from their base: the delivery's (S1).
+              const differs = new Set(
+                seen.preview.repositories
+                  .filter((one) => one.files.length > 0)
+                  .map((one) => one.repository),
+              )
+              const changedIds = project.repositories
+                .filter((one) => differs.has(one.path))
+                .map((one) => one.id)
               yield* transaction
                 .insert(missionShips)
                 .values({
@@ -806,6 +818,7 @@ export const shipLayer = (settings: ShipSettings) =>
                   trees: writeTrees(candidate),
                   versions: JSON.stringify({ waves: waves.copy.version, end: end.copy.version }),
                   confirmation,
+                  changed: JSON.stringify(changedIds),
                   shippedAt,
                   deliveredAt,
                 })

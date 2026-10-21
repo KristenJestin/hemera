@@ -34,7 +34,7 @@ import { getProject } from '../projects.ts'
 import type { DomainEvents } from '../domain-events.ts'
 import type { Secrets } from '../secrets.ts'
 import { Database, refusedWhile } from '../storage/database.ts'
-import { agentSessions, missions, workspaces } from '../storage/schema.ts'
+import { agentSessions, missions, workspaceRepositories, workspaces } from '../storage/schema.ts'
 import { Memory, SessionEpochs } from '../memory/index.ts'
 import { ToolAccess, toolAccessLayer } from './access.ts'
 import { effectfulActionsLayer } from './actions.ts'
@@ -160,6 +160,15 @@ const grantOf = (sessionId: string) =>
       .from(workspaces)
       .where(and(eq(workspaces.projectId, projectId), eq(workspaces.folder, session.folder)))
       .pipe(Effect.mapError(refusedWhile('reading the Workspaces')))
+    // A session in one repository's worktree of a Workspace (the Delivery agent, S1) is in it.
+    const [worktree] =
+      workspace === undefined
+        ? yield* database
+            .select({ id: workspaceRepositories.workspaceId })
+            .from(workspaceRepositories)
+            .where(eq(workspaceRepositories.worktree, session.folder))
+            .pipe(Effect.mapError(refusedWhile('reading the Workspaces')))
+        : []
     const helped = yield* helperOf(sessionId)
     return Option.match(role, {
       // A role this version does not know is handed no tool rather than guessed at.
@@ -198,7 +207,7 @@ const grantOf = (sessionId: string) =>
                   },
             projectId,
             missionId,
-            workspaceId: workspace?.id ?? null,
+            workspaceId: workspace?.id ?? worktree?.id ?? null,
             mainCheckout: resolve(project.mainCheckout) === folder,
           },
         }
