@@ -95,7 +95,7 @@ function RetiredQuestion({
         <span className="line-clamp-2 break-words">{question.text}</span>
         <span className="text-xs break-words">{why}</span>
       </div>
-      {discussed && (
+      {discussed && onDiscuss !== undefined && (
         <Button
           variant="ghost"
           size="sm"
@@ -317,13 +317,10 @@ function Proposed({
 
 export interface QuestionCardProps extends Pick<
   PlanningHandlers,
-  | 'onAnswer'
-  | 'onWaitOnSomeone'
-  | 'onCopyDraft'
-  | 'onAcceptProposed'
-  | 'onDismissProposed'
-  | 'onDiscuss'
+  'onAnswer' | 'onWaitOnSomeone' | 'onCopyDraft' | 'onAcceptProposed' | 'onDismissProposed'
 > {
+  /** Opens the question's discussion; a page that talks to agents otherwise offers no Discuss. */
+  onDiscuss?: PlanningHandlers['onDiscuss'] | undefined
   question: Question
   /** Whether a discussion on it exists already: Discuss then opens it. */
   discussed: boolean
@@ -562,14 +559,16 @@ function OpenQuestion({
             I’m waiting on someone
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onDiscuss({ kind: 'question', id: question.id })}
-        >
-          <IconMessages size="sm" />
-          {discussed ? 'Open the discussion' : 'Discuss'}
-        </Button>
+        {onDiscuss !== undefined && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDiscuss({ kind: 'question', id: question.id })}
+          >
+            <IconMessages size="sm" />
+            {discussed ? 'Open the discussion' : 'Discuss'}
+          </Button>
+        )}
       </div>
     </article>
   )

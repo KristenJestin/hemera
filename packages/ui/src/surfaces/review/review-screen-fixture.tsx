@@ -174,7 +174,6 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
     onCopyDraft: props.onCopy,
     onAcceptProposed: noAnswer,
     onDismissProposed: noAnswer,
-    onDiscuss: () => {},
   }
   const rail: RailHandlers = {
     onService: props.onService,

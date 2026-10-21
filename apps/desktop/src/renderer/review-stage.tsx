@@ -83,8 +83,8 @@ export function ReviewStage({
       onCopyDraft: copy,
       onAcceptProposed: act.acceptProposed,
       onDismissProposed: act.dismissProposed,
-      // A round's question is answered here; its discussion belongs to Planning's page.
-      onDiscuss: () => undefined,
+      // A round's question is answered here, never discussed: in Review the user talks to the
+      // agents through feedback and what waits for them.
     },
   }
   const feedback: FeedbackHandlers = {
@@ -121,20 +121,14 @@ export function ReviewStage({
       />
     )
   // A round's conflicts and new missions are the engine's questions, answered in its waves: a
-  // point offers no way out of its own. Building · round N is the Building page, not this one.
+  // point offers no way out of its own. Building · round N is the Building page, which the
+  // mission shows by itself while a round builds: this view says it and opens nothing.
   const views: MissionView[] = (moment?.rounds ?? []).map((round) => ({
     id: roundViewId(round.n),
     title: `Round ${String(round.n)}`,
     icon: <IconMessages size="sm" />,
     width: 'wide',
-    body: (
-      <RoundView
-        round={round}
-        question={rail.question}
-        onPoint={() => undefined}
-        onOpenBuilding={() => undefined}
-      />
-    ),
+    body: <RoundView round={round} question={rail.question} />,
   }))
   const local = moment?.forge === null
   const refusals = moment?.refusals ?? []

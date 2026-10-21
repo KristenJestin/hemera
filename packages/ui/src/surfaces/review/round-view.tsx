@@ -21,9 +21,15 @@ import type { Round, RoundPoint } from './review-types.ts'
  * with a note, withdraw the remark, or cancel the point. A point that adds what the Spec never
  * asked for offers to start a mission of its own instead. Once the round is closed, nothing is
  * offered: it is read, the way it ended.
+ *
+ * What goes somewhere is offered only where something answers it: without `onPoint` a point's
+ * ways out are not drawn (the reason stays), and without `onOpenBuilding` the Building line is
+ * a line, not a button.
  */
 
 export type PointAction = 'clarify' | 'withdraw' | 'cancel' | 'mission'
+
+type PointHandler = (id: string, action: PointAction, note: string) => void
 
 const KIND: Record<RoundPoint['kind'], string> = { fix: 'Fix', behaviour: 'Behaviour change' }
 
@@ -39,7 +45,7 @@ function Conflict({
   onPoint,
 }: {
   point: RoundPoint
-  onPoint: (id: string, action: PointAction, note: string) => void
+  onPoint: PointHandler | undefined
 }): ReactNode {
   const [clarifying, setClarifying] = useState(false)
   const [note, setNote] = useState('')
@@ -57,7 +63,7 @@ function Conflict({
       <p className="max-w-measure text-sm break-words text-warning-muted-foreground">
         {conflict.why}
       </p>
-      {clarifying ? (
+      {onPoint === undefined ? null : clarifying ? (
         <Input
           label={`The note on ${point.id}`}
           size="sm"
@@ -95,7 +101,7 @@ function PointLine({
 }: {
   point: RoundPoint
   closed: boolean
-  onPoint: (id: string, action: PointAction, note: string) => void
+  onPoint: PointHandler | undefined
 }): ReactNode {
   const [open, setOpen] = useState(false)
   return (
@@ -129,7 +135,7 @@ function PointLine({
         </div>
       </Unfolding>
       {!closed && <Conflict point={point} onPoint={onPoint} />}
-      {point.newMission !== undefined && !closed && (
+      {point.newMission !== undefined && !closed && onPoint !== undefined && (
         <div className="flex min-w-0 flex-wrap items-center gap-2 pr-4 pb-2 pl-10">
           <span className="min-w-0 text-sm text-muted-foreground">
             {`The Spec never asks for it: “${point.newMission}” can be a mission of its own.`}
@@ -145,8 +151,23 @@ function PointLine({
 }
 
 /** Where the round stands, on one line; while it builds, the way to the Building page. */
-function Where({ round, onOpenBuilding }: { round: Round; onOpenBuilding: () => void }): ReactNode {
+function Where({
+  round,
+  onOpenBuilding,
+}: {
+  round: Round
+  onOpenBuilding: (() => void) | undefined
+}): ReactNode {
   if (round.state === 'building') {
+    if (onOpenBuilding === undefined) {
+      return (
+        <p className="flex min-h-control-md items-center gap-2 text-sm">
+          <StatusMark state="running" size="sm" />
+          <span className="font-medium">{`Building · round ${String(round.n)}`}</span>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{round.building}</span>
+        </p>
+      )
+    }
     return (
       <button
         type="button"
@@ -175,8 +196,8 @@ function Where({ round, onOpenBuilding }: { round: Round; onOpenBuilding: () => 
 export interface RoundViewProps {
   round: Round
   question: RailHandlers['question']
-  onPoint: (id: string, action: PointAction, note: string) => void
-  onOpenBuilding: () => void
+  onPoint?: PointHandler | undefined
+  onOpenBuilding?: (() => void) | undefined
 }
 
 export function RoundView({ round, question, onPoint, onOpenBuilding }: RoundViewProps): ReactNode {
