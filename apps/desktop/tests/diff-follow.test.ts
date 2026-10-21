@@ -76,6 +76,7 @@ const NO_REVIEW: ReviewStateView = {
   rounds: [],
   feedback: [],
   waits: false,
+  fixable: false,
 }
 
 const feedback = (id: string): FeedbackView => ({

@@ -44,7 +44,6 @@ import {
   FEEDBACK_STATES,
   type FeedbackStanding,
   ROUND_STATES,
-  RUNNING_ROUND_STATES,
   START_A_MISSION,
   type ToolArguments,
   graphProblemSaid,
@@ -59,6 +58,7 @@ import {
   roundTaskId,
   startedFromSaid,
   taskGraph,
+  fixHeldBy,
   waitsForFix,
 } from '@hemera/core/domain'
 import {
@@ -430,6 +430,8 @@ export const roundsLayer = (settings: RoundsSettings) =>
                 if (round === undefined || !waitsForFix(rows.map(standingOf))) {
                   return yield* refuse(NOTHING_WAITS)
                 }
+                const held = fixHeldBy(round.number, all.map(standingOfRound))
+                if (held !== null) return yield* refuse(held)
                 const closing: NewEvent[] = []
                 for (const other of all) {
                   if (other.number === round.number) continue
@@ -451,10 +453,6 @@ export const roundsLayer = (settings: RoundsSettings) =>
                         from: 'answered',
                         to: 'closed',
                       }),
-                    )
-                  } else if (RUNNING_ROUND_STATES.some((running) => running === other.state)) {
-                    return yield* refuse(
-                      `round ${String(other.number)} is ${other.state}: round ${String(round.number)} waits for it to be answered`,
                     )
                   }
                 }
@@ -1654,3 +1652,9 @@ const standingOf = (row: typeof reviewFeedback.$inferSelect): FeedbackStanding =
 })
 
 const roundStateOf = (state: string) => ROUND_STATES.find((one) => one === state) ?? 'collecting'
+
+/** What of a round row says whether it holds a Fix back. */
+const standingOfRound = (row: typeof reviewRounds.$inferSelect) => ({
+  number: row.number,
+  state: roundStateOf(row.state),
+})

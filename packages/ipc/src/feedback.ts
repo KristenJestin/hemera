@@ -143,6 +143,8 @@ export const ReviewStateView = Schema.Struct({
   feedback: Schema.Array(FeedbackView),
   /** Whether feedback waits for a Fix: one `waiting`, not a question. */
   waits: Schema.Boolean,
+  /** Whether Fix may be pressed now: feedback waits, and no other round is grilled or built. */
+  fixable: Schema.Boolean,
 })
 export type ReviewStateView = typeof ReviewStateView.Type
 

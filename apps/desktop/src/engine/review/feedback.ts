@@ -43,6 +43,7 @@ import {
   rangeRefusal,
   roundMoveRefusal,
   sniffImage,
+  fixHeldBy,
   waitsForFix,
 } from '@hemera/core/domain'
 import {
@@ -913,7 +914,7 @@ export const reviewLayer = (settings: ReviewSettings) =>
 
       const state = (missionId: string) =>
         Effect.gen(function* () {
-          yield* missionRow(missionId)
+          const mission = yield* missionRow(missionId)
           const rounds = yield* database
             .select()
             .from(reviewRounds)
@@ -933,6 +934,11 @@ export const reviewLayer = (settings: ReviewSettings) =>
             .orderBy(asc(reviewFeedback.round), asc(reviewFeedback.createdAt))
             .pipe(Effect.mapError(refusedWhile('reading the feedback')))
           const feedback = yield* viewsOf(missionId, rows)
+          const standings = rounds.map((one) => ({
+            number: one.number,
+            state: roundStateOf(one.state),
+          }))
+          const collecting = standings.find((one) => one.state === 'collecting')
           const view: ReviewStateView = {
             missionId,
             checkpoints: yield* Effect.forEach(kept, (one) =>
@@ -946,6 +952,13 @@ export const reviewLayer = (settings: ReviewSettings) =>
             })),
             feedback,
             waits: waitsForFix(feedback),
+            // Fix's own conditions (`Rounds.fix`): in Review, the collecting round's feedback
+            // waits, and no other round is grilled or built.
+            fixable:
+              mission.stage === 'review' &&
+              collecting !== undefined &&
+              waitsForFix(feedback.filter((one) => one.round === collecting.number)) &&
+              fixHeldBy(collecting.number, standings) === null,
           }
           return view
         })

@@ -82,6 +82,21 @@ export function waitsForFix(feedback: ReadonlyArray<FeedbackStanding>): boolean 
   return feedback.some((one) => one.state === 'waiting' && one.kind !== 'question')
 }
 
+/**
+ * Why the Fix of round `number` waits, or null: another round is grilled or built. An answered
+ * round does not hold it back, since the next Fix closes it (open question 35).
+ */
+export function fixHeldBy(
+  number: number,
+  rounds: ReadonlyArray<{ readonly number: number; readonly state: RoundState }>,
+): string | null {
+  const other = rounds.find(
+    (one) => one.number !== number && (one.state === 'grilling' || one.state === 'building'),
+  )
+  if (other === undefined) return null
+  return `round ${String(other.number)} is ${other.state}: round ${String(number)} waits for it to be answered`
+}
+
 /** Why round `number` may not move from one state to another, or null: forward only. */
 export function roundMoveRefusal(number: number, from: RoundState, to: RoundState): string | null {
   if (ROUND_STATES.indexOf(to) > ROUND_STATES.indexOf(from)) return null
