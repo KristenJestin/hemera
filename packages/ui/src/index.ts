@@ -225,7 +225,7 @@ export { TaskView } from './surfaces/building/task-view.tsx'
 export * as Review from './surfaces/review/review-types.ts'
 export { ReviewPage, type ReviewPageProps } from './surfaces/review/review-page.tsx'
 export {
-  imageOf,
+  type Attached,
   type FeedbackHandlers,
   type NewRemark,
 } from './surfaces/review/review-feedback.tsx'

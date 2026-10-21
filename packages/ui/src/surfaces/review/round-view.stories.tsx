@@ -21,6 +21,8 @@ const meta = {
     onShip: fn(),
     onService: fn(),
     onRemark: fn(),
+    onAttach: fn(),
+    onStartMission: fn(),
     onFix: fn(),
     onVerify: fn(),
     onTeam: fn(),

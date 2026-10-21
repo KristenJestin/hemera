@@ -5,6 +5,7 @@ import { Button } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Textarea } from '../../components/field/field.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
+import { MentionField, type Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import type { MarkState } from '../../components/status-mark/mark-legends.ts'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
@@ -51,8 +52,15 @@ export interface NewRemark {
   follows?: string | undefined
 }
 
+/** What Hemera answered for an image attached: the id it keeps it by, or why it refused it. */
+export type Attached = { id: string } | { refused: string }
+
 export interface FeedbackHandlers {
   onAdd: (remark: NewRemark) => void
+  /** An image attached, pasted or dropped, handed to Hemera at once: Hemera judges it. */
+  onAttach: (file: File) => Promise<Attached>
+  /** A remark the agent answered with a mission of its own: the mission is started from it. */
+  onStartMission: (id: string) => void
   onEdit: (id: string, text: string) => void
   onWithdraw: (id: string) => void
   onResolve: (id: string) => void
@@ -85,31 +93,14 @@ export function remarkLegend(remark: Remark): string {
   }
 }
 
-/** The images Hemera keeps: png, jpeg and webp, up to 10 MB each. */
-const KEPT = new Map([
-  ['image/png', 'png'],
-  ['image/jpeg', 'jpeg'],
-  ['image/webp', 'webp'],
-])
-
-const LIMIT = 10 * 1024 * 1024
-
 const sizeOf = (bytes: number): string =>
   bytes >= 1024 * 1024
     ? `${String(Math.round(bytes / 1024 / 1024))} MB`
     : `${String(Math.max(1, Math.round(bytes / 1024)))} KB`
 
-/** An image as Hemera takes it: kept, or refused with the reason in words. */
-export function imageOf(file: File): RemarkImage {
-  const size = sizeOf(file.size)
-  if (!KEPT.has(file.type)) {
-    const kind = (file.name.split('.').at(-1) ?? 'This file').toUpperCase()
-    return { name: file.name, size, refused: `${kind} is not kept: png, jpeg or webp` }
-  }
-  if (file.size > LIMIT) {
-    return { name: file.name, size, refused: `Too large: ${size}, the limit is 10 MB` }
-  }
-  return { name: file.name, size }
+/** An image of the remark being written: kept by Hemera under its id, or refused with why. */
+interface Taken extends RemarkImage {
+  id?: string | undefined
 }
 
 /** The images of a remark, one line each: kept with their size, refused with why. */
@@ -173,29 +164,45 @@ const filesOf = (list: FileList | null): File[] => (list === null ? [] : [...lis
  */
 export function Composer({
   follows,
+  mentionables,
   onAdd,
+  onAttach,
   onOpenDiff,
 }: {
   /** The remark this one follows up, for a follow-up written under it. */
   follows?: string | undefined
+  mentionables: readonly Mentionable[]
   onAdd: (remark: NewRemark) => void
+  onAttach: (file: File) => Promise<Attached>
   onOpenDiff?: (() => void) | undefined
 }): ReactNode {
   const id = useId()
   const [kind, setKind] = useState<Remark['kind']>('remark')
   const [text, setText] = useState('')
-  const [images, setImages] = useState<readonly RemarkImage[]>([])
+  const [images, setImages] = useState<readonly Taken[]>([])
   const take = (files: readonly File[]): void => {
-    if (files.length === 0) return
-    setImages((before) => [
-      ...before,
-      ...files.map(imageOf).filter((one) => !before.some((had) => had.name === one.name)),
-    ])
+    for (const file of files) {
+      if (images.some((had) => had.name === file.name)) continue
+      const size = sizeOf(file.size)
+      void onAttach(file).then(
+        (answer) => {
+          const taken: Taken =
+            'id' in answer
+              ? { name: file.name, size, id: answer.id }
+              : { name: file.name, size, refused: answer.refused }
+          setImages((before) =>
+            before.some((had) => had.name === file.name) ? before : [...before, taken],
+          )
+        },
+        (failure: Error) =>
+          setImages((before) => [...before, { name: file.name, size, refused: failure.message }]),
+      )
+    }
   }
   const add = (): void => {
     const words = text.trim()
     if (words === '') return
-    const kept = images.filter((one) => one.refused === undefined).map((one) => one.name)
+    const kept = images.flatMap((one) => (one.id === undefined ? [] : [one.id]))
     onAdd(
       follows === undefined
         ? { kind, text: words, images: kept }
@@ -218,12 +225,6 @@ export function Composer({
         event.preventDefault()
         add()
       }}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' || event.shiftKey) return
-        if (!(event.target instanceof HTMLTextAreaElement)) return
-        event.preventDefault()
-        add()
-      }}
       onPaste={(event: ClipboardEvent<HTMLFormElement>) => take(filesOf(event.clipboardData.files))}
       onDragOver={(event: DragEvent<HTMLFormElement>) => event.preventDefault()}
       onDrop={(event: DragEvent<HTMLFormElement>) => {
@@ -231,16 +232,17 @@ export function Composer({
         take(filesOf(event.dataTransfer.files))
       }}
     >
-      <Textarea
+      <MentionField
         label={label}
-        rows={2}
         placeholder={
           kind === 'question'
             ? 'What you want to understand. It gets an answer, never a change.'
             : 'What you saw. Paste or drop images here.'
         }
         value={text}
-        onValueChange={setText}
+        onValueChange={(value) => setText(value)}
+        mentionables={mentionables}
+        onSubmit={add}
       />
       <Images
         images={images}
@@ -310,10 +312,12 @@ export function Composer({
 export function RemarkLine({
   remark,
   handlers,
+  mentionables,
   initiallyOpen = false,
 }: {
   remark: Remark
   handlers: FeedbackHandlers
+  mentionables: readonly Mentionable[]
   initiallyOpen?: boolean | undefined
 }): ReactNode {
   const [open, setOpen] = useState(initiallyOpen)
@@ -410,6 +414,17 @@ export function RemarkLine({
                 {remark.kind === 'question' ? 'The answer' : 'What the agent did'}
               </span>
               <p className={PROSE}>{remark.answer}</p>
+              {remark.toMission === true && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="self-start"
+                  aria-label={`Start a mission from ${remark.id}`}
+                  onClick={() => handlers.onStartMission(remark.id)}
+                >
+                  Start a mission from this
+                </Button>
+              )}
             </div>
           )}
           <RemarkActions
@@ -423,6 +438,8 @@ export function RemarkLine({
             <div className="max-w-measure">
               <Composer
                 follows={remark.id}
+                mentionables={mentionables}
+                onAttach={handlers.onAttach}
                 onAdd={(added) => {
                   handlers.onAdd(added)
                   setFollowing(false)
@@ -515,11 +532,13 @@ function RoundGroup({
   round,
   remarks,
   handlers,
+  mentionables,
   initiallyOpen,
 }: {
   round: Round
   remarks: readonly Remark[]
   handlers: FeedbackHandlers
+  mentionables: readonly Mentionable[]
   initiallyOpen: boolean
 }): ReactNode {
   const [open, setOpen] = useState(initiallyOpen)
@@ -547,7 +566,12 @@ function RoundGroup({
       <Unfolding open={open}>
         <ul aria-label={name} className="flex flex-col border-t border-border">
           {remarks.map((remark) => (
-            <RemarkLine key={remark.id} remark={remark} handlers={handlers} />
+            <RemarkLine
+              key={remark.id}
+              remark={remark}
+              handlers={handlers}
+              mentionables={mentionables}
+            />
           ))}
         </ul>
       </Unfolding>
@@ -583,6 +607,8 @@ export interface FeedbackProps extends FeedbackHandlers {
   /** Whether Fix may be pressed now: the engine's word, never worked out here. */
   fixable: boolean
   rounds: readonly Round[]
+  /** What the field offers after `@`: the Project's missions and commands. */
+  mentionables: readonly Mentionable[]
   loading?: boolean | undefined
 }
 
@@ -591,6 +617,7 @@ export function Feedback({
   remarks,
   fixable,
   rounds,
+  mentionables,
   loading = false,
   ...handlers
 }: FeedbackProps): ReactNode {
@@ -608,7 +635,12 @@ export function Feedback({
       />
       <Frame>
         <div className="px-4 py-3">
-          <Composer onAdd={handlers.onAdd} onOpenDiff={() => handlers.onOpenDiff('')} />
+          <Composer
+            mentionables={mentionables}
+            onAdd={handlers.onAdd}
+            onAttach={handlers.onAttach}
+            onOpenDiff={() => handlers.onOpenDiff('')}
+          />
         </div>
       </Frame>
       {loading ? (
@@ -629,7 +661,12 @@ export function Feedback({
               <Frame>
                 <ul aria-label="Next round" className="flex flex-col">
                   {waiting.map((remark) => (
-                    <RemarkLine key={remark.id} remark={remark} handlers={handlers} />
+                    <RemarkLine
+                      key={remark.id}
+                      remark={remark}
+                      handlers={handlers}
+                      mentionables={mentionables}
+                    />
                   ))}
                 </ul>
               </Frame>
@@ -641,6 +678,7 @@ export function Feedback({
               round={round}
               remarks={remarks.filter((one) => one.round === round.n && one.state !== 'waiting')}
               handlers={handlers}
+              mentionables={mentionables}
               initiallyOpen={at === 0}
             />
           ))}

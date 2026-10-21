@@ -26,7 +26,8 @@ import {
   type MomentName,
   TITLE,
 } from './review-fixtures.ts'
-import type { NewRemark } from './review-feedback.tsx'
+import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
+import type { Attached, NewRemark } from './review-feedback.tsx'
 import { ReviewPage } from './review-page.tsx'
 import type { RailHandlers } from './review-rail.tsx'
 import { type PointAction, RoundView } from './round-view.tsx'
@@ -56,6 +57,9 @@ export interface ReviewScreenProps {
   onShip: () => void
   onService: RailHandlers['onService']
   onRemark: (action: 'add' | 'edit' | 'withdraw' | 'resolve', what: RemarkWhat) => void
+  /** An image handed to Hemera: the story's engine keeps it or refuses it as Hemera does. */
+  onAttach: (file: File) => void
+  onStartMission: (id: string) => void
   onFix: () => void
   onVerify: RailHandlers['onVerify']
   onTeam: RailHandlers['onTeam']
@@ -120,6 +124,25 @@ function previewOf(moment: ReviewMoment, asked: ReviewScreenProps['preview']): S
 }
 
 const noAnswer = async (): Promise<void> => {}
+
+/** The images Hemera keeps: png, jpeg and webp, up to 10 MB each. */
+const KEPT = new Set(['image/png', 'image/jpeg', 'image/webp'])
+
+const LIMIT = 10 * 1024 * 1024
+
+/** The story's engine on an image: kept under its name, or refused in Hemera's words. */
+function attachedOf(file: File): Attached {
+  if (!KEPT.has(file.type)) {
+    const kind = (file.name.split('.').at(-1) ?? 'This file').toUpperCase()
+    return { refused: `${kind} is not kept: png, jpeg or webp` }
+  }
+  if (file.size > LIMIT) {
+    return {
+      refused: `Too large: ${String(Math.round(file.size / 1024 / 1024))} MB, the limit is 10 MB`,
+    }
+  }
+  return { id: file.name }
+}
 
 /** The Review page of ACME-12 in its frame, the needs above it, its views over it. */
 export function ReviewScreen(props: ReviewScreenProps): ReactNode {
@@ -280,6 +303,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
             moment={moment}
             loading={loading}
             rail={rail}
+            mentionables={MENTIONABLES}
             feedback={{
               onAdd: (added) => {
                 props.onRemark('add', added)
@@ -291,7 +315,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                     text: added.text,
                     state: 'waiting',
                     at: 'now',
-                    images: added.images.map((name) => ({ name, size: '' })),
+                    images: added.images.map((name) => ({ name, size: '2 KB' })),
                     follows: added.follows,
                   },
                 ])
@@ -308,6 +332,11 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                 props.onRemark('resolve', { id })
                 change(id, (one) => ({ ...one, state: 'resolved' }))
               },
+              onAttach: (file) => {
+                props.onAttach(file)
+                return Promise.resolve(attachedOf(file))
+              },
+              onStartMission: props.onStartMission,
               onFix: props.onFix,
               onOpenDiff: openDiff,
               onOpenRound: (n) => views.open(`round:${String(n)}`),

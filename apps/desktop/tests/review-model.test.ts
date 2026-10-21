@@ -5,6 +5,7 @@
  * there when the engine says a Fix may be pressed, Ship's refusal is the engine's reasons.
  */
 
+import { TO_A_MISSION } from '@hemera/core/domain'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { reviewMomentOf, type ReviewRead } from '../src/renderer/review-model.ts'
@@ -413,6 +414,34 @@ describe('The feedback by round', () => {
     expect(moment.remarks[0]?.answer).toBe('The dates follow the customer’s time zone now.')
     expect(moment.rounds.map((one) => [one.n, one.state])).toEqual([[1, 'back']])
     expect(moment.fixable).toBe(true)
+  })
+
+  test('a remark the engine answered with a mission of its own offers to start it, with its images', () => {
+    const moment = reviewMomentOf(
+      read({
+        state: reviewState({
+          feedback: [
+            feedback({
+              state: 'addressed',
+              answer: TO_A_MISSION,
+              images: [
+                {
+                  evidenceId: 'ev-1',
+                  name: 'header.png',
+                  sha256: 'a1',
+                  size: 2048,
+                  mediaType: 'image/png',
+                },
+              ],
+            }),
+            feedback({ id: 'fb-2', state: 'addressed', answer: 'Done.', createdAt: at(10, 5) }),
+          ],
+        }),
+      }),
+      NOW,
+    )
+    expect(moment.remarks.map((one) => one.toMission)).toEqual([true, undefined])
+    expect(moment.remarks[0]?.images).toEqual([{ name: 'header.png', size: '2 KB' }])
   })
 
   test('Fix is not offered while the engine says no Fix may be pressed, whatever waits', () => {

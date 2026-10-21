@@ -17,6 +17,7 @@ import { IconGitCompare } from '@hemera/ui/icons'
 import { createElement, useEffect, useState, type ReactNode } from 'react'
 
 import type { Link } from './link.ts'
+import type { StartSeed } from './start-results.ts'
 import {
   followKept,
   freezeShown,
@@ -55,6 +56,8 @@ export interface MissionRouteProps {
     goProject: () => void
     /** Goes to another mission of the Project, by its key. */
     goMission: (key: string) => void
+    /** Goes to the Project's start field, opened on a mission started from a remark. */
+    startMission?: ((seed: StartSeed) => void) | undefined
     /** Opens a Chat of the Project, by its id. */
     openChat: (chatId: string) => void
     answer: ShellActions['answer']
@@ -214,6 +217,7 @@ export function MissionPage({
         mission,
         open: actions.open,
         goMission: actions.goMission,
+        startMission: actions.startMission ?? (() => undefined),
         readiness,
         openChat: actions.openChat,
         refused,

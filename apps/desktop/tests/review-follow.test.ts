@@ -4,12 +4,19 @@
  * happens when a change is heard, and only then.
  */
 
-import { ProofRefused, type BuildingView, type ProofsView, type ReviewChange } from '@hemera/ipc'
+import {
+  FeedbackRefused,
+  ImageRefused,
+  ProofRefused,
+  type BuildingView,
+  type ProofsView,
+  type ReviewChange,
+} from '@hemera/ipc'
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { Link } from '../src/renderer/link.ts'
 import { followReview, type ReviewFollowView } from '../src/renderer/review-follow.ts'
-import { building, diff, now, proof, service } from './building-fixtures.ts'
+import { at, building, diff, now, proof, service } from './building-fixtures.ts'
 import { SILENT_LINK } from './fake-link.ts'
 import { feedback, proofsView, reviewState, shipPreview } from './review-fixtures.ts'
 
@@ -157,5 +164,134 @@ describe('A proof verified by hand', () => {
     await settled()
     await following.verify('S2', { validated: true })
     expect(last()?.refused).toBe('S2 is not verified by hand.')
+  })
+})
+
+describe('The feedback', () => {
+  const sent: string[] = []
+  const withFeedback = (more: Partial<Link> = {}) => {
+    sent.length = 0
+    const played = linkOf({
+      addFeedback: (missionId, kind, body, anchor, images) => {
+        sent.push(`add ${missionId} ${kind} ${body} ${String(anchor)} ${(images ?? []).join(',')}`)
+        return Promise.resolve(feedback())
+      },
+      followUpFeedback: (feedbackId, body, images) => {
+        sent.push(`follow ${feedbackId} ${body} ${(images ?? []).join(',')}`)
+        return Promise.resolve(feedback())
+      },
+      editFeedback: (feedbackId, body, version) => {
+        sent.push(`edit ${feedbackId} ${body} ${String(version)}`)
+        return Promise.resolve(feedback())
+      },
+      withdrawFeedback: (feedbackId) => {
+        sent.push(`withdraw ${feedbackId}`)
+        return Promise.resolve(feedback())
+      },
+      resolveFeedback: (feedbackId) => {
+        sent.push(`resolve ${feedbackId}`)
+        return Promise.resolve(feedback())
+      },
+      ...more,
+    })
+    played.setState(
+      reviewState({
+        feedback: [
+          feedback({ id: 'fb-a', version: 3 }),
+          feedback({ id: 'fb-b', state: 'addressed', createdAt: at(10, 5) }),
+        ],
+      }),
+    )
+    return played
+  }
+
+  test('a remark added goes to the engine with the images Hemera kept, and is read back', async () => {
+    const played = withFeedback()
+    const { following } = review(played.link)
+    await settled()
+    const reads = played.calls.filter((one) => one === 'state').length
+    await following.add({ kind: 'remark', text: 'The header says UTC.', images: ['ev-1'] })
+    expect(sent).toEqual(['add m12 remark The header says UTC. null ev-1'])
+    expect(played.calls.filter((one) => one === 'state').length).toBe(reads + 1)
+  })
+
+  test('a follow-up names the remark it follows by the engine’s id', async () => {
+    const played = withFeedback()
+    const { following } = review(played.link)
+    await settled()
+    await following.add({ kind: 'remark', text: 'Still visible.', images: [], follows: 'F2' })
+    expect(sent).toEqual(['follow fb-b Still visible. '])
+  })
+
+  test('edit, withdraw and resolve name the feedback by the engine’s id, the edit on its version', async () => {
+    const played = withFeedback()
+    const { following } = review(played.link)
+    await settled()
+    await following.edit('F1', 'The export keeps the filter.')
+    await following.withdraw('F1')
+    await following.resolve('F2')
+    expect(sent).toEqual([
+      'edit fb-a The export keeps the filter. 3',
+      'withdraw fb-a',
+      'resolve fb-b',
+    ])
+  })
+
+  test('an image attached is handed to Hemera, which keeps it or says why not', async () => {
+    const names: string[] = []
+    const played = withFeedback({
+      addImage: (missionId, name, bytes) => {
+        names.push(`${missionId} ${name} ${String(bytes.length)}`)
+        return name.endsWith('.gif')
+          ? Promise.reject(new ImageRefused({ reason: 'GIF is not kept: png, jpeg or webp' }))
+          : Promise.resolve({ evidenceId: 'ev-1', sha256: 'a1', size: 3, width: 1, height: 1 })
+      },
+    })
+    const { following } = review(played.link)
+    await settled()
+    const kept = await following.attach(new File([new Uint8Array([1, 2, 3])], 'header.png'))
+    const refused = await following.attach(new File([new Uint8Array([1])], 'loop.gif'))
+    expect(names).toEqual(['m12 header.png 3', 'm12 loop.gif 1'])
+    expect(kept).toEqual({ id: 'ev-1' })
+    expect(refused).toEqual({ refused: 'GIF is not kept: png, jpeg or webp' })
+  })
+
+  test('Fix sends the round, and a refusal is the engine’s words', async () => {
+    const fixed: string[] = []
+    const played = withFeedback({
+      fix: (missionId) => {
+        fixed.push(missionId)
+        return fixed.length === 1
+          ? Promise.resolve()
+          : Promise.reject(new FeedbackRefused({ reason: 'No feedback waits for a Fix.' }))
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    await following.fix()
+    expect(fixed).toEqual(['m12'])
+    expect(last()?.refused).toBeUndefined()
+    await following.fix()
+    expect(last()?.refused).toBe('No feedback waits for a Fix.')
+  })
+
+  test('Start a mission from this hands the start field the remark and where it comes from', async () => {
+    const played = withFeedback({
+      startMissionFrom: (feedbackId) =>
+        Promise.resolve({
+          feedbackId,
+          text: 'Export the invoices of a year at once.',
+          origin: 'm12',
+          originSaid: 'Started from ACME-12, round 1',
+        }),
+    })
+    const { following } = review(played.link)
+    await settled()
+    await expect(following.startMission('F2')).resolves.toEqual({
+      text: 'Export the invoices of a year at once.',
+      origin: 'm12',
+      originFeedback: 'fb-b',
+      said: 'Started from ACME-12, round 1',
+    })
   })
 })

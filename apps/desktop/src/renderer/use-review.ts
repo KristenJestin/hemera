@@ -4,7 +4,7 @@ import type { Link } from './link.ts'
 import { followReview, type ReviewFollowView, type ReviewFollowing } from './review-follow.ts'
 import { followedOf, useFollower } from './use-building.ts'
 
-const LOADING_REVIEW: ReviewFollowView = { moment: null }
+const LOADING_REVIEW: ReviewFollowView = { moment: null, mentionables: [] }
 
 /** A mission's Review page, and what the window does with it. */
 export function useReview(
@@ -24,6 +24,14 @@ export function useReview(
     {
       service: (name, action) => sent((following) => following.service(name, action)),
       verify: (scenarioId, verdict) => sent((following) => following.verify(scenarioId, verdict)),
+      add: (remark) => sent((following) => following.add(remark)),
+      attach: (file) =>
+        current()?.attach(file) ?? Promise.resolve({ refused: 'Hemera is not there yet.' }),
+      edit: (label, text) => sent((following) => following.edit(label, text)),
+      withdraw: (label) => sent((following) => following.withdraw(label)),
+      resolve: (label) => sent((following) => following.resolve(label)),
+      fix: () => sent((following) => following.fix()),
+      startMission: (label) => current()?.startMission(label) ?? Promise.resolve(null),
       retry: () => current()?.retry(),
     },
   ]

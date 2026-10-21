@@ -27,6 +27,8 @@ import {
   type MissionDiff,
   type MissionGrant,
   type MissionService,
+  type ImageAdded,
+  type MissionFromSource,
   type PrelaunchView,
   type ProofsView,
   type ScenarioProofView,
@@ -763,6 +765,8 @@ export interface Link {
     kind: FeedbackKind,
     body: string,
     anchor: AnchorAsked | null,
+    /** The images Hemera kept for it, by their evidence ids. */
+    images?: ReadonlyArray<string>,
   ) => Promise<FeedbackView>
   /** Its words written again, on the version the user read. */
   readonly editFeedback: (
@@ -772,7 +776,17 @@ export interface Link {
   ) => Promise<FeedbackView>
   readonly withdrawFeedback: (feedbackId: string) => Promise<FeedbackView>
   readonly resolveFeedback: (feedbackId: string) => Promise<FeedbackView>
-  readonly followUpFeedback: (feedbackId: string, body: string) => Promise<FeedbackView>
+  readonly followUpFeedback: (
+    feedbackId: string,
+    body: string,
+    images?: ReadonlyArray<string>,
+  ) => Promise<FeedbackView>
+  /** An image for a feedback, handed to Hemera, which keeps it in the evidence or refuses it. */
+  readonly addImage: (missionId: string, name: string, bytes: Uint8Array) => Promise<ImageAdded>
+  /** Sends the feedback waiting to its round: the agent grills it, then Building · round N. */
+  readonly fix: (missionId: string) => Promise<void>
+  /** What a mission started from a feedback begins with: its words and its origin. */
+  readonly startMissionFrom: (feedbackId: string) => Promise<MissionFromSource>
   /** The version of a file a code comment was written on. */
   readonly commentedVersion: (feedbackId: string) => Promise<CommentedVersion>
   /** The mission's proofs, red then green, and its final checks; null before a Building. */
@@ -1269,16 +1283,21 @@ export function linkOver(port: Port): Link {
     reviewState: (missionId) => call((ready) => ready['review.state']({ missionId })),
     onReviewChanges: (missionId, listener, onEnd) =>
       follow((ready) => ready['review.changes']({ missionId }), listener, anError, onEnd),
-    addFeedback: (missionId, kind, body, anchor) =>
-      call((ready) => ready['review.feedbackAdd']({ missionId, kind, body, anchor, images: [] })),
+    addFeedback: (missionId, kind, body, anchor, images = []) =>
+      call((ready) => ready['review.feedbackAdd']({ missionId, kind, body, anchor, images })),
     editFeedback: (feedbackId, body, version) =>
       call((ready) => ready['review.feedbackEdit']({ feedbackId, body, version })),
     withdrawFeedback: (feedbackId) =>
       call((ready) => ready['review.feedbackWithdraw']({ feedbackId })),
     resolveFeedback: (feedbackId) =>
       call((ready) => ready['review.feedbackResolve']({ feedbackId })),
-    followUpFeedback: (feedbackId, body) =>
-      call((ready) => ready['review.feedbackFollowUp']({ feedbackId, body, images: [] })),
+    followUpFeedback: (feedbackId, body, images = []) =>
+      call((ready) => ready['review.feedbackFollowUp']({ feedbackId, body, images })),
+    addImage: (missionId, name, bytes) =>
+      call((ready) => ready['review.imageAdd']({ missionId, name, bytes })),
+    fix: (missionId) => call((ready) => ready['review.fix']({ missionId })),
+    startMissionFrom: (feedbackId) =>
+      call((ready) => ready['review.startMissionFrom']({ feedbackId })),
     commentedVersion: (feedbackId) =>
       call((ready) => ready['review.commentedVersion']({ feedbackId })),
     proofs: (missionId) => call((ready) => ready['proofs.read']({ missionId })),

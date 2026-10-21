@@ -37,6 +37,8 @@ export interface Remark {
   round?: number | undefined
   /** What the agent answered, once it did: what it did, or the answer to a question. */
   answer?: string | undefined
+  /** Whether the agent answered that it asks for a mission of its own, to start from it. */
+  toMission?: boolean | undefined
   /** The remark it follows up, when it is a follow-up. */
   follows?: string | undefined
   /** Who wrote it when it came from the team, through the user. */

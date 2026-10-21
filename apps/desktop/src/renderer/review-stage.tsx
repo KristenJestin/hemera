@@ -57,6 +57,7 @@ export function ReviewStage({
   engineReady,
   mission,
   open,
+  startMission,
   frame,
 }: StagePageProps): ReactNode {
   const [view, act] = useReview(link, engineReady, mission)
@@ -79,11 +80,17 @@ export function ReviewStage({
     },
   }
   const feedback: FeedbackHandlers = {
-    onAdd: () => undefined,
-    onEdit: () => undefined,
-    onWithdraw: () => undefined,
-    onResolve: () => undefined,
-    onFix: () => undefined,
+    onAdd: (remark) => void act.add(remark),
+    onAttach: act.attach,
+    onStartMission: (label) => {
+      void act.startMission(label).then((seed) => {
+        if (seed !== null) startMission(seed)
+      })
+    },
+    onEdit: (label, text) => void act.edit(label, text),
+    onWithdraw: (label) => void act.withdraw(label),
+    onResolve: (label) => void act.resolve(label),
+    onFix: () => void act.fix(),
     onOpenDiff: () => open('diff'),
     onOpenRound: (n) => open(`round:${String(n)}`),
   }
@@ -102,6 +109,7 @@ export function ReviewStage({
         loading={moment === null}
         rail={rail}
         feedback={feedback}
+        mentionables={view.mentionables}
       />
     )
   return frame({ base, ballFace: false, notice: view.refused })

@@ -12,6 +12,7 @@ import { createElement, type ReactNode } from 'react'
 
 import { DiffHeadActions, DiffSheet, VersionSheet } from './diff-route.tsx'
 import type { Link } from './link.ts'
+import type { StartSeed } from './start-results.ts'
 import { differenceOf } from './mission-header-model.ts'
 import { BuildingStage } from './building-stage.tsx'
 import { PlanningStage } from './planning-stage.tsx'
@@ -49,6 +50,8 @@ export interface StagePageProps {
   open: (view: string) => void
   /** Goes to another mission of the Project, by its key. */
   goMission: (key: string) => void
+  /** Goes to the Project's start field, opened on a mission started from a remark. */
+  startMission: (seed: StartSeed) => void
   /** What stands between a Planning mission and its Freeze, once the engine said. */
   readiness: FreezeReadiness | null
   /** Opens a Chat of the Project, by its id. */

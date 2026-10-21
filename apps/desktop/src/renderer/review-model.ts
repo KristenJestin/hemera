@@ -7,7 +7,7 @@
  * engine's words, never worked out here.
  */
 
-import type { Ball, BlockedCause } from '@hemera/core/domain'
+import { TO_A_MISSION, type Ball, type BlockedCause } from '@hemera/core/domain'
 import type {
   AnchorView,
   AutoReviewView,
@@ -299,6 +299,7 @@ function remarksOf(state: ReviewStateView | null): Review.Remark[] {
       images: one.images.map((image) => ({ name: image.name, size: sizeOf(image.size) })),
       round: one.round,
       answer: one.answer ?? undefined,
+      toMission: one.answer === TO_A_MISSION ? true : undefined,
       follows: one.followsUp === null ? undefined : labels.get(one.followsUp),
       at: timeOf(one.createdAt),
     }))

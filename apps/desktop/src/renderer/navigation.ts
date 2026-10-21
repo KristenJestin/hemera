@@ -20,6 +20,8 @@ import {
   type SidebarPlace,
 } from '@hemera/ui'
 
+import type { StartSeed } from './start-results.ts'
+
 export type Route =
   | {
       readonly kind: 'home'
@@ -37,7 +39,8 @@ export type Route =
       readonly section?: AppSection | undefined
       readonly linked?: boolean | undefined
     }
-  | { readonly kind: 'project'; readonly id: string }
+  /** With a seed, its start field opens on a mission started from a remark (#496). */
+  | { readonly kind: 'project'; readonly id: string; readonly start?: StartSeed | undefined }
   /** The settings of a Project: its own page, entered from the Project page's header. */
   | {
       readonly kind: 'projectSettings'

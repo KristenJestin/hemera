@@ -844,6 +844,22 @@ export const MOMENTS = {
     }
   },
   back,
+  /** Round 2 back, one remark answered with a mission of its own: it is started from there. */
+  toAMission: (): ReviewMoment => {
+    const moment = back()
+    return {
+      ...moment,
+      remarks: edit(
+        moment.remarks,
+        (one) => one.id === 'F9',
+        () => ({
+          answer:
+            'This asks for something the Spec never wanted: a mission of its own, started from this remark.',
+          toMission: true,
+        }),
+      ),
+    }
+  },
   team: (): ReviewMoment => ({
     ...feedback(),
     now: '2 comments of the team wait for your take.',

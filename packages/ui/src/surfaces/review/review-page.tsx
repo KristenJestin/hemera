@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { Feedback, type FeedbackHandlers } from './review-feedback.tsx'
 import { ForYou, type RailHandlers, Reruns, ReviewCard, TheRest } from './review-rail.tsx'
 import type { ReviewMoment } from './review-types.ts'
@@ -18,6 +19,8 @@ export interface ReviewPageProps {
   loading: boolean
   rail: RailHandlers
   feedback: FeedbackHandlers
+  /** What the fields offer after `@`: the Project's missions and commands. */
+  mentionables: readonly Mentionable[]
 }
 
 const COLUMNS = 'flex min-w-0 flex-col gap-8 px-8 pt-2 pb-10 lg:flex-row-reverse lg:items-start'
@@ -26,7 +29,13 @@ const MAIN = 'flex min-w-0 flex-1 flex-col gap-6'
 
 const RAIL = 'flex w-full min-w-0 shrink-0 flex-col gap-6 lg:w-view-narrow'
 
-export function ReviewPage({ moment, loading, rail, feedback }: ReviewPageProps): ReactNode {
+export function ReviewPage({
+  moment,
+  loading,
+  rail,
+  feedback,
+  mentionables,
+}: ReviewPageProps): ReactNode {
   return (
     <div className={COLUMNS} data-stage="review">
       <aside aria-label="What happens" className={RAIL}>
@@ -44,6 +53,7 @@ export function ReviewPage({ moment, loading, rail, feedback }: ReviewPageProps)
           remarks={moment.remarks}
           fixable={moment.fixable}
           rounds={moment.rounds}
+          mentionables={mentionables}
           loading={loading}
           {...feedback}
         />

@@ -3,6 +3,7 @@ import { ProjectPage } from '@hemera/ui'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 
 import { flight, startChat } from './chat-actions.ts'
+import type { StartSeed } from './start-results.ts'
 import type { Link } from './link.ts'
 import { lineOf } from './missions.ts'
 import { chatRowsOf, eventsOf, groupsOf, livingSpecOf } from './project-lines.ts'
@@ -15,6 +16,8 @@ export interface ProjectRouteProps {
   link: Link
   engineReady: boolean
   id: string
+  /** What the start field opens with, for a mission started from a remark. */
+  start?: StartSeed | undefined
   state: ProjectState
   /** The name the sidebar knows, while the page reads the Project. */
   fallback: string
@@ -90,6 +93,7 @@ export function ProjectRoute({
   link,
   engineReady,
   id,
+  start,
   state,
   fallback,
   now,
@@ -133,6 +137,7 @@ export function ProjectRoute({
           engineReady={engineReady}
           projectId={id}
           projectName={name}
+          seed={start}
           onOpenMission={actions.openMission}
         />
       }

@@ -5,7 +5,7 @@
  * the link's calls are promises.
  */
 
-import type { AgentState, Command, Mission, ModelMark, Project } from '@hemera/ipc'
+import type { AgentState, ModelMark, Project } from '@hemera/ipc'
 import {
   ChatPage,
   EFFORTS,
@@ -21,6 +21,7 @@ import { chatActions, flight, markedAs, startChat } from './chat-actions.ts'
 import {
   OWN_DEFAULT,
   chatItemsOf,
+  mentionablesOf,
   mentionsIn,
   pickerAgentsOf,
   settingOfChoice,
@@ -72,25 +73,6 @@ export function ProjectChats({
     </>
   )
 }
-
-/** What the mention field offers: the Project's missions by key, its commands by name. */
-const mentionablesOf = (
-  missions: ReadonlyArray<Mission>,
-  commands: ReadonlyArray<Command>,
-): Mentionable[] => [
-  ...missions.map((mission) => ({
-    kind: 'mission' as const,
-    id: mission.key,
-    label: mission.key,
-    detail: mission.title,
-  })),
-  ...commands.map((command) => ({
-    kind: 'command' as const,
-    id: command.id,
-    label: command.name,
-    detail: command.line,
-  })),
-]
 
 /** What the page reads besides its Chat: once per Project, the marks again once one changes. */
 interface Around {

@@ -188,6 +188,7 @@ function Application() {
             link={link}
             engineReady={ready}
             id={route.id}
+            start={route.start}
             state={project}
             fallback={nameOf(route.id)}
             now={now}
@@ -229,6 +230,7 @@ function Application() {
               close: (view) => setNavigation((before) => closeView(before, view)),
               goProject: () => goTo({ kind: 'project', id: route.projectId }),
               goMission: (key) => goTo({ kind: 'mission', projectId: route.projectId, key }),
+              startMission: (start) => goTo({ kind: 'project', id: route.projectId, start }),
               openChat: (chatId) => openChat(route.projectId, chatId),
               answer: answering.answer,
               recheck: answering.recheck,

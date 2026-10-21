@@ -9,6 +9,7 @@ import type {
   AutoReviewView,
   BuildingView,
   Command,
+  Mission,
   MissionDiff,
   MissionPushes,
   MissionService,
@@ -22,16 +23,20 @@ import type {
   TeamCommentView,
   Wave,
 } from '@hemera/ipc'
-import type { Review } from '@hemera/ui'
+import type { Attached, Mentionable, NewRemark, Review } from '@hemera/ui'
 
 import type { FollowedMission } from './building-follow.ts'
+import { mentionablesOf } from './chat-items.ts'
 import type { Link } from './link.ts'
-import { reviewMomentOf } from './review-model.ts'
+import { feedbackLabels, reviewMomentOf } from './review-model.ts'
+import type { StartSeed } from './start-results.ts'
 
 /** What the Review page shows of its follower. */
 export interface ReviewFollowView {
   /** The page, once the Review is read; null before. */
   readonly moment: Review.ReviewMoment | null
+  /** What the fields offer after `@`: the Project's missions and commands. */
+  readonly mentionables: ReadonlyArray<Mentionable>
   /** Why the page could not be read, in words. */
   readonly error?: string | undefined
   /** Why the last gesture did not go through, in words. */
@@ -46,6 +51,16 @@ export interface ReviewFollowing {
     scenarioId: string,
     verdict: { readonly validated: boolean; readonly reason?: string | undefined },
   ) => Promise<void>
+  /** A remark or a question added, or a follow-up of a remark, by its name on the page. */
+  readonly add: (remark: NewRemark) => Promise<void>
+  /** An image handed to Hemera at once: the id it keeps it by, or why it refused it. */
+  readonly attach: (file: File) => Promise<Attached>
+  readonly edit: (label: string, text: string) => Promise<void>
+  readonly withdraw: (label: string) => Promise<void>
+  readonly resolve: (label: string) => Promise<void>
+  readonly fix: () => Promise<void>
+  /** What the start field opens with, for a mission started from a remark; null when refused. */
+  readonly startMission: (label: string) => Promise<StartSeed | null>
   /** Reads again, after a failure. */
   readonly retry: () => void
   readonly stop: () => void
@@ -70,6 +85,7 @@ export function followReview(
   let now: Now | null = null
   let services: ReadonlyArray<MissionService> = []
   let catalogue: ReadonlyArray<Command> = []
+  let missions: ReadonlyArray<Mission> = []
   let diff: MissionDiff | null = null
   const pushes: MissionPushes | null = null
   const team: ReadonlyArray<TeamCommentView> = []
@@ -106,6 +122,7 @@ export function followReview(
               },
               clock(),
             ),
+      mentionables: mentionablesOf(missions, catalogue),
       error,
       refused,
     })
@@ -212,6 +229,9 @@ export function followReview(
     void quietly(link.catalogue(mission.projectId), (read) => {
       catalogue = read
     })
+    void quietly(link.missions(mission.projectId), (read) => {
+      missions = read
+    })
     void readServices()
     void readDiff()
   }
@@ -227,7 +247,61 @@ export function followReview(
     })
   }
 
+  /** A feedback by its name on the page (`F2`), as the engine knows it. */
+  const feedbackOf = (label: string) => {
+    const feedback = state?.feedback ?? []
+    const labels = feedbackLabels(feedback)
+    return feedback.find((one) => labels.get(one.id) === label)
+  }
+  /** A gesture on a feedback named on the page; one the engine no longer has is done with. */
+  const onFeedback = <A>(label: string, send: (feedbackId: string) => Promise<A>) => {
+    const one = feedbackOf(label)
+    return one === undefined ? Promise.resolve() : gesture(send(one.id), readReview)
+  }
+
   return {
+    add: (remark) => {
+      if (remark.follows === undefined) {
+        return gesture(
+          link.addFeedback(missionId, remark.kind, remark.text, null, remark.images),
+          readReview,
+        )
+      }
+      return onFeedback(remark.follows, (id) =>
+        link.followUpFeedback(id, remark.text, remark.images),
+      )
+    },
+    attach: (file) =>
+      file
+        .arrayBuffer()
+        .then((buffer) => link.addImage(missionId, file.name, new Uint8Array(buffer)))
+        .then(
+          (added): Attached => ({ id: added.evidenceId }),
+          (failure: Error): Attached => ({ refused: failure.message }),
+        ),
+    edit: (label, text) =>
+      onFeedback(label, (id) => link.editFeedback(id, text, feedbackOf(label)?.version ?? 1)),
+    withdraw: (label) => onFeedback(label, (id) => link.withdrawFeedback(id)),
+    resolve: (label) => onFeedback(label, (id) => link.resolveFeedback(id)),
+    fix: () => gesture(link.fix(missionId), readReview),
+    startMission: (label) => {
+      const one = feedbackOf(label)
+      if (one === undefined) return Promise.resolve(null)
+      refused = undefined
+      return link.startMissionFrom(one.id).then(
+        (source): StartSeed => ({
+          text: source.text,
+          origin: source.origin,
+          originFeedback: source.feedbackId,
+          said: source.originSaid,
+        }),
+        (failure: Error) => {
+          refused = failure.message
+          emit()
+          return null
+        },
+      )
+    },
     service: (name, action) => {
       const run = services.find((one) => one.name === name)
       if (action === 'start') {
