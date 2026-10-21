@@ -7,7 +7,7 @@
  * the home folder is a temporary one too, never the user's.
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   type BigIntStats,
   chmodSync,
@@ -34,6 +34,7 @@ import {
   shapeChanges,
   shapesOf,
 } from '../src/engine/git-shapes.ts'
+import { readOwnSync } from '../src/engine/tools/judged.ts'
 import { git, repository } from './repositories.ts'
 import { removeFolders, temporaryFolder } from './storage.ts'
 
@@ -559,6 +560,119 @@ describe('An index that cannot be read for its submodules is said, never read as
     git(made, 'init', '-q')
     expect(saidOf(made)).toBeUndefined()
   })
+})
+
+/**
+ * A measure, not a test (#538, removed before merge): while another process renames a new index
+ * over the one read, as Git does, how often a read fails, and whether the index's stat has changed
+ * by the time the failure is seen. It never fails the suite; its line `PROBE538` is read on CI.
+ */
+describe('Probe: an index read while another process renames over it (#538)', () => {
+  const RENAMER = `
+    const { writeFileSync, renameSync, readFileSync } = require('node:fs')
+    const { spawnSync } = require('node:child_process')
+    const [index, mode, ms] = process.argv.slice(1)
+    const bytes = readFileSync(index)
+    const until = Date.now() + Number(ms)
+    let renames = 0
+    process.stdout.write('ready\\n')
+    while (Date.now() < until) {
+      if (mode === 'git') spawnSync('git', ['update-index', '--force-write-index'], { cwd: require('node:path').dirname(require('node:path').dirname(index)) })
+      else { writeFileSync(index + '.lock', bytes); renameSync(index + '.lock', index) }
+      renames += 1
+    }
+    process.stdout.write('renames ' + renames + '\\n')
+  `
+  const keyOf = (path: string): string | null => {
+    try {
+      const stat = lstatSync(path, { bigint: true })
+      return [stat.size, stat.mtimeNs, stat.ctimeNs, stat.ino, stat.dev, stat.mode].join(':')
+    } catch (cause) {
+      return `error:${cause instanceof Error && 'code' in cause ? String(cause.code) : '?'}`
+    }
+  }
+
+  test.each(['node', 'git'])(
+    'renamed over by %s',
+    async (mode) => {
+      const main = repository(join(work, 'acme'))
+      writeFileSync(join(main, 'a.txt'), 'a\n')
+      git(main, 'add', 'a.txt')
+      const index = join(main, '.git', 'index')
+      const ms = 4000
+      const child = spawn(process.execPath, ['-e', RENAMER, index, mode, String(ms)])
+      let out = ''
+      child.stdout.on('data', (chunk: Buffer) => {
+        out += chunk.toString()
+      })
+      await new Promise<void>((done) => {
+        const ready = () => (out.includes('ready') ? done() : setTimeout(ready, 5))
+        ready()
+      })
+      const tally = {
+        platform: process.platform,
+        mode,
+        reads: 0,
+        changed: 0,
+        statError: 0,
+        unchanged: 0,
+        /** For an unchanged recheck: how long until the stat changed, by bucket. */
+        laterChange: { under1ms: 0, under10ms: 0, under100ms: 0, never: 0 },
+        maxLaterMs: 0,
+        /** For an unchanged recheck: whether reading again at once succeeded. */
+        readAgainOk: 0,
+        readAgainFailed: 0,
+      }
+      const failures = new Map<string, number>()
+      const end = Date.now() + ms
+      while (Date.now() < end) {
+        const before = keyOf(index)
+        tally.reads += 1
+        try {
+          readOwnSync(index, 64 * 1024 * 1024)
+          continue
+        } catch (cause) {
+          const code =
+            cause instanceof Error && 'code' in cause ? String(cause.code) : String(cause)
+          failures.set(code, (failures.get(code) ?? 0) + 1)
+        }
+        const recheck = keyOf(index)
+        if (recheck?.startsWith('error:') === true) tally.statError += 1
+        else if (recheck !== before) tally.changed += 1
+        else {
+          tally.unchanged += 1
+          try {
+            readOwnSync(index, 64 * 1024 * 1024)
+            tally.readAgainOk += 1
+          } catch {
+            tally.readAgainFailed += 1
+          }
+          const from = performance.now()
+          let waited = -1
+          while (performance.now() - from < 100) {
+            if (keyOf(index) !== before) {
+              waited = performance.now() - from
+              break
+            }
+          }
+          if (waited < 0) tally.laterChange.never += 1
+          else if (waited < 1) tally.laterChange.under1ms += 1
+          else if (waited < 10) tally.laterChange.under10ms += 1
+          else tally.laterChange.under100ms += 1
+          tally.maxLaterMs = Math.max(tally.maxLaterMs, waited)
+        }
+      }
+      await new Promise((done) => {
+        if (child.exitCode !== null) done(null)
+        else child.on('exit', done)
+      })
+      // oxlint-disable-next-line no-console
+      console.log(
+        `PROBE538 ${JSON.stringify({ ...tally, failures: Object.fromEntries(failures), child: out.trim().split('\n').at(-1) })}`,
+      )
+    },
+    60_000,
+  )
 })
 
 describe('Two fingerprints compare by their net change (#457)', () => {
