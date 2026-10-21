@@ -3892,6 +3892,44 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "End your delivery step: done with what you did, or failed with what blocked you. Hemera compares the repository with the frozen tree once you report.",
+      "properties": {
+        "changed": {
+          "description": "The files you changed, when your task said to change some.",
+          "items": {
+            "description": "A file you changed, by its path in your repository.",
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "outcome": {
+          "description": "\`done\` when the task is done, \`failed\` when something blocked it.",
+          "enum": [
+            "done",
+            "failed",
+          ],
+          "type": "string",
+        },
+        "summary": {
+          "description": "What you did, or what blocked you and what you tried. Say "not verified" for what you could not check.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "outcome",
+        "summary",
+      ],
+      "type": "object",
+    },
+    "name": "delivery_step_report",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

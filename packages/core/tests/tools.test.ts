@@ -297,6 +297,24 @@ describe('Each role has exactly its tools', () => {
       ],
     ],
     ['team-comment', ['fs_list', 'fs_read', 'search', 'spec_read', 'team_comment_draft']],
+    [
+      'delivery',
+      [
+        'commands_list',
+        'commands_output',
+        'commands_run',
+        'commands_stop',
+        'delivery_step_report',
+        'fs_edit',
+        'fs_list',
+        'fs_read',
+        'fs_write',
+        'memory_read',
+        'note_add',
+        'search',
+        'spec_read',
+      ],
+    ],
   ])('%s', (role, tools) => {
     expect(toolsFor(role)).toEqual(tools)
   })

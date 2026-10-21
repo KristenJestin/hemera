@@ -47,6 +47,7 @@ import {
 } from './rounds.ts'
 import { TaskAmendment } from './build-tasks.ts'
 import { TeamCommentDraft } from './team-comments.ts'
+import { DeliveryStepReport } from './delivery-run.ts'
 import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
@@ -71,6 +72,7 @@ export const ROLES = [
   'living-spec',
   'round-planner',
   'team-comment',
+  'delivery',
 ] as const
 export const Role = Schema.Literals(ROLES)
 export type Role = typeof Role.Type
@@ -93,6 +95,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   'living-spec': 'the living spec agent',
   'round-planner': 'the Planner in round mode',
   'team-comment': 'the Planner in team-comment mode',
+  delivery: 'the Delivery agent',
 }
 
 /** The kinds of place a role works in. */
@@ -130,6 +133,8 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   // The Workspace as the user reviewed it, never the main checkout (#468).
   'round-planner': { kind: 'workspace', readOnly: true },
   'team-comment': { kind: 'workspace', readOnly: true },
+  // One repository's worktree of the mission's Workspace: its session's folder (S1).
+  delivery: { kind: 'workspace', readOnly: false },
 }
 
 export type GateClass = 'local' | 'judged' | 'workflow'
@@ -957,7 +962,7 @@ const RUNNERS: ReadonlyArray<Role> = ['probe', 'builder', 'helper', 'chat']
 /** Every tool of Hemera's, by its name as the agent asks for it. */
 export const TOOLS = {
   fs_read: tool({
-    roles: [...READERS, 'spec-reviewer', 'code-reviewer'],
+    roles: [...READERS, 'spec-reviewer', 'code-reviewer', 'delivery'],
     gate: 'local',
     effect: 'reads',
     path: 'path',
@@ -965,7 +970,7 @@ export const TOOLS = {
     label: { label: 'Read file', mark: 'read-file', doing: 'Reading a file' },
   }),
   fs_list: tool({
-    roles: READERS,
+    roles: [...READERS, 'delivery'],
     gate: 'local',
     effect: 'reads',
     path: 'path',
@@ -973,7 +978,7 @@ export const TOOLS = {
     label: { label: 'List folder', mark: 'list-folder', doing: 'Listing a folder' },
   }),
   search: tool({
-    roles: [...READERS, 'spec-reviewer', 'code-reviewer'],
+    roles: [...READERS, 'spec-reviewer', 'code-reviewer', 'delivery'],
     gate: 'local',
     effect: 'reads',
     path: null,
@@ -981,7 +986,7 @@ export const TOOLS = {
     label: { label: 'Search', mark: 'search', doing: 'Searching the code' },
   }),
   fs_write: tool({
-    roles: WRITERS,
+    roles: [...WRITERS, 'delivery'],
     gate: 'judged',
     effect: 'writes',
     path: 'path',
@@ -989,7 +994,7 @@ export const TOOLS = {
     label: { label: 'Write file', mark: 'write-file', doing: 'Writing a file' },
   }),
   fs_edit: tool({
-    roles: WRITERS,
+    roles: [...WRITERS, 'delivery'],
     gate: 'judged',
     effect: 'writes',
     path: 'path',
@@ -997,7 +1002,7 @@ export const TOOLS = {
     label: { label: 'Edit file', mark: 'edit-file', doing: 'Editing a file' },
   }),
   commands_list: tool({
-    roles: ['planner', ...RUNNERS],
+    roles: ['planner', ...RUNNERS, 'delivery'],
     gate: 'local',
     effect: 'reads',
     path: null,
@@ -1005,7 +1010,7 @@ export const TOOLS = {
     label: { label: 'List commands', mark: 'list-commands', doing: 'Listing the commands' },
   }),
   commands_run: tool({
-    roles: ['planner', ...RUNNERS, 'prototyper'],
+    roles: ['planner', ...RUNNERS, 'prototyper', 'delivery'],
     gate: 'judged',
     effect: 'runs',
     path: null,
@@ -1013,7 +1018,7 @@ export const TOOLS = {
     label: { label: 'Run command', mark: 'run-command', doing: 'Running a command' },
   }),
   commands_output: tool({
-    roles: ['planner', ...RUNNERS, 'prototyper'],
+    roles: ['planner', ...RUNNERS, 'prototyper', 'delivery'],
     gate: 'local',
     effect: 'reads',
     path: null,
@@ -1025,7 +1030,7 @@ export const TOOLS = {
     },
   }),
   commands_stop: tool({
-    roles: [...RUNNERS, 'prototyper'],
+    roles: [...RUNNERS, 'prototyper', 'delivery'],
     gate: 'workflow',
     effect: 'runs',
     path: null,
@@ -1033,7 +1038,7 @@ export const TOOLS = {
     label: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
   }),
   memory_read: tool({
-    roles: ['planner', 'probe', 'builder', 'chat', 'round-planner'],
+    roles: ['planner', 'probe', 'builder', 'chat', 'round-planner', 'delivery'],
     gate: 'workflow',
     effect: 'reads',
     path: null,
@@ -1057,7 +1062,7 @@ export const TOOLS = {
     label: { label: 'Add to the Journal', mark: 'journal-add', doing: 'Writing in the Journal' },
   }),
   note_add: tool({
-    roles: ['planner', 'probe', 'builder', 'helper', 'prototyper', 'round-planner'],
+    roles: ['planner', 'probe', 'builder', 'helper', 'prototyper', 'round-planner', 'delivery'],
     gate: 'workflow',
     effect: 'records',
     path: null,
@@ -1126,6 +1131,7 @@ export const TOOLS = {
       'code-reviewer',
       'round-planner',
       'team-comment',
+      'delivery',
     ],
     gate: 'workflow',
     effect: 'reads',
@@ -1653,6 +1659,18 @@ export const TOOLS = {
       doing: 'Reading a team comment',
     },
   }),
+  delivery_step_report: tool({
+    roles: ['delivery'],
+    gate: 'workflow',
+    effect: 'reports',
+    path: null,
+    input: DeliveryStepReport,
+    label: {
+      label: 'Report the delivery step',
+      mark: 'delivery-step-report',
+      doing: 'Reporting the delivery step',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1749,6 +1767,7 @@ export const TOOL_NAMES = [
   'round_ready',
   'feedback_answer',
   'team_comment_draft',
+  'delivery_step_report',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>
