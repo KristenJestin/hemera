@@ -43,7 +43,7 @@ import {
   ROW,
   Unfolding,
   plural,
-} from './parts.tsx'
+} from './review-parts.tsx'
 import type {
   Check,
   Proof,
@@ -52,7 +52,7 @@ import type {
   Round,
   Service,
   TeamComment,
-} from './types.ts'
+} from './review-types.ts'
 
 /**
  * The Review page's rail, top to bottom: what happens (the stage card, and Ship's re-runs while

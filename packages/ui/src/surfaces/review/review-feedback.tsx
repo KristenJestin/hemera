@@ -17,8 +17,18 @@ import {
   IconPhoto,
   IconX,
 } from '../../icons.ts'
-import { Chevron, ID, LINE, MARKED, MONO, PROSE, QUIET, Unfolding, plural } from './parts.tsx'
-import type { Remark, RemarkImage, RemarkState, Round } from './types.ts'
+import {
+  Chevron,
+  ID,
+  LINE,
+  MARKED,
+  MONO,
+  PROSE,
+  QUIET,
+  Unfolding,
+  plural,
+} from './review-parts.tsx'
+import type { Remark, RemarkImage, RemarkState, Round } from './review-types.ts'
 
 /**
  * The user's feedback, as #254 recommends it for open question 33: it lives in the middle of the
@@ -572,8 +582,6 @@ export interface FeedbackProps extends FeedbackHandlers {
   remarks: readonly Remark[]
   rounds: readonly Round[]
   loading?: boolean | undefined
-  /** Open question 33's alternative: one list narrowed by what each remark waits for. */
-  model?: 'rounds' | 'list' | undefined
 }
 
 /** The feedback by round: the field, the next round with Fix, then the rounds, newest first. */
@@ -581,7 +589,6 @@ export function Feedback({
   remarks,
   rounds,
   loading = false,
-  model = 'rounds',
   ...handlers
 }: FeedbackProps): ReactNode {
   const waiting = remarks.filter((one) => one.state === 'waiting')
@@ -604,8 +611,6 @@ export function Feedback({
       </Frame>
       {loading ? (
         <SkeletonRows />
-      ) : model === 'list' ? (
-        <OneList remarks={remarks} handlers={handlers} />
       ) : (
         <>
           {waiting.length > 0 && (
@@ -640,61 +645,5 @@ export function Feedback({
         </>
       )}
     </section>
-  )
-}
-
-type Filter = 'resolve' | 'waiting' | 'round' | 'all'
-
-const FILTERS: readonly { id: Filter; label: string; keeps: (remark: Remark) => boolean }[] = [
-  { id: 'resolve', label: 'To resolve', keeps: (one) => one.state === 'addressed' },
-  { id: 'waiting', label: 'Not sent', keeps: (one) => one.state === 'waiting' },
-  { id: 'round', label: 'In a round', keeps: (one) => one.state === 'inRound' },
-  { id: 'all', label: 'All', keeps: () => true },
-]
-
-/** The alternative: every remark in one list, newest first, narrowed by what it waits for. */
-function OneList({
-  remarks,
-  handlers,
-}: {
-  remarks: readonly Remark[]
-  handlers: FeedbackHandlers
-}): ReactNode {
-  const [filter, setFilter] = useState<Filter>(() =>
-    remarks.some((one) => one.state === 'addressed') ? 'resolve' : 'all',
-  )
-  const keeps = FILTERS.find((one) => one.id === filter)?.keeps ?? (() => true)
-  const shown = remarks.filter(keeps).toReversed()
-  const waiting = remarks.some((one) => one.state === 'waiting')
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex min-w-0 items-center gap-1">
-        <div role="group" aria-label="Show" className="flex flex-wrap gap-1">
-          {FILTERS.map((one) => (
-            <Button
-              key={one.id}
-              variant={filter === one.id ? 'secondary' : 'ghost'}
-              size="sm"
-              aria-pressed={filter === one.id}
-              onClick={() => setFilter(one.id)}
-            >
-              {`${one.label} · ${String(remarks.filter(one.keeps).length)}`}
-            </Button>
-          ))}
-        </div>
-        {waiting && (
-          <Button variant="primary" size="sm" className="ml-auto" onClick={handlers.onFix}>
-            Fix
-          </Button>
-        )}
-      </div>
-      <Frame>
-        <ul aria-label="Remarks" className="flex flex-col">
-          {shown.map((remark) => (
-            <RemarkLine key={remark.id} remark={remark} handlers={handlers} />
-          ))}
-        </ul>
-      </Frame>
-    </div>
   )
 }

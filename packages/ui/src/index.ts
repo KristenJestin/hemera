@@ -221,6 +221,17 @@ export {
   type ServiceAction,
 } from './surfaces/building/building-page.tsx'
 export { TaskView } from './surfaces/building/task-view.tsx'
+/** The values the Review page, its round view and Ship draw, by the words they use: `Review.Remark`. */
+export * as Review from './surfaces/review/review-types.ts'
+export { ReviewPage, type ReviewPageProps } from './surfaces/review/review-page.tsx'
+export {
+  imageOf,
+  type FeedbackHandlers,
+  type NewRemark,
+} from './surfaces/review/review-feedback.tsx'
+export { type RailHandlers } from './surfaces/review/review-rail.tsx'
+export { RoundView, type PointAction, type RoundViewProps } from './surfaces/review/round-view.tsx'
+export { ShipDialog, type ShipDialogProps } from './surfaces/review/ship-dialog.tsx'
 export * from './blocks/project-settings/provider-model.ts'
 export * from './blocks/project-settings/ticket-providers.tsx'
 export * from './blocks/project-settings/provider-forms.tsx'

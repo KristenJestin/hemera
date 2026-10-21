@@ -20,7 +20,7 @@ import {
   IconTerminal,
   IconTestPipe,
 } from '../../icons.ts'
-import { CODE, Chevron, ID, QUIET, Unfolding } from '../review/parts.tsx'
+import { CODE, Chevron, ID, QUIET, Unfolding } from '../../surfaces/review/review-parts.tsx'
 import type {
   DeliveryWave,
   ForgeAction,

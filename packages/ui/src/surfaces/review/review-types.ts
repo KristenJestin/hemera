@@ -235,8 +235,6 @@ export interface BallView {
   ball: 'agent' | 'you' | 'someone'
   /** Beside the glyph: who or what it waits on. */
   words?: string | undefined
-  /** The alternative to open question 49: the ball stays the user's, a mark says what waits. */
-  waitingMark?: string | undefined
 }
 
 export interface ReviewMoment {

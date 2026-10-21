@@ -12,7 +12,7 @@ import type {
   Service,
   ShipPreview,
   TeamComment,
-} from './types.ts'
+} from './review-types.ts'
 
 /**
  * ACME-12 in Review at a real size, for #254: five repositories, fourteen scenarios of which two are

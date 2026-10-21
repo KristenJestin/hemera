@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 
-import { Feedback, type FeedbackHandlers } from './feedback.tsx'
-import { ForYou, type RailHandlers, Reruns, ReviewCard, TheRest } from './rail.tsx'
-import type { ReviewMoment } from './types.ts'
+import { Feedback, type FeedbackHandlers } from './review-feedback.tsx'
+import { ForYou, type RailHandlers, Reruns, ReviewCard, TheRest } from './review-rail.tsx'
+import type { ReviewMoment } from './review-types.ts'
 
 /**
  * The Review page as #254 proposes it, in the language of the Planning and Building pages: a rail
@@ -16,7 +16,6 @@ import type { ReviewMoment } from './types.ts'
 export interface ReviewPageProps {
   moment: ReviewMoment
   loading: boolean
-  model: 'rounds' | 'list'
   rail: RailHandlers
   feedback: FeedbackHandlers
 }
@@ -27,7 +26,7 @@ const MAIN = 'flex min-w-0 flex-1 flex-col gap-6'
 
 const RAIL = 'flex w-full min-w-0 shrink-0 flex-col gap-6 lg:w-view-narrow'
 
-export function ReviewPage({ moment, loading, model, rail, feedback }: ReviewPageProps): ReactNode {
+export function ReviewPage({ moment, loading, rail, feedback }: ReviewPageProps): ReactNode {
   return (
     <div className={COLUMNS} data-stage="review">
       <aside aria-label="What happens" className={RAIL}>
@@ -41,13 +40,7 @@ export function ReviewPage({ moment, loading, model, rail, feedback }: ReviewPag
         )}
       </aside>
       <div className={MAIN}>
-        <Feedback
-          remarks={moment.remarks}
-          rounds={moment.rounds}
-          loading={loading}
-          model={model}
-          {...feedback}
-        />
+        <Feedback remarks={moment.remarks} rounds={moment.rounds} loading={loading} {...feedback} />
       </div>
     </div>
   )

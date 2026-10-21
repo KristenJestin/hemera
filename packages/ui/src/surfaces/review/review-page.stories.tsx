@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_TITLE } from './fixtures.ts'
-import { cardOf, tabTo, unfold } from './play.ts'
-import { ReviewScreen } from './screen.tsx'
+import { LONG_TITLE } from './review-fixtures.ts'
+import { cardOf, tabTo, unfold } from './review-play.ts'
+import { ReviewScreen } from './review-screen-fixture.tsx'
 
 /**
  * The Review page of #254, recommended: the same rail as Planning and Building — the stage card,
@@ -14,7 +14,7 @@ import { ReviewScreen } from './screen.tsx'
  * what the agent answered, the older ones folded. The needs stand above the page.
  */
 const meta = {
-  title: 'Explorations/Review/Review',
+  title: 'Surfaces/Review',
   component: ReviewScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },

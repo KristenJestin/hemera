@@ -20,7 +20,7 @@ import {
   IconShieldCheck,
   IconTestPipe,
 } from '../../icons.ts'
-import { Fold, ID, MONO, PROSE, QUIET, ROW, plural } from '../review/parts.tsx'
+import { Fold, ID, MONO, PROSE, QUIET, ROW, plural } from '../../surfaces/review/review-parts.tsx'
 import type {
   CancelledMoment,
   CleanupItem,

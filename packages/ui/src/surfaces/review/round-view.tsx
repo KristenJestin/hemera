@@ -7,9 +7,9 @@ import { Input } from '../../components/field/field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { IconCheck, IconChevronRight, IconListNumbers, IconPlus } from '../../icons.ts'
-import { Chevron, Fold, ID, LINE, MARKED, PROSE, QUIET, Unfolding } from './parts.tsx'
-import type { RailHandlers } from './rail.tsx'
-import type { Round, RoundPoint } from './types.ts'
+import { Chevron, Fold, ID, LINE, MARKED, PROSE, QUIET, Unfolding } from './review-parts.tsx'
+import type { RailHandlers } from './review-rail.tsx'
+import type { Round, RoundPoint } from './review-types.ts'
 
 /**
  * A round, as a view over the Review page: a small Spec. Where it stands on one line — its
