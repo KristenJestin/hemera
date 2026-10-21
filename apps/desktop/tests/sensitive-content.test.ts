@@ -479,6 +479,7 @@ const CONTENT = {
   round_propose_mission: NOTHING,
   round_ready: NOTHING,
   feedback_answer: NOTHING,
+  team_comment_draft: NOTHING,
   hemera_report: NOTHING,
   hemera_reports: NOTHING,
 } satisfies Record<ToolName, Hands>

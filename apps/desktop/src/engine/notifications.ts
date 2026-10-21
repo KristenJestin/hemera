@@ -330,6 +330,26 @@ const movedToReview = (event: DomainEvent) =>
     ? triaged(event)
     : Effect.succeed(Option.none<TriageFacts>())
 
+interface TeamCommentFacts extends TriageFacts {
+  readonly author: string
+  readonly repository: string
+}
+
+/** A comment of someone else on a mission's pull request (R8), read in this stage. */
+const teamComment = (stage: 'review' | 'shipping') => (event: DomainEvent) =>
+  Effect.gen(function* () {
+    const mine = Option.getOrNull(Schema.decodeUnknownOption(Schema.Boolean)(event.payload['mine']))
+    if (mine !== false || Option.getOrNull(readText(event.payload['stage'])) !== stage) {
+      return Option.none<TeamCommentFacts>()
+    }
+    const found = yield* triaged(event)
+    return Option.map(found, (facts): TeamCommentFacts => ({
+      ...facts,
+      author: Option.getOrNull(readText(event.payload['author'])) ?? 'Someone',
+      repository: Option.getOrNull(readText(event.payload['repository'])) ?? 'a repository',
+    }))
+  })
+
 interface LivingSpecFacts extends Facts {
   readonly project: NoticeProject
 }
@@ -636,6 +656,40 @@ export const KINDS: ReadonlyArray<NotificationKind> = [
     source: 'mission.moved',
     facts: movedToReview,
     words: (facts) => ({ subject: facts.title, what: 'it waits for your Review' }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  // Open question 51 (#42's recommendation): a team comment in Review asks for the user's take.
+  defineKind({
+    id: 'team-comment-review',
+    label: 'A team comment on a mission’s pull request in Review',
+    byDefault: true,
+    sound: 'needs-you',
+    importance: IMPORTANCE['needs-you'],
+    tone: 'you',
+    source: 'team_comment.received',
+    facts: teamComment('review'),
+    words: (facts) => ({
+      subject: facts.title,
+      what: `${facts.author} commented on the pull request of ${facts.repository}`,
+    }),
+    route: (facts) =>
+      MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
+  }),
+  // During Shipping it blocks nothing: a notice, never a need.
+  defineKind({
+    id: 'team-comment-shipping',
+    label: 'A team comment on a mission’s pull request during Shipping',
+    byDefault: true,
+    sound: null,
+    importance: IMPORTANCE.none,
+    tone: 'outside',
+    source: 'team_comment.received',
+    facts: teamComment('shipping'),
+    words: (facts) => ({
+      subject: facts.title,
+      what: `${facts.author} commented on the pull request of ${facts.repository} during Shipping`,
+    }),
     route: (facts) =>
       MissionTarget.make({ projectId: facts.project.id, missionKey: facts.missionKey }),
   }),

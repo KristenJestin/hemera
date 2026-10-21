@@ -3859,6 +3859,39 @@ exports[`Every input schema is generated from its Schema > the whole list, as an
   {
     "inputSchema": {
       "additionalProperties": true,
+      "description": "Store your reading of one team comment and a reply draft, both internal: nothing is sent anywhere. Call it once per comment of your brief.",
+      "properties": {
+        "comment": {
+          "description": "The team comment, by the id your brief gives it.",
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reading": {
+          "description": "What the comment asks or reports, in the user’s language, and whether it agrees or conflicts with the Spec.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reply": {
+          "description": "A reply the user may send themselves, in the comment’s language, short and factual. Never promise a change.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "comment",
+        "reading",
+        "reply",
+      ],
+      "type": "object",
+    },
+    "name": "team_comment_draft",
+  },
+  {
+    "inputSchema": {
+      "additionalProperties": true,
       "description": "Report a problem with Hemera itself, not with the code: Hemera adds the mission, your role, the stage and the call. Read hemera_reports first. Nothing is sent anywhere.",
       "properties": {
         "callId": {

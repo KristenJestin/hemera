@@ -46,6 +46,7 @@ import {
   RoundTasksWrite,
 } from './rounds.ts'
 import { TaskAmendment } from './build-tasks.ts'
+import { TeamCommentDraft } from './team-comments.ts'
 import { HelperLaunch, HelperRead, HelperResult } from './helpers.ts'
 import { MAX_REQUESTED_OPTION, MAX_REQUESTED_OPTIONS, MAX_REQUESTED_TEXT } from './need.ts'
 import { LIVING_PAGE_DOMAINS } from './living-spec.ts'
@@ -69,6 +70,7 @@ export const ROLES = [
   'setup',
   'living-spec',
   'round-planner',
+  'team-comment',
 ] as const
 export const Role = Schema.Literals(ROLES)
 export type Role = typeof Role.Type
@@ -90,6 +92,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   setup: 'the setup agent',
   'living-spec': 'the living spec agent',
   'round-planner': 'the Planner in round mode',
+  'team-comment': 'the Planner in team-comment mode',
 }
 
 /** The kinds of place a role works in. */
@@ -126,6 +129,7 @@ export const ROLE_PLACES: Readonly<Record<Role, RolePlace>> = {
   'living-spec': { kind: 'main-checkout', readOnly: true },
   // The Workspace as the user reviewed it, never the main checkout (#468).
   'round-planner': { kind: 'workspace', readOnly: true },
+  'team-comment': { kind: 'workspace', readOnly: true },
 }
 
 export type GateClass = 'local' | 'judged' | 'workflow'
@@ -938,6 +942,7 @@ const READERS: ReadonlyArray<Role> = [
   'setup',
   'living-spec',
   'round-planner',
+  'team-comment',
 ]
 const WRITERS: ReadonlyArray<Role> = [
   'probe',
@@ -1120,6 +1125,7 @@ export const TOOLS = {
       'spec-reviewer',
       'code-reviewer',
       'round-planner',
+      'team-comment',
     ],
     gate: 'workflow',
     effect: 'reads',
@@ -1635,6 +1641,18 @@ export const TOOLS = {
     input: FeedbackAnswer,
     label: { label: 'Answer a feedback', mark: 'feedback-answer', doing: 'Answering a feedback' },
   }),
+  team_comment_draft: tool({
+    roles: ['team-comment'],
+    gate: 'workflow',
+    effect: 'proposes',
+    path: null,
+    input: TeamCommentDraft,
+    label: {
+      label: 'Draft a team comment’s reading',
+      mark: 'team-comment-draft',
+      doing: 'Reading a team comment',
+    },
+  }),
   hemera_report: tool({
     roles: ROLES,
     gate: 'workflow',
@@ -1730,6 +1748,7 @@ export const TOOL_NAMES = [
   'round_propose_mission',
   'round_ready',
   'feedback_answer',
+  'team_comment_draft',
   'hemera_report',
   'hemera_reports',
 ] as const satisfies ReadonlyArray<ToolName>

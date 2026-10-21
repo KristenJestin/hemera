@@ -106,6 +106,23 @@ const REVIEWERS = new RegExp(
 )
 /** A repository read through gh's API: its visibility and the account's permissions (R7). */
 const REPO_PATH = new RegExp(String.raw`^repos/${NAME}/${NAME}$`)
+/** The lists of a pull request's comments and reviews, read through gh's REST API (R8). */
+const COMMENTS_PATH = new RegExp(
+  String.raw`^repos/${NAME}/${NAME}/(pulls/\d+/comments|issues/\d+/comments|pulls/\d+/reviews)$`,
+)
+/**
+ * The one GraphQL query Hemera sends (R8): a pull request's review threads, each resolved or not,
+ * with the ids of its comments. A query, never a mutation; on one line, which `cmd.exe` would cut
+ * at its first newline.
+ */
+export const THREADS_QUERY =
+  'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { databaseId } } } } } } }'
+/** What `-f` sends as a string: the one query given whole, the owner, the repository's name. */
+const THREADS_STRING = new RegExp(
+  String.raw`^(query=${THREADS_QUERY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|owner=${NAME}|name=${NAME})$`,
+)
+/** What `-F` sends typed: the pull request's number only. */
+const THREADS_NUMBER = /^number=\d+$/
 const APPROVAL = new RegExp(
   String.raw`^repos/${NAME}/${NAME}/actions/runs/\d+/pending_deployments$`,
 )
@@ -144,6 +161,8 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
   ),
   read('bkt', 'version', ['--version']),
   read('bkt', 'auth.status', ['auth', 'status', '--json']),
+  // Bitbucket Cloud's signed-in account (R8): its id, what a comment of mine is known by.
+  shape('bkt', 'read', 'user', ['api', '/user'], [BKT_CONTEXT]),
   // The pull requests (R6): found before one is created, read for their state, head and
   // approvals. Only the open ones are listed, and only the fields named.
   shape(
@@ -186,6 +205,39 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
     'read',
     'pr.view',
     ['pr', 'view', '<number>'],
+    [...BKT_PLACE, ['--json', switchFlag(true)]],
+    [NUMBER],
+  ),
+  // The comments of a pull request, inline and general, and its reviews (R8): read only, in
+  // pages. Hemera never posts, edits, reacts to or resolves anything on a forge.
+  shape(
+    'gh',
+    'read',
+    'comments.list',
+    ['api', '--hostname', '<host>', '<path>'],
+    [
+      ['--paginate', switchFlag(true)],
+      ['--slurp', switchFlag(true)],
+    ],
+    [['<path>', COMMENTS_PATH]],
+  ),
+  shape(
+    'gh',
+    'read',
+    'comments.threads',
+    ['api', '--hostname', '<host>', 'graphql'],
+    [
+      ['-f', { value: true, pattern: THREADS_STRING, required: true, repeat: true }],
+      ['-F', valueFlag(true, THREADS_NUMBER)],
+    ],
+  ),
+  // bkt's own list of a pull request's comments, as read in its source at `5068ddc`: Cloud's API
+  // comments, or Data Center's from the pull request's activities. To confirm on a real forge.
+  shape(
+    'bkt',
+    'read',
+    'comments.list',
+    ['pr', 'comments', '<number>'],
     [...BKT_PLACE, ['--json', switchFlag(true)]],
     [NUMBER],
   ),
