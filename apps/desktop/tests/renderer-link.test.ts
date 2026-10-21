@@ -650,7 +650,6 @@ const main = async (engine: 'answers' | 'gone') => {
     DeliveryRpcs.toLayer({
       'delivery.pushes': unused,
       'delivery.retry': unused,
-      'evidence.setPublishable': unused,
       'delivery.changes': () =>
         Stream.die('the window’s link is not asked for the Review page here'),
     }),
@@ -664,7 +663,6 @@ const main = async (engine: 'answers' | 'gone') => {
       'teamComments.take': unused,
       'teamComments.addToRound': unused,
       'teamComments.dismiss': unused,
-      'teamComments.startMissionFrom': unused,
       'teamComments.changes': () =>
         Stream.die('the window’s link is not asked for the Review page here'),
     }),

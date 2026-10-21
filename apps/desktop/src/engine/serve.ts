@@ -18,6 +18,7 @@ import {
   EngineApartRpcs,
   ForgeRpcs,
   DeliveryRpcs,
+  EvidenceRpcs,
   DeliveryRulesRpcs,
   EngineMainCoreRpcs,
   type EngineStart,
@@ -25,6 +26,7 @@ import {
   SetupEditRefused,
   SetupRefused,
   ShipRpcs,
+  TeamCommentMissionRpcs,
   TeamCommentsRpcs,
   TesterFolderUnreadable,
 } from '@hemera/ipc'
@@ -929,6 +931,29 @@ export const engineHandlers = (
     pushesHandlers(profile, log),
     shipHandlers(profile, log),
     teamCommentsHandlers(profile, log),
+    unaskedHandlers(profile, log),
+  )
+}
+
+/**
+ * What the engine serves and no screen asks for yet (see `EngineUnaskedRpcs`): the window is not
+ * offered them, so they are a layer of their own.
+ */
+const unaskedHandlers = (profile: StartedProfile, log: Log) => {
+  const { use } = profile
+  return Layer.mergeAll(
+    EvidenceRpcs.toLayer({
+      'evidence.setPublishable': ({ evidenceId, publishable }) =>
+        use(Pushes.use((pushes) => pushes.setPublishable(evidenceId, publishable))).pipe(
+          observed('evidence.setPublishable', log),
+        ),
+    }),
+    TeamCommentMissionRpcs.toLayer({
+      'teamComments.startMissionFrom': ({ commentId }) =>
+        use(TeamComments.use((team) => team.startMissionFrom(commentId))).pipe(
+          observed('teamComments.startMissionFrom', log),
+        ),
+    }),
   )
 }
 
@@ -954,10 +979,6 @@ const teamCommentsHandlers = (profile: StartedProfile, log: Log) => {
     'teamComments.dismiss': ({ commentId }) =>
       use(TeamComments.use((team) => team.dismiss(commentId))).pipe(
         observed('teamComments.dismiss', log),
-      ),
-    'teamComments.startMissionFrom': ({ commentId }) =>
-      use(TeamComments.use((team) => team.startMissionFrom(commentId))).pipe(
-        observed('teamComments.startMissionFrom', log),
       ),
     'teamComments.changes': ({ missionId }) =>
       follow(Stream.unwrap(TeamComments.useSync((team) => team.changes(missionId)))).pipe(
@@ -999,10 +1020,6 @@ const pushesHandlers = (profile: StartedProfile, log: Log) => {
     'delivery.changes': ({ missionId }) =>
       follow(Stream.unwrap(Pushes.useSync((pushes) => pushes.changes(missionId)))).pipe(
         observedStream('delivery.changes', log),
-      ),
-    'evidence.setPublishable': ({ evidenceId, publishable }) =>
-      use(Pushes.use((pushes) => pushes.setPublishable(evidenceId, publishable))).pipe(
-        observed('evidence.setPublishable', log),
       ),
   })
 }
