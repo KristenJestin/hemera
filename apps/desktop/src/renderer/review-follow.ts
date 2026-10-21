@@ -404,9 +404,10 @@ export function followReview(
       emit()
       return link.shipPreview(missionId).then(
         (read) => {
-          preview = read
           // An older confirmation's read landing late is not the one the dialog waits for.
-          confirmable = asked === confirmation
+          if (asked !== confirmation) return
+          preview = read
+          confirmable = true
           emit()
         },
         (failure: Error) => {

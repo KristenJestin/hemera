@@ -525,6 +525,41 @@ describe('Ship', () => {
     expect(last()?.confirmable).toBe(false)
   })
 
+  test('a confirmation’s read landing after a later one is ignored: Ship sends the latest preview', async () => {
+    const confirmed: string[] = []
+    let previews = 0
+    const lands: Array<(read: ReturnType<typeof shipPreview>) => void> = []
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        if (previews === 1) {
+          return Promise.resolve(shipPreview({ previewId: 'stale', possible: true, reasons: [] }))
+        }
+        return new Promise((resolve) => {
+          lands.push(resolve)
+        })
+      },
+      confirmShip: (missionId, previewId) => {
+        confirmed.push(previewId)
+        return Promise.resolve({ missionId, shippedAt: at(11, 0), trees: [], deliveredAt: null })
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    // Opened, closed, opened again: two reads on their way, the later one landing first.
+    const first = following.previewShip()
+    const second = following.previewShip()
+    lands[1]?.(shipPreview({ previewId: 'latest', possible: true, reasons: [] }))
+    await second
+    expect(last()?.confirmable).toBe(true)
+    // The older one landing late is not what the dialog shows: it changes nothing.
+    lands[0]?.(shipPreview({ previewId: 'older', possible: true, reasons: [] }))
+    await first
+    expect(last()?.confirmable).toBe(true)
+    await expect(following.ship()).resolves.toBe(true)
+    expect(confirmed).toEqual(['latest'])
+  })
+
   test('a fresh read that fails leaves the confirmation unoffered, and says why', async () => {
     let previews = 0
     const played = linkOf({
