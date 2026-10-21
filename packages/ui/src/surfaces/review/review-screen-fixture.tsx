@@ -129,7 +129,11 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
   const [remarks, setRemarks] = useState<readonly Remark[]>(given.remarks)
   const [team, setTeam] = useState<readonly TeamComment[]>(given.team)
   const [shipping, setShipping] = useState(false)
-  const moment: ReviewMoment = { ...given, remarks, team }
+  // The engine's word on Fix, played here: a remark waits and no round is grilled or built.
+  const fixable =
+    remarks.some((one) => one.state === 'waiting') &&
+    !given.rounds.some((one) => one.state === 'grilling' || one.state === 'building')
+  const moment: ReviewMoment = { ...given, remarks, team, fixable }
   const local = moment.forge === null
   const stage = moment.stage ?? 'Review'
 

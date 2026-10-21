@@ -144,6 +144,8 @@ export interface Service {
   line: string
   /** Why it stopped, when it failed. */
   error?: string | undefined
+  /** Whether its × removes it once it does not run: not one of the catalogue never started. */
+  removable?: boolean | undefined
 }
 
 /** A scenario's proof: its red recorded, then green; or a proof the user verifies by hand. */
@@ -248,6 +250,8 @@ export interface ReviewMoment {
   ball: BallView
   needs: readonly NeedRow[]
   remarks: readonly Remark[]
+  /** Whether Fix may be pressed now, as the engine says: feedback waits and no round runs. */
+  fixable: boolean
   rounds: readonly Round[]
   team: readonly TeamComment[]
   pulls: readonly PullRequest[]

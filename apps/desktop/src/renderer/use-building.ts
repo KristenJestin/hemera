@@ -22,7 +22,9 @@ const LOADING_BUILDING: BuildingFollowView = {
   percent: null,
 }
 
-const followedOf = (mission: Pick<Mission, 'id' | 'projectId' | 'freeze'>): FollowedMission => ({
+export const followedOf = (
+  mission: Pick<Mission, 'id' | 'projectId' | 'freeze'>,
+): FollowedMission => ({
   id: mission.id,
   projectId: mission.projectId,
   frozenAt: mission.freeze?.frozenAt ?? null,
@@ -32,7 +34,7 @@ const followedOf = (mission: Pick<Mission, 'id' | 'projectId' | 'freeze'>): Foll
  * Follows a mission with `follow` while the engine is there, and hands its gestures over: before
  * the engine follows the mission, a gesture has nowhere to go and is done with.
  */
-function useFollower<View, Following extends { readonly stop: () => void }>(
+export function useFollower<View, Following extends { readonly stop: () => void }>(
   link: Link,
   engineReady: boolean,
   mission: FollowedMission,

@@ -660,6 +660,7 @@ function entering(): ReviewMoment {
     ball: { ball: 'you' },
     needs: [],
     remarks: [],
+    fixable: false,
     rounds: [],
     team: [],
     pulls: [],
@@ -699,6 +700,7 @@ function feedback(): ReviewMoment {
     progress: { step: 'Review · round 1', detail: '4 remarks wait to be sent' },
     round: 1,
     remarks: [...ROUND_ONE, ...WAITING],
+    fixable: true,
     rounds: [ROUND_ONE_BACK],
     proofs: verified(PROOFS),
     pulls: PULLS_OPEN,
@@ -720,6 +722,7 @@ function grilling(): ReviewMoment {
       (one) => one.state === 'waiting',
       () => ({ state: 'inRound', round: 2 }),
     ),
+    fixable: false,
     rounds: [ROUND_TWO_GRILLING, ROUND_ONE_BACK],
     refusals: ['round 2 is open', 'Q2 and Q3 wait for your answer'],
   }
@@ -820,6 +823,7 @@ export const MOMENTS = {
   writing: (): ReviewMoment => ({
     ...feedback(),
     remarks: ROUND_ONE,
+    fixable: false,
     progress: { step: 'Review · round 1', detail: '3 addressed wait for you' },
     refusals: ['3 addressed remarks wait for you'],
   }),

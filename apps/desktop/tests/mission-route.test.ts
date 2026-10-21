@@ -247,9 +247,9 @@ describe('The needs at the top', () => {
 
 describe('The base of each stage', () => {
   test('is the empty base with the stage’s name when no page is registered', () => {
-    expect(STAGE_PAGES.Review).toBeUndefined()
-    expect(drawn({ mission: mission({ stage: 'review', frozen: true }) })).toContain(
-      'The Review page',
+    expect(STAGE_PAGES.Shipping).toBeUndefined()
+    expect(drawn({ mission: mission({ stage: 'shipping', frozen: true }) })).toContain(
+      'The Shipping page',
     )
   })
 
@@ -267,6 +267,13 @@ describe('The base of each stage', () => {
 
   test('Planning has its page', () => {
     expect(STAGE_PAGES.Planning).toBeDefined()
+  })
+
+  test('Review has its page: its rows wait in their shape while the Review is read', () => {
+    expect(STAGE_PAGES.Review).toBeDefined()
+    const markup = drawn({ mission: mission({ stage: 'review', frozen: true }) })
+    expect(markup).toContain('data-stage="review"')
+    expect(markup).not.toContain('The Review page')
   })
 
   test('Ready has its page: the frozen Spec is read first, and nothing launches meanwhile', () => {
@@ -423,13 +430,13 @@ describe('The head of a mission in Planning', () => {
     const planning = drawn()
     expect(planning).toContain('data-ball="agent"')
     expect(planning).not.toContain('data-now=""')
-    expect(drawn({ mission: mission({ stage: 'review', frozen: true }) })).not.toContain(
+    expect(drawn({ mission: mission({ stage: 'shipping', frozen: true }) })).not.toContain(
       'data-ball="agent"',
     )
   })
 
-  test('on Ready and Building too: their stage card draws the face', () => {
-    for (const stage of ['ready', 'building'] as const) {
+  test('on Ready, Building and Review too: their stage card draws the face', () => {
+    for (const stage of ['ready', 'building', 'review'] as const) {
       expect(drawn({ mission: mission({ stage, frozen: true }) })).toContain('data-ball="agent"')
     }
   })

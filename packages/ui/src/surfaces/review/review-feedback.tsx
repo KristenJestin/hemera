@@ -580,6 +580,8 @@ function SkeletonRows(): ReactNode {
 
 export interface FeedbackProps extends FeedbackHandlers {
   remarks: readonly Remark[]
+  /** Whether Fix may be pressed now: the engine's word, never worked out here. */
+  fixable: boolean
   rounds: readonly Round[]
   loading?: boolean | undefined
 }
@@ -587,12 +589,12 @@ export interface FeedbackProps extends FeedbackHandlers {
 /** The feedback by round: the field, the next round with Fix, then the rounds, newest first. */
 export function Feedback({
   remarks,
+  fixable,
   rounds,
   loading = false,
   ...handlers
 }: FeedbackProps): ReactNode {
   const waiting = remarks.filter((one) => one.state === 'waiting')
-  const open = rounds.some((one) => one.state === 'grilling' || one.state === 'building')
   const next = (rounds[0]?.n ?? 0) + 1
   return (
     <section
@@ -618,7 +620,7 @@ export function Feedback({
               <div className="flex min-h-control-md items-center gap-3">
                 <h3 className="text-sm font-semibold">Next round</h3>
                 <span className={QUIET}>{plural(waiting.length, 'waits', 'wait')} to be sent</span>
-                {!open && (
+                {fixable && (
                   <Button variant="primary" size="sm" className="ml-auto" onClick={handlers.onFix}>
                     {`Fix · round ${String(next)}`}
                   </Button>

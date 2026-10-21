@@ -244,5 +244,9 @@ export const SILENT_LINK: Link = {
   resolveFeedback: never,
   followUpFeedback: never,
   commentedVersion: never,
+  proofs: never,
+  validateManualProof: never,
+  refuseManualProof: never,
+  shipPreview: never,
   close: () => undefined,
 }

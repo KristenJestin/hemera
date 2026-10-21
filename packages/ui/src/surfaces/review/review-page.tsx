@@ -40,7 +40,13 @@ export function ReviewPage({ moment, loading, rail, feedback }: ReviewPageProps)
         )}
       </aside>
       <div className={MAIN}>
-        <Feedback remarks={moment.remarks} rounds={moment.rounds} loading={loading} {...feedback} />
+        <Feedback
+          remarks={moment.remarks}
+          fixable={moment.fixable}
+          rounds={moment.rounds}
+          loading={loading}
+          {...feedback}
+        />
       </div>
     </div>
   )

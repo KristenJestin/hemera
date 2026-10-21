@@ -463,13 +463,15 @@ function Services({
                     />
                   </>
                 )}
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  aria-label={runs ? `Stop ${service.name}` : `Remove ${service.name}`}
-                  icon={<IconX size="sm" />}
-                  onClick={() => handlers.onService(service.name, runs ? 'stop' : 'remove')}
-                />
+                {(runs || service.removable !== false) && (
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    aria-label={runs ? `Stop ${service.name}` : `Remove ${service.name}`}
+                    icon={<IconX size="sm" />}
+                    onClick={() => handlers.onService(service.name, runs ? 'stop' : 'remove')}
+                  />
+                )}
               </div>
               {service.error !== undefined && (
                 <p className="pr-4 pb-1.5 pl-10 text-xs text-destructive-muted-foreground">

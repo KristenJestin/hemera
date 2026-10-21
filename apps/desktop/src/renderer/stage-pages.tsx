@@ -16,6 +16,7 @@ import { differenceOf } from './mission-header-model.ts'
 import { BuildingStage } from './building-stage.tsx'
 import { PlanningStage } from './planning-stage.tsx'
 import { ReadyStage } from './ready-stage.tsx'
+import { ReviewStage } from './review-stage.tsx'
 
 /** What a stage's page puts in the mission's frame, beside what the frame draws itself. */
 export interface StageFrame {
@@ -74,6 +75,7 @@ export const STAGE_PAGES: Partial<Record<MissionStage, (props: StagePageProps) =
   Planning: PlanningStage,
   Ready: ReadyStage,
   Building: BuildingStage,
+  Review: ReviewStage,
 }
 
 /** What a view's body is handed beside its mission: the link, and the way to open another view. */

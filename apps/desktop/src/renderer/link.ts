@@ -28,6 +28,9 @@ import {
   type MissionGrant,
   type MissionService,
   type PrelaunchView,
+  type ProofsView,
+  type ScenarioProofView,
+  type ShipPreview,
   type AutomaticBackups,
   type BootstrapRun,
   type BaseBranchEdit,
@@ -772,6 +775,22 @@ export interface Link {
   readonly followUpFeedback: (feedbackId: string, body: string) => Promise<FeedbackView>
   /** The version of a file a code comment was written on. */
   readonly commentedVersion: (feedbackId: string) => Promise<CommentedVersion>
+  /** The mission's proofs, red then green, and its final checks; null before a Building. */
+  readonly proofs: (missionId: string) => Promise<ProofsView | null>
+  /** A scenario verified by hand, validated by the user on the trees of now. */
+  readonly validateManualProof: (
+    missionId: string,
+    scenarioId: string,
+    note: string | null,
+  ) => Promise<ScenarioProofView>
+  /** A scenario verified by hand, refused by the user, who says why. */
+  readonly refuseManualProof: (
+    missionId: string,
+    scenarioId: string,
+    note: string,
+  ) => Promise<ScenarioProofView>
+  /** What Ship would do now, and whether it may: the engine's reasons when it may not. */
+  readonly shipPreview: (missionId: string) => Promise<ShipPreview>
   /** What was allowed for the mission, the revoked and fallen grants included. */
   readonly missionGrants: (missionId: string) => Promise<ReadonlyArray<MissionGrant>>
   /** Revokes a grant, from the next call on. */
@@ -1262,6 +1281,12 @@ export function linkOver(port: Port): Link {
       call((ready) => ready['review.feedbackFollowUp']({ feedbackId, body, images: [] })),
     commentedVersion: (feedbackId) =>
       call((ready) => ready['review.commentedVersion']({ feedbackId })),
+    proofs: (missionId) => call((ready) => ready['proofs.read']({ missionId })),
+    validateManualProof: (missionId, scenarioId, note) =>
+      call((ready) => ready['proofs.validateManual']({ missionId, scenarioId, note })),
+    refuseManualProof: (missionId, scenarioId, note) =>
+      call((ready) => ready['proofs.refuseManual']({ missionId, scenarioId, note })),
+    shipPreview: (missionId) => call((ready) => ready['ship.preview']({ missionId })),
     close: () => {
       Effect.runFork(Scope.close(scope, Exit.void))
     },
