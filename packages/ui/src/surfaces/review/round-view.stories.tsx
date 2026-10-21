@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { ReviewScreen } from './screen.tsx'
+import { ReviewScreen } from './review-screen-fixture.tsx'
 
 /**
  * A round, as a view over the Review page (open question 76, settled by the mission frame: a
@@ -11,7 +11,7 @@ import { ReviewScreen } from './screen.tsx'
  * out; a point the Spec never asked for is offered as a mission of its own.
  */
 const meta = {
-  title: 'Explorations/Review/Round',
+  title: 'Surfaces/Round view',
   component: ReviewScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
@@ -21,6 +21,8 @@ const meta = {
     onShip: fn(),
     onService: fn(),
     onRemark: fn(),
+    onAttach: fn(),
+    onStartMission: fn(),
     onFix: fn(),
     onVerify: fn(),
     onTeam: fn(),

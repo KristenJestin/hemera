@@ -13,7 +13,7 @@ import {
   type ModelSettingValue,
   draftOf,
 } from '@hemera/core/domain'
-import type { AgentState, ChatLine, ModelMark } from '@hemera/ipc'
+import type { AgentState, ChatLine, Command, Mission, ModelMark } from '@hemera/ipc'
 import type {
   ChatAction,
   ChatActionKind,
@@ -169,3 +169,22 @@ export const settingOfChoice = (agent: AgentProvider, choice: ModelChoice): Mode
   model: choice.model === OWN_DEFAULT ? null : choice.model,
   effort: choice.effort ?? null,
 })
+
+/** What the mention field offers: the Project's missions by key, its commands by name. */
+export const mentionablesOf = (
+  missions: ReadonlyArray<Mission>,
+  commands: ReadonlyArray<Command>,
+): Mentionable[] => [
+  ...missions.map((mission) => ({
+    kind: 'mission' as const,
+    id: mission.key,
+    label: mission.key,
+    detail: mission.title,
+  })),
+  ...commands.map((command) => ({
+    kind: 'command' as const,
+    id: command.id,
+    label: command.name,
+    detail: command.line,
+  })),
+]

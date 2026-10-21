@@ -5,7 +5,8 @@ import { StageCard } from '../../blocks/mission/stage-card.tsx'
 import { QuestionCard } from '../../blocks/planning/question-card.tsx'
 import type { PlanningHandlers } from '../../blocks/planning/planning-types.ts'
 import { Button, IconButton } from '../../components/button/button.tsx'
-import { Input, Textarea } from '../../components/field/field.tsx'
+import { Input } from '../../components/field/field.tsx'
+import { MentionField, type Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import type { MarkState } from '../../components/status-mark/mark-legends.ts'
@@ -43,16 +44,17 @@ import {
   ROW,
   Unfolding,
   plural,
-} from './parts.tsx'
+} from './review-parts.tsx'
 import type {
   Check,
   Proof,
   PullRequest,
+  Rerun,
   ReviewMoment,
   Round,
   Service,
   TeamComment,
-} from './types.ts'
+} from './review-types.ts'
 
 /**
  * The Review page's rail, top to bottom: what happens (the stage card, and Ship's re-runs while
@@ -102,13 +104,28 @@ export function ReviewCard({
   )
 }
 
-/** What Ship re-runs before it pushes, one line each, a red one with the end of its output. */
+/**
+ * What Ship re-runs before it pushes, one line each, a red one with the end of its output; it
+ * unfolds as Ship starts, pushing the rail down.
+ */
 export function Reruns({ moment }: { moment: ReviewMoment }): ReactNode {
-  if (moment.shipping === undefined) return null
+  const { shipping } = moment
+  return (
+    <Unfolding open={shipping !== undefined}>
+      {shipping !== undefined && (
+        <div className="pt-6">
+          <RerunList reruns={shipping.reruns} />
+        </div>
+      )}
+    </Unfolding>
+  )
+}
+
+function RerunList({ reruns }: { reruns: readonly Rerun[] }): ReactNode {
   return (
     <Frame>
       <ul aria-label="Re-run before pushing" className="flex flex-col py-1">
-        {moment.shipping.reruns.map((rerun) => (
+        {reruns.map((rerun) => (
           <li key={rerun.id} className="flex flex-col">
             <div className={ROW}>
               <StatusMark state={rerun.state} size="sm" legend />
@@ -213,11 +230,13 @@ function TeamLine({
   comment,
   forge,
   names,
+  mentionables,
   handlers,
 }: {
   comment: TeamComment
   forge: string
   names: readonly string[]
+  mentionables: readonly Mentionable[]
   handlers: RailHandlers
 }): ReactNode {
   const [open, setOpen] = useState(false)
@@ -252,12 +271,12 @@ function TeamLine({
             </span>
             <p className={PROSE}>{comment.draft}</p>
           </div>
-          <Textarea
+          <MentionField
             label={`My take on ${comment.id}`}
-            rows={2}
             placeholder="It weighs more than the agent’s reading"
             value={take}
-            onValueChange={setTake}
+            onValueChange={(value) => setTake(value)}
+            mentionables={mentionables}
           />
           <div className="flex flex-wrap gap-2">
             <Button
@@ -277,15 +296,17 @@ function TeamLine({
             >
               Dismiss
             </Button>
-            <Button
-              variant="link"
-              size="sm"
-              aria-label={`Open ${comment.id} on ${forge}`}
-              onClick={() => handlers.onOpenLink(comment.url)}
-            >
-              <IconExternalLink size="sm" />
-              {`Open on ${forge}`}
-            </Button>
+            {comment.url !== undefined && (
+              <Button
+                variant="link"
+                size="sm"
+                aria-label={`Open ${comment.id} on ${forge}`}
+                onClick={() => handlers.onOpenLink(comment.url ?? '')}
+              >
+                <IconExternalLink size="sm" />
+                {`Open on ${forge}`}
+              </Button>
+            )}
           </div>
         </div>
       </Unfolding>
@@ -333,9 +354,12 @@ function RoundQuestions({
 export function ForYou({
   moment,
   handlers,
+  mentionables,
 }: {
   moment: ReviewMoment
   handlers: RailHandlers
+  /** What My take offers after `@`: the Project's missions and commands. */
+  mentionables: readonly Mentionable[]
 }): ReactNode {
   const grilling = moment.rounds.find((one) => one.state === 'grilling')
   const toVerify = moment.proofs.filter((one) => one.state === 'toVerify')
@@ -365,6 +389,7 @@ export function ForYou({
                   comment={comment}
                   forge={moment.forge ?? 'the forge'}
                   names={names}
+                  mentionables={mentionables}
                   handlers={handlers}
                 />
               ))}
@@ -463,13 +488,15 @@ function Services({
                     />
                   </>
                 )}
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  aria-label={runs ? `Stop ${service.name}` : `Remove ${service.name}`}
-                  icon={<IconX size="sm" />}
-                  onClick={() => handlers.onService(service.name, runs ? 'stop' : 'remove')}
-                />
+                {(runs || service.removable !== false) && (
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    aria-label={runs ? `Stop ${service.name}` : `Remove ${service.name}`}
+                    icon={<IconX size="sm" />}
+                    onClick={() => handlers.onService(service.name, runs ? 'stop' : 'remove')}
+                  />
+                )}
               </div>
               {service.error !== undefined && (
                 <p className="pr-4 pb-1.5 pl-10 text-xs text-destructive-muted-foreground">
@@ -698,13 +725,15 @@ function TeamSettled({
             <StatusMark state={TEAM_MARK[comment.state]} size="sm" legend />
             <span className="shrink-0 font-medium">{comment.author}</span>
             <span className="min-w-0 flex-1 truncate text-muted-foreground">{comment.text}</span>
-            <IconButton
-              variant="ghost"
-              size="sm"
-              aria-label={`Open ${comment.id} on ${forge}`}
-              icon={<IconExternalLink size="sm" />}
-              onClick={() => handlers.onOpenLink(comment.url)}
-            />
+            {comment.url !== undefined && (
+              <IconButton
+                variant="ghost"
+                size="sm"
+                aria-label={`Open ${comment.id} on ${forge}`}
+                icon={<IconExternalLink size="sm" />}
+                onClick={() => handlers.onOpenLink(comment.url ?? '')}
+              />
+            )}
           </li>
         ))}
       </ul>

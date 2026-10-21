@@ -1,10 +1,12 @@
 import { cn } from 'cn'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ClipboardEvent, type DragEvent, type ReactNode, useId, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Frame } from '../../components/frame/frame.tsx'
 import { Textarea } from '../../components/field/field.tsx'
 import { Skeleton } from '../../components/loading/loading.tsx'
+import { MentionField, type Mentionable } from '../../components/mention-field/mention-field.tsx'
 import { SectionHead } from '../../components/section-head/section-head.tsx'
 import type { MarkState } from '../../components/status-mark/mark-legends.ts'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
@@ -17,8 +19,19 @@ import {
   IconPhoto,
   IconX,
 } from '../../icons.ts'
-import { Chevron, ID, LINE, MARKED, MONO, PROSE, QUIET, Unfolding, plural } from './parts.tsx'
-import type { Remark, RemarkImage, RemarkState, Round } from './types.ts'
+import { collapse, expand, fold, useTransition } from '../../motion.ts'
+import {
+  Chevron,
+  ID,
+  LINE,
+  MARKED,
+  MONO,
+  PROSE,
+  QUIET,
+  Unfolding,
+  plural,
+} from './review-parts.tsx'
+import type { Remark, RemarkImage, RemarkState, Round } from './review-types.ts'
 
 /**
  * The user's feedback, as #254 recommends it for open question 33: it lives in the middle of the
@@ -41,8 +54,15 @@ export interface NewRemark {
   follows?: string | undefined
 }
 
+/** What Hemera answered for an image attached: the id it keeps it by, or why it refused it. */
+export type Attached = { id: string } | { refused: string }
+
 export interface FeedbackHandlers {
   onAdd: (remark: NewRemark) => void
+  /** An image attached, pasted or dropped, handed to Hemera at once: Hemera judges it. */
+  onAttach: (file: File) => Promise<Attached>
+  /** A remark the agent answered with a mission of its own: the mission is started from it. */
+  onStartMission: (id: string) => void
   onEdit: (id: string, text: string) => void
   onWithdraw: (id: string) => void
   onResolve: (id: string) => void
@@ -75,31 +95,14 @@ export function remarkLegend(remark: Remark): string {
   }
 }
 
-/** The images Hemera keeps: png, jpeg and webp, up to 10 MB each. */
-const KEPT = new Map([
-  ['image/png', 'png'],
-  ['image/jpeg', 'jpeg'],
-  ['image/webp', 'webp'],
-])
-
-const LIMIT = 10 * 1024 * 1024
-
 const sizeOf = (bytes: number): string =>
   bytes >= 1024 * 1024
     ? `${String(Math.round(bytes / 1024 / 1024))} MB`
     : `${String(Math.max(1, Math.round(bytes / 1024)))} KB`
 
-/** An image as Hemera takes it: kept, or refused with the reason in words. */
-export function imageOf(file: File): RemarkImage {
-  const size = sizeOf(file.size)
-  if (!KEPT.has(file.type)) {
-    const kind = (file.name.split('.').at(-1) ?? 'This file').toUpperCase()
-    return { name: file.name, size, refused: `${kind} is not kept: png, jpeg or webp` }
-  }
-  if (file.size > LIMIT) {
-    return { name: file.name, size, refused: `Too large: ${size}, the limit is 10 MB` }
-  }
-  return { name: file.name, size }
+/** An image of the remark being written: kept by Hemera under its id, or refused with why. */
+interface Taken extends RemarkImage {
+  id?: string | undefined
 }
 
 /** The images of a remark, one line each: kept with their size, refused with why. */
@@ -163,29 +166,45 @@ const filesOf = (list: FileList | null): File[] => (list === null ? [] : [...lis
  */
 export function Composer({
   follows,
+  mentionables,
   onAdd,
+  onAttach,
   onOpenDiff,
 }: {
   /** The remark this one follows up, for a follow-up written under it. */
   follows?: string | undefined
+  mentionables: readonly Mentionable[]
   onAdd: (remark: NewRemark) => void
+  onAttach: (file: File) => Promise<Attached>
   onOpenDiff?: (() => void) | undefined
 }): ReactNode {
   const id = useId()
   const [kind, setKind] = useState<Remark['kind']>('remark')
   const [text, setText] = useState('')
-  const [images, setImages] = useState<readonly RemarkImage[]>([])
+  const [images, setImages] = useState<readonly Taken[]>([])
   const take = (files: readonly File[]): void => {
-    if (files.length === 0) return
-    setImages((before) => [
-      ...before,
-      ...files.map(imageOf).filter((one) => !before.some((had) => had.name === one.name)),
-    ])
+    for (const file of files) {
+      if (images.some((had) => had.name === file.name)) continue
+      const size = sizeOf(file.size)
+      void onAttach(file).then(
+        (answer) => {
+          const taken: Taken =
+            'id' in answer
+              ? { name: file.name, size, id: answer.id }
+              : { name: file.name, size, refused: answer.refused }
+          setImages((before) =>
+            before.some((had) => had.name === file.name) ? before : [...before, taken],
+          )
+        },
+        (failure: Error) =>
+          setImages((before) => [...before, { name: file.name, size, refused: failure.message }]),
+      )
+    }
   }
   const add = (): void => {
     const words = text.trim()
     if (words === '') return
-    const kept = images.filter((one) => one.refused === undefined).map((one) => one.name)
+    const kept = images.flatMap((one) => (one.id === undefined ? [] : [one.id]))
     onAdd(
       follows === undefined
         ? { kind, text: words, images: kept }
@@ -208,12 +227,6 @@ export function Composer({
         event.preventDefault()
         add()
       }}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' || event.shiftKey) return
-        if (!(event.target instanceof HTMLTextAreaElement)) return
-        event.preventDefault()
-        add()
-      }}
       onPaste={(event: ClipboardEvent<HTMLFormElement>) => take(filesOf(event.clipboardData.files))}
       onDragOver={(event: DragEvent<HTMLFormElement>) => event.preventDefault()}
       onDrop={(event: DragEvent<HTMLFormElement>) => {
@@ -221,16 +234,17 @@ export function Composer({
         take(filesOf(event.dataTransfer.files))
       }}
     >
-      <Textarea
+      <MentionField
         label={label}
-        rows={2}
         placeholder={
           kind === 'question'
             ? 'What you want to understand. It gets an answer, never a change.'
             : 'What you saw. Paste or drop images here.'
         }
         value={text}
-        onValueChange={setText}
+        onValueChange={(value) => setText(value)}
+        mentionables={mentionables}
+        onSubmit={add}
       />
       <Images
         images={images}
@@ -300,10 +314,12 @@ export function Composer({
 export function RemarkLine({
   remark,
   handlers,
+  mentionables,
   initiallyOpen = false,
 }: {
   remark: Remark
   handlers: FeedbackHandlers
+  mentionables: readonly Mentionable[]
   initiallyOpen?: boolean | undefined
 }): ReactNode {
   const [open, setOpen] = useState(initiallyOpen)
@@ -311,8 +327,16 @@ export function RemarkLine({
   const [following, setFollowing] = useState(false)
   const quiet = remark.state === 'resolved' || remark.state === 'withdrawn'
   const kept = (remark.images ?? []).length
+  const folding = useTransition(fold)
   return (
-    <li className="flex flex-col border-b border-border last:border-b-0">
+    // A remark written grows into its list, pushing what is under it.
+    <motion.li
+      className="flex flex-col overflow-hidden border-b border-border last:border-b-0"
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
       <div className={MARKED}>
         <Legend label={remarkLegend(remark)}>
           <StatusMark state={MARK[remark.state]} size="sm" />
@@ -400,6 +424,17 @@ export function RemarkLine({
                 {remark.kind === 'question' ? 'The answer' : 'What the agent did'}
               </span>
               <p className={PROSE}>{remark.answer}</p>
+              {remark.toMission === true && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="self-start"
+                  aria-label={`Start a mission from ${remark.id}`}
+                  onClick={() => handlers.onStartMission(remark.id)}
+                >
+                  Start a mission from this
+                </Button>
+              )}
             </div>
           )}
           <RemarkActions
@@ -413,6 +448,8 @@ export function RemarkLine({
             <div className="max-w-measure">
               <Composer
                 follows={remark.id}
+                mentionables={mentionables}
+                onAttach={handlers.onAttach}
                 onAdd={(added) => {
                   handlers.onAdd(added)
                   setFollowing(false)
@@ -422,7 +459,7 @@ export function RemarkLine({
           )}
         </div>
       </Unfolding>
-    </li>
+    </motion.li>
   )
 }
 
@@ -505,11 +542,13 @@ function RoundGroup({
   round,
   remarks,
   handlers,
+  mentionables,
   initiallyOpen,
 }: {
   round: Round
   remarks: readonly Remark[]
   handlers: FeedbackHandlers
+  mentionables: readonly Mentionable[]
   initiallyOpen: boolean
 }): ReactNode {
   const [open, setOpen] = useState(initiallyOpen)
@@ -536,9 +575,16 @@ function RoundGroup({
       </div>
       <Unfolding open={open}>
         <ul aria-label={name} className="flex flex-col border-t border-border">
-          {remarks.map((remark) => (
-            <RemarkLine key={remark.id} remark={remark} handlers={handlers} />
-          ))}
+          <AnimatePresence initial={false}>
+            {remarks.map((remark) => (
+              <RemarkLine
+                key={remark.id}
+                remark={remark}
+                handlers={handlers}
+                mentionables={mentionables}
+              />
+            ))}
+          </AnimatePresence>
         </ul>
       </Unfolding>
     </Frame>
@@ -570,22 +616,24 @@ function SkeletonRows(): ReactNode {
 
 export interface FeedbackProps extends FeedbackHandlers {
   remarks: readonly Remark[]
+  /** Whether Fix may be pressed now: the engine's word, never worked out here. */
+  fixable: boolean
   rounds: readonly Round[]
+  /** What the field offers after `@`: the Project's missions and commands. */
+  mentionables: readonly Mentionable[]
   loading?: boolean | undefined
-  /** Open question 33's alternative: one list narrowed by what each remark waits for. */
-  model?: 'rounds' | 'list' | undefined
 }
 
 /** The feedback by round: the field, the next round with Fix, then the rounds, newest first. */
 export function Feedback({
   remarks,
+  fixable,
   rounds,
+  mentionables,
   loading = false,
-  model = 'rounds',
   ...handlers
 }: FeedbackProps): ReactNode {
   const waiting = remarks.filter((one) => one.state === 'waiting')
-  const open = rounds.some((one) => one.state === 'grilling' || one.state === 'building')
   const next = (rounds[0]?.n ?? 0) + 1
   return (
     <section
@@ -597,23 +645,25 @@ export function Feedback({
         title="Feedback"
         count={loading ? undefined : remarks.filter((one) => one.state !== 'withdrawn').length}
       />
-      <Frame>
-        <div className="px-4 py-3">
-          <Composer onAdd={handlers.onAdd} onOpenDiff={() => handlers.onOpenDiff('')} />
-        </div>
-      </Frame>
-      {loading ? (
-        <SkeletonRows />
-      ) : model === 'list' ? (
-        <OneList remarks={remarks} handlers={handlers} />
-      ) : (
-        <>
-          {waiting.length > 0 && (
-            <div className="flex flex-col gap-2">
+      {/* The next round unfolds under the composer with its own gap, so nothing jumps first. */}
+      <div className="flex flex-col">
+        <Frame>
+          <div className="px-4 py-3">
+            <Composer
+              mentionables={mentionables}
+              onAdd={handlers.onAdd}
+              onAttach={handlers.onAttach}
+              onOpenDiff={() => handlers.onOpenDiff('')}
+            />
+          </div>
+        </Frame>
+        {!loading && (
+          <Unfolding open={waiting.length > 0}>
+            <div className="flex flex-col gap-2 pt-4">
               <div className="flex min-h-control-md items-center gap-3">
                 <h3 className="text-sm font-semibold">Next round</h3>
                 <span className={QUIET}>{plural(waiting.length, 'waits', 'wait')} to be sent</span>
-                {!open && (
+                {fixable && (
                   <Button variant="primary" size="sm" className="ml-auto" onClick={handlers.onFix}>
                     {`Fix · round ${String(next)}`}
                   </Button>
@@ -621,80 +671,36 @@ export function Feedback({
               </div>
               <Frame>
                 <ul aria-label="Next round" className="flex flex-col">
-                  {waiting.map((remark) => (
-                    <RemarkLine key={remark.id} remark={remark} handlers={handlers} />
-                  ))}
+                  <AnimatePresence initial={false}>
+                    {waiting.map((remark) => (
+                      <RemarkLine
+                        key={remark.id}
+                        remark={remark}
+                        handlers={handlers}
+                        mentionables={mentionables}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </ul>
               </Frame>
             </div>
-          )}
-          {rounds.map((round, at) => (
-            <RoundGroup
-              key={round.n}
-              round={round}
-              remarks={remarks.filter((one) => one.round === round.n && one.state !== 'waiting')}
-              handlers={handlers}
-              initiallyOpen={at === 0}
-            />
-          ))}
-        </>
-      )}
-    </section>
-  )
-}
-
-type Filter = 'resolve' | 'waiting' | 'round' | 'all'
-
-const FILTERS: readonly { id: Filter; label: string; keeps: (remark: Remark) => boolean }[] = [
-  { id: 'resolve', label: 'To resolve', keeps: (one) => one.state === 'addressed' },
-  { id: 'waiting', label: 'Not sent', keeps: (one) => one.state === 'waiting' },
-  { id: 'round', label: 'In a round', keeps: (one) => one.state === 'inRound' },
-  { id: 'all', label: 'All', keeps: () => true },
-]
-
-/** The alternative: every remark in one list, newest first, narrowed by what it waits for. */
-function OneList({
-  remarks,
-  handlers,
-}: {
-  remarks: readonly Remark[]
-  handlers: FeedbackHandlers
-}): ReactNode {
-  const [filter, setFilter] = useState<Filter>(() =>
-    remarks.some((one) => one.state === 'addressed') ? 'resolve' : 'all',
-  )
-  const keeps = FILTERS.find((one) => one.id === filter)?.keeps ?? (() => true)
-  const shown = remarks.filter(keeps).toReversed()
-  const waiting = remarks.some((one) => one.state === 'waiting')
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex min-w-0 items-center gap-1">
-        <div role="group" aria-label="Show" className="flex flex-wrap gap-1">
-          {FILTERS.map((one) => (
-            <Button
-              key={one.id}
-              variant={filter === one.id ? 'secondary' : 'ghost'}
-              size="sm"
-              aria-pressed={filter === one.id}
-              onClick={() => setFilter(one.id)}
-            >
-              {`${one.label} · ${String(remarks.filter(one.keeps).length)}`}
-            </Button>
-          ))}
-        </div>
-        {waiting && (
-          <Button variant="primary" size="sm" className="ml-auto" onClick={handlers.onFix}>
-            Fix
-          </Button>
+          </Unfolding>
         )}
       </div>
-      <Frame>
-        <ul aria-label="Remarks" className="flex flex-col">
-          {shown.map((remark) => (
-            <RemarkLine key={remark.id} remark={remark} handlers={handlers} />
-          ))}
-        </ul>
-      </Frame>
-    </div>
+      {loading ? (
+        <SkeletonRows />
+      ) : (
+        rounds.map((round, at) => (
+          <RoundGroup
+            key={round.n}
+            round={round}
+            remarks={remarks.filter((one) => one.round === round.n && one.state !== 'waiting')}
+            handlers={handlers}
+            mentionables={mentionables}
+            initiallyOpen={at === 0}
+          />
+        ))
+      )}
+    </section>
   )
 }

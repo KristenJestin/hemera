@@ -332,3 +332,53 @@ export const SearchFailed: Story = {
     await shown(() => menu().getByText('The file list could not be read.'))
   },
 }
+
+/**
+ * A value handed back late: the page draws a text the field wrote a keystroke ago, after the field
+ * has read the next key. The field keeps what was typed since, as a hand typing fast on a busy
+ * page expects; only a value it never wrote, such as the field emptied once sent, is drawn anew.
+ */
+export const LateValue: Story = {
+  render: function Render(args) {
+    const [value, setValue] = useState(args.value)
+    const [held, setHeld] = useState<readonly string[]>([])
+    return (
+      <div className="flex flex-col gap-2">
+        <MentionField
+          {...args}
+          value={value}
+          onValueChange={(next, mentions) => {
+            setHeld((before) => [...before, next])
+            args.onValueChange(next, mentions)
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setValue(held[0] ?? value)
+            setHeld((before) => before.slice(1))
+          }}
+        >
+          Hand back the oldest value
+        </button>
+        <button type="button" onClick={() => setValue('')}>
+          Empty the field
+        </button>
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await typeIn(field(canvasElement), 'ab')
+    await waitFor(() => expect(field(canvasElement)).toHaveTextContent('ab'))
+    // `a` comes back after `b` was read: the field still reads `ab`.
+    await userEvent.click(canvas.getByRole('button', { name: 'Hand back the oldest value' }))
+    await expect(field(canvasElement)).toHaveTextContent('ab')
+    await userEvent.click(canvas.getByRole('button', { name: 'Hand back the oldest value' }))
+    await expect(field(canvasElement)).toHaveTextContent('ab')
+    // A value the field never wrote is drawn anew.
+    await userEvent.click(canvas.getByRole('button', { name: 'Empty the field' }))
+    await waitFor(() => expect(field(canvasElement)).toHaveTextContent(''))
+    await expect(field(canvasElement).textContent).toBe('')
+  },
+}

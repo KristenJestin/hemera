@@ -7,7 +7,17 @@ import { Frame } from '../../components/frame/frame.tsx'
 import { LetterAvatar } from '../../components/letter-avatar/letter-avatar.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
 import { IconBug, IconGitCompare, IconPlus, IconX } from '../../icons.ts'
-import { CODE, Calls, Chevron, LINE, MONO, PROSE, QUIET, ROW, Unfolding } from '../review/parts.tsx'
+import {
+  CODE,
+  Calls,
+  Chevron,
+  LINE,
+  MONO,
+  PROSE,
+  QUIET,
+  ROW,
+  Unfolding,
+} from '../../surfaces/review/review-parts.tsx'
 import type { Fix, ShippingMoment, TeamComment } from './types.ts'
 
 /**

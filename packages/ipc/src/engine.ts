@@ -219,6 +219,12 @@ export const EngineReviewRpcs = DiffRpcs.merge(AutoReviewRpcs)
 /** Review's feedback (#341), which the diff view writes (#497): a layer of its own (TS2589). */
 export const EngineFeedbackRpcs = ReviewRpcs
 
+/**
+ * What the Review page (#496) asks beside its feedback: the proofs (#144), the pushes (R6), Ship
+ * (R9) and the team comments (R8), each a layer of its own in the engine and in main (TS2589).
+ */
+export const EngineDeliveryRpcs = ProofsRpcs.merge(DeliveryRpcs, ShipRpcs, TeamCommentsRpcs)
+
 export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineApartRpcs,
   EngineSettingsRpcs,
@@ -226,16 +232,8 @@ export const EngineMainRpcs = EngineMainCoreRpcs.merge(
   EngineDeliveryRulesRpcs,
   EngineReviewRpcs,
   EngineFeedbackRpcs,
+  EngineDeliveryRpcs,
 )
 
-/**
- * Everything the engine serves: what main asks, and the proofs (#144), the pushes (R6), Ship (R9)
- * and the team comments (R8), served apart until their screens (R10, #496) forward them; their
- * handlers are layers of their own (TS2589).
- */
-export const EngineServedRpcs = EngineMainRpcs.merge(
-  ProofsRpcs,
-  DeliveryRpcs,
-  ShipRpcs,
-  TeamCommentsRpcs,
-)
+/** Everything the engine serves: what main asks, which it forwards to the window. */
+export const EngineServedRpcs = EngineMainRpcs

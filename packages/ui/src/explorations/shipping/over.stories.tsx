@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { tabTo } from '../review/play.ts'
+import { tabTo } from '../../surfaces/review/review-play.ts'
 import { ShippingScreen } from './screen.tsx'
 
 /**

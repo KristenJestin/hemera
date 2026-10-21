@@ -146,3 +146,19 @@ export function startAndOpen(
     (failure: Error) => then.refused(`The mission could not be started: ${failure.message}`),
   )
 }
+
+/**
+ * What the start field opens with when a mission is started from a feedback ("Start a mission
+ * from this"): its words, the mission and the feedback it comes from, and how that origin is said.
+ */
+export interface StartSeed {
+  readonly text: string
+  readonly origin: string
+  readonly originFeedback: string
+  /** `Started from ACME-12, round 2`. */
+  readonly said: string
+}
+
+/** A creation started from a feedback carries its origin: the remark closes once it is created. */
+export const seededCreate = (made: StartCreate, seed: StartSeed | undefined): StartCreate =>
+  seed === undefined ? made : { ...made, origin: seed.origin, originFeedback: seed.originFeedback }

@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { LONG_TITLE } from './fixtures.ts'
-import { cardOf, tabTo, unfold } from './play.ts'
-import { ReviewScreen } from './screen.tsx'
+import { LONG_TITLE } from './review-fixtures.ts'
+import { cardOf, tabTo, unfold } from './review-play.ts'
+import { ReviewScreen } from './review-screen-fixture.tsx'
 
 /**
  * The Review page of #254, recommended: the same rail as Planning and Building — the stage card,
@@ -14,7 +14,7 @@ import { ReviewScreen } from './screen.tsx'
  * what the agent answered, the older ones folded. The needs stand above the page.
  */
 const meta = {
-  title: 'Explorations/Review/Review',
+  title: 'Surfaces/Review',
   component: ReviewScreen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
@@ -23,6 +23,8 @@ const meta = {
     onShip: fn(),
     onService: fn(),
     onRemark: fn(),
+    onAttach: fn(),
+    onStartMission: fn(),
     onFix: fn(),
     onVerify: fn(),
     onTeam: fn(),
@@ -149,23 +151,27 @@ const png = (name: string, bytes: number): File =>
   })
 
 /**
- * Writing a remark: a remark or a question, images attached, pasted or dropped — kept, or refused
- * with the reason. Adding it sends nothing: it waits in the next round, and Fix appears.
+ * Writing a remark: a remark or a question, in the mention field; images attached, pasted or
+ * dropped go to Hemera at once, which keeps them or refuses them with the reason. Adding it sends
+ * nothing: it waits in the next round, and Fix appears when the engine says one may be pressed.
  */
 export const WritingARemark: Story = {
   args: { moment: 'writing' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('button', { name: /^Fix/ })).toBeNull()
-    const field = canvas.getByRole('textbox', { name: 'A remark from your live test' })
+    const field = await canvas.findByRole('textbox', { name: 'A remark from your live test' })
     await userEvent.type(field, 'The header says UTC.')
     await userEvent.upload(canvas.getByLabelText('Attach images'), [
       png('header.png', 2048),
       png('loop.gif', 1024),
     ])
+    await expect(args.onAttach).toHaveBeenCalledTimes(2)
     const images = await waitFor(() => canvas.getByRole('list', { name: 'Images of the remark' }))
-    await expect(within(images).getByText('header.png')).toBeVisible()
-    await expect(within(images).getByText(/GIF is not kept: png, jpeg or webp/)).toBeVisible()
+    await waitFor(() => {
+      expect(within(images).getByText('header.png')).toBeVisible()
+      expect(within(images).getByText(/GIF is not kept: png, jpeg or webp/)).toBeVisible()
+    })
     await userEvent.click(canvas.getByRole('button', { name: 'Add the remark' }))
     await expect(args.onRemark).toHaveBeenCalledWith('add', {
       kind: 'remark',
@@ -188,7 +194,7 @@ export const AskingAQuestion: Story = {
       'aria-pressed',
       'true',
     )
-    const field = canvas.getByRole('textbox', { name: 'A question for the agent' })
+    const field = await canvas.findByRole('textbox', { name: 'A question for the agent' })
     await userEvent.type(field, 'Why a stream?{Enter}')
     await expect(args.onRemark).toHaveBeenCalledWith('add', {
       kind: 'question',
@@ -298,6 +304,22 @@ export const RoundBack: Story = {
   },
 }
 
+/** A remark the agent answered with a mission of its own: the mission is started from it. */
+export const AnswerToAMission: Story = {
+  args: { moment: 'toAMission' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const round = within(canvas.getByRole('list', { name: 'Round 2' }))
+    await userEvent.click(round.getByRole('button', { name: /F9/ }))
+    const start = await waitFor(() =>
+      round.getByRole('button', { name: 'Start a mission from F9' }),
+    )
+    await userEvent.click(start)
+    await expect(args.onStartMission).toHaveBeenCalledWith('F9')
+    await expect(round.queryByRole('button', { name: 'Start a mission from F6' })).toBeNull()
+  },
+}
+
 /** A closed round stays readable: its remarks resolved or withdrawn, its view a press away. */
 export const ClosedRoundInHistory: Story = {
   args: { moment: 'back' },
@@ -368,7 +390,10 @@ export const TeamComments: Story = {
     await expect(args.onOpenLink).toHaveBeenCalledWith(
       'https://github.com/acme/shop/pull/412#discussion_r1',
     )
-    await userEvent.type(forYou.getByRole('textbox', { name: 'My take on C1' }), 'One per user.')
+    await userEvent.type(
+      await forYou.findByRole('textbox', { name: 'My take on C1' }),
+      'One per user.',
+    )
     await userEvent.click(forYou.getByRole('button', { name: 'Add C1 to the round' }))
     await expect(args.onTeam).toHaveBeenCalledWith('C1', 'round', 'One per user.')
     await userEvent.click(forYou.getByRole('button', { name: /bram\.de-vries/ }))
@@ -447,6 +472,11 @@ export const ShipConfirmationInFull: Story = {
     await expect(hand.getByText(/S13/)).toBeVisible()
     const rules = within(dialog.getByRole('region', { name: 'Rules changed since this mission' }))
     await expect(rules.getByText(/squash/)).toBeVisible()
+    await expect(
+      rules.getByText(
+        'api’s reviewers changed in the Project since this mission copied them. This delivery keeps the mission’s copy.',
+      ),
+    ).toBeVisible()
     const ci = within(dialog.getByRole('region', { name: 'Pull requests’ CI' }))
     await expect(ci.getByRole('img', { name: 'Running' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Ship now' })).toBeEnabled()
@@ -574,7 +604,7 @@ export const KeyboardPath: Story = {
     await expect(services.matches(':focus-visible')).toBe(true)
     await userEvent.keyboard('{Enter}')
     await expect(services).toHaveAttribute('aria-expanded', 'true')
-    const field = canvas.getByRole('textbox', { name: 'A remark from your live test' })
+    const field = await canvas.findByRole('textbox', { name: 'A remark from your live test' })
     await tabTo(field)
     const open = canvas.getByRole('button', { name: 'Open round 2' })
     await tabTo(open)

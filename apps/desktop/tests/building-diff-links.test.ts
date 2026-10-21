@@ -49,6 +49,7 @@ function framed(open: (view: string) => void): StageFrame {
     mission: MISSION,
     open,
     goMission: none,
+    startMission: none,
     readiness: null,
     openChat: none,
     kept: [],

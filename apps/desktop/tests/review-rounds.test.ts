@@ -431,6 +431,46 @@ describe('Fix', () => {
       expect(field).not.toContain('The CSV has no header row.')
     },
   )
+  test(
+    'Fix is offered only while a remark waits and no other round is grilled or built',
+    SLOW,
+    async () => {
+      const { run } = rounding()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* inReview()
+            const fixable = () =>
+              Effect.map(
+                Review.use((review) => review.state(missionId)),
+                (state) => [state.waits, state.fixable],
+              )
+            const empty = yield* fixable()
+            yield* written(missionId, question('Why is the date in UTC?'))
+            const asked = yield* fixable()
+            yield* written(missionId, remark('The export button is hidden on small screens.'))
+            const waiting = yield* fixable()
+            yield* fix(missionId)
+            const grilled = yield* fixable()
+            // Written while round 1 is grilled: it waits for round 2, whose Fix is refused.
+            yield* written(missionId, remark('The file name has no date.'))
+            const later = yield* fixable()
+            const refused = yield* fix(missionId).pipe(Effect.flip)
+            return { empty, asked, waiting, grilled, later, refused: refused.message }
+          }),
+        ),
+      )
+      expect(seen).toEqual({
+        empty: [false, false],
+        asked: [false, false],
+        waiting: [true, true],
+        grilled: [false, false],
+        later: [true, false],
+        refused: 'round 1 is grilling: round 2 waits for it to be answered',
+      })
+    },
+  )
 })
 
 describe('The grilling', () => {

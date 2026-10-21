@@ -37,6 +37,8 @@ export interface Remark {
   round?: number | undefined
   /** What the agent answered, once it did: what it did, or the answer to a question. */
   answer?: string | undefined
+  /** Whether the agent answered that it asks for a mission of its own, to start from it. */
+  toMission?: boolean | undefined
   /** The remark it follows up, when it is a follow-up. */
   follows?: string | undefined
   /** Who wrote it when it came from the team, through the user. */
@@ -108,7 +110,8 @@ export interface TeamComment {
   state: 'new' | 'inRound' | 'dismissed' | 'resolved'
   /** The user's own take, which weighs more than the agent's reading. */
   take?: string | undefined
-  url: string
+  /** Its address on the forge, when the forge gave one. */
+  url?: string | undefined
   at: string
 }
 
@@ -144,6 +147,8 @@ export interface Service {
   line: string
   /** Why it stopped, when it failed. */
   error?: string | undefined
+  /** Whether its × removes it once it does not run: not one of the catalogue never started. */
+  removable?: boolean | undefined
 }
 
 /** A scenario's proof: its red recorded, then green; or a proof the user verifies by hand. */
@@ -216,8 +221,11 @@ export interface ShipPreview {
   redo: readonly string[]
   /** The proofs verified by hand that the user has not validated. */
   unvalidated: readonly { id: string; title: string }[]
-  /** The rules of the Project that changed since the mission copied them. */
-  rules: readonly { what: string; before: string; now: string }[]
+  /**
+   * The rules of the Project that changed since the mission copied them; with what each said then
+   * and says now, when that is known.
+   */
+  rules: readonly { what: string; before?: string | undefined; now?: string | undefined }[]
   /** The CI of each open pull request. */
   ci: readonly { repository: string; number: number; state: MarkState; words: string }[]
   /** The Local preset: no forge, Ship is a dated "delivered". */
@@ -235,8 +243,6 @@ export interface BallView {
   ball: 'agent' | 'you' | 'someone'
   /** Beside the glyph: who or what it waits on. */
   words?: string | undefined
-  /** The alternative to open question 49: the ball stays the user's, a mark says what waits. */
-  waitingMark?: string | undefined
 }
 
 export interface ReviewMoment {
@@ -250,6 +256,8 @@ export interface ReviewMoment {
   ball: BallView
   needs: readonly NeedRow[]
   remarks: readonly Remark[]
+  /** Whether Fix may be pressed now, as the engine says: feedback waits and no round runs. */
+  fixable: boolean
   rounds: readonly Round[]
   team: readonly TeamComment[]
   pulls: readonly PullRequest[]

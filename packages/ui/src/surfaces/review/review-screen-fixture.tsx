@@ -5,18 +5,14 @@ import { stageWords } from '../../blocks/mission/vocabulary.ts'
 import { Button } from '../../components/button/button.tsx'
 import { IconFileText, IconGitCompare, IconMessages, IconRocket } from '../../icons.ts'
 import { ContentHeader, type Crumb } from '../../shell/content-header.tsx'
-import {
-  MissionFrame,
-  MissionFrameNeeds,
-  type MissionView,
-} from '../../surfaces/mission/mission-frame.tsx'
+import { MissionFrame, MissionFrameNeeds, type MissionView } from '../mission/mission-frame.tsx'
 import {
   AT_BASE,
   type MissionFrameState,
   closeView,
   openView,
   showView,
-} from '../../surfaces/mission/navigation.ts'
+} from '../mission/navigation.ts'
 import {
   BRANCH,
   edit,
@@ -29,13 +25,14 @@ import {
   MOMENTS,
   type MomentName,
   TITLE,
-} from './fixtures.ts'
-import type { NewRemark } from './feedback.tsx'
-import { ReviewPage } from './review.tsx'
-import type { RailHandlers } from './rail.tsx'
+} from './review-fixtures.ts'
+import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
+import type { Attached, NewRemark } from './review-feedback.tsx'
+import { ReviewPage } from './review-page.tsx'
+import type { RailHandlers } from './review-rail.tsx'
 import { type PointAction, RoundView } from './round-view.tsx'
-import { ShipDialog } from './ship.tsx'
-import type { Remark, ReviewMoment, ShipPreview, TeamComment } from './types.ts'
+import { ShipDialog } from './ship-dialog.tsx'
+import type { Remark, ReviewMoment, ShipPreview, TeamComment } from './review-types.ts'
 
 /**
  * The Review page of ACME-12 in its mission frame, under the window's header that carries the
@@ -54,16 +51,15 @@ export interface ReviewScreenProps {
   long?: boolean | undefined
   forge?: 'GitHub' | 'Bitbucket' | undefined
   /** What Ship's confirmation lists: the moment's own, everything, or the Local preset's. */
-  preview?: 'plain' | 'full' | 'local' | 'stamp' | undefined
-  /** Open question 33: by round (recommended), or one list. */
-  feedback?: 'rounds' | 'list' | undefined
-  /** Open question 49: someone else's ball once the team holds Ship (recommended), or the user's. */
-  ball?: 'someone' | 'yours' | undefined
+  preview?: 'plain' | 'full' | 'local' | undefined
   /** The views open as the story starts. */
   initial?: MissionFrameState | undefined
   onShip: () => void
   onService: RailHandlers['onService']
   onRemark: (action: 'add' | 'edit' | 'withdraw' | 'resolve', what: RemarkWhat) => void
+  /** An image handed to Hemera: the story's engine keeps it or refuses it as Hemera does. */
+  onAttach: (file: File) => void
+  onStartMission: (id: string) => void
   onFix: () => void
   onVerify: RailHandlers['onVerify']
   onTeam: RailHandlers['onTeam']
@@ -123,11 +119,30 @@ function momentOf(props: ReviewScreenProps): ReviewMoment {
 
 function previewOf(moment: ReviewMoment, asked: ReviewScreenProps['preview']): ShipPreview {
   if (asked === 'full') return FULL_PREVIEW
-  if (asked === 'local' || asked === 'stamp' || moment.forge === null) return LOCAL_PREVIEW
+  if (asked === 'local' || moment.forge === null) return LOCAL_PREVIEW
   return moment.preview
 }
 
 const noAnswer = async (): Promise<void> => {}
+
+/** The images Hemera keeps: png, jpeg and webp, up to 10 MB each. */
+const KEPT = new Set(['image/png', 'image/jpeg', 'image/webp'])
+
+const LIMIT = 10 * 1024 * 1024
+
+/** The story's engine on an image: kept under its name, or refused in Hemera's words. */
+function attachedOf(file: File): Attached {
+  if (!KEPT.has(file.type)) {
+    const kind = (file.name.split('.').at(-1) ?? 'This file').toUpperCase()
+    return { refused: `${kind} is not kept: png, jpeg or webp` }
+  }
+  if (file.size > LIMIT) {
+    return {
+      refused: `Too large: ${String(Math.round(file.size / 1024 / 1024))} MB, the limit is 10 MB`,
+    }
+  }
+  return { id: file.name }
+}
 
 /** The Review page of ACME-12 in its frame, the needs above it, its views over it. */
 export function ReviewScreen(props: ReviewScreenProps): ReactNode {
@@ -137,7 +152,11 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
   const [remarks, setRemarks] = useState<readonly Remark[]>(given.remarks)
   const [team, setTeam] = useState<readonly TeamComment[]>(given.team)
   const [shipping, setShipping] = useState(false)
-  const moment: ReviewMoment = { ...given, remarks, team }
+  // The engine's word on Fix, played here: a remark waits and no round is grilled or built.
+  const fixable =
+    remarks.some((one) => one.state === 'waiting') &&
+    !given.rounds.some((one) => one.state === 'grilling' || one.state === 'building')
+  const moment: ReviewMoment = { ...given, remarks, team, fixable }
   const local = moment.forge === null
   const stage = moment.stage ?? 'Review'
 
@@ -222,10 +241,6 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
     if (touched.outside !== undefined)
       marks.push({ kind: 'outside', repository: touched.repository })
   }
-  const yours = props.ball === 'yours' && moment.ball.ball === 'someone'
-  if (yours && moment.ball.words !== undefined) {
-    marks.push({ kind: 'waiting', on: moment.ball.words.replace(/^Waiting on /, '') })
-  }
 
   const canShip =
     !loading && stage === 'Review' && moment.refusals.length === 0 && moment.shipping === undefined
@@ -252,8 +267,8 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
         round={moment.round}
         frozen
         type="feature"
-        ball={yours ? 'you' : moment.ball.ball}
-        now={yours ? undefined : moment.ball.words}
+        ball={moment.ball.ball}
+        now={moment.ball.words}
         marks={marks}
         ticket={{ key: 'acme/shop#41' }}
         branch={BRANCH}
@@ -287,8 +302,8 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
           <ReviewPage
             moment={moment}
             loading={loading}
-            model={props.feedback ?? 'rounds'}
             rail={rail}
+            mentionables={MENTIONABLES}
             feedback={{
               onAdd: (added) => {
                 props.onRemark('add', added)
@@ -300,7 +315,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                     text: added.text,
                     state: 'waiting',
                     at: 'now',
-                    images: added.images.map((name) => ({ name, size: '' })),
+                    images: added.images.map((name) => ({ name, size: '2 KB' })),
                     follows: added.follows,
                   },
                 ])
@@ -317,6 +332,11 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                 props.onRemark('resolve', { id })
                 change(id, (one) => ({ ...one, state: 'resolved' }))
               },
+              onAttach: (file) => {
+                props.onAttach(file)
+                return Promise.resolve(attachedOf(file))
+              },
+              onStartMission: props.onStartMission,
               onFix: props.onFix,
               onOpenDiff: openDiff,
               onOpenRound: (n) => views.open(`round:${String(n)}`),
@@ -332,7 +352,6 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
       <ShipDialog
         missionKey={KEY}
         preview={previewOf(moment, props.preview)}
-        stampOnly={props.preview === 'stamp'}
         open={shipping}
         onOpenChange={setShipping}
         onConfirm={props.onShip}

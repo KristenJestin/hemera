@@ -21,6 +21,7 @@ import {
   createOf,
   foldStart,
   searchPending,
+  seededCreate,
   startAndOpen,
   viewsOf,
 } from '../src/renderer/start-results.ts'
@@ -145,6 +146,24 @@ describe('what a choice creates', () => {
       ticket: { reference },
       idempotencyKey: 'k3',
     })
+  })
+
+  test('a mission started from a remark carries the mission and the remark it comes from', () => {
+    const seed = {
+      text: 'Export a year at once',
+      origin: 'm12',
+      originFeedback: 'fb-9',
+      said: 'Started from ACME-12, round 2',
+    }
+    const made = createOf('acme', 'Export a year at once', fold(create(false)), 'k5')
+    expect(seededCreate(made, seed)).toEqual({
+      projectId: 'acme',
+      text: 'Export a year at once',
+      origin: 'm12',
+      originFeedback: 'fb-9',
+      idempotencyKey: 'k5',
+    })
+    expect(seededCreate(made, undefined)).toEqual(made)
   })
 
   test('is the ticket of a result chosen', () => {

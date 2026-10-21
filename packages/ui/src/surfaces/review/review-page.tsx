@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 
-import { Feedback, type FeedbackHandlers } from './feedback.tsx'
-import { ForYou, type RailHandlers, Reruns, ReviewCard, TheRest } from './rail.tsx'
-import type { ReviewMoment } from './types.ts'
+import type { Mentionable } from '../../components/mention-field/mention-field.tsx'
+import { Feedback, type FeedbackHandlers } from './review-feedback.tsx'
+import { ForYou, type RailHandlers, Reruns, ReviewCard, TheRest } from './review-rail.tsx'
+import type { ReviewMoment } from './review-types.ts'
 
 /**
  * The Review page as #254 proposes it, in the language of the Planning and Building pages: a rail
@@ -16,9 +17,10 @@ import type { ReviewMoment } from './types.ts'
 export interface ReviewPageProps {
   moment: ReviewMoment
   loading: boolean
-  model: 'rounds' | 'list'
   rail: RailHandlers
   feedback: FeedbackHandlers
+  /** What the fields offer after `@`: the Project's missions and commands. */
+  mentionables: readonly Mentionable[]
 }
 
 const COLUMNS = 'flex min-w-0 flex-col gap-8 px-8 pt-2 pb-10 lg:flex-row-reverse lg:items-start'
@@ -27,15 +29,24 @@ const MAIN = 'flex min-w-0 flex-1 flex-col gap-6'
 
 const RAIL = 'flex w-full min-w-0 shrink-0 flex-col gap-6 lg:w-view-narrow'
 
-export function ReviewPage({ moment, loading, model, rail, feedback }: ReviewPageProps): ReactNode {
+export function ReviewPage({
+  moment,
+  loading,
+  rail,
+  feedback,
+  mentionables,
+}: ReviewPageProps): ReactNode {
   return (
     <div className={COLUMNS} data-stage="review">
       <aside aria-label="What happens" className={RAIL}>
-        <ReviewCard moment={moment} loading={loading} />
+        {/* The re-runs unfold under the card with their own gap, so nothing jumps before them. */}
+        <div className="flex flex-col">
+          <ReviewCard moment={moment} loading={loading} />
+          {!loading && <Reruns moment={moment} />}
+        </div>
         {!loading && (
           <>
-            <Reruns moment={moment} />
-            <ForYou moment={moment} handlers={rail} />
+            <ForYou moment={moment} handlers={rail} mentionables={mentionables} />
             <TheRest moment={moment} handlers={rail} />
           </>
         )}
@@ -43,9 +54,10 @@ export function ReviewPage({ moment, loading, model, rail, feedback }: ReviewPag
       <div className={MAIN}>
         <Feedback
           remarks={moment.remarks}
+          fixable={moment.fixable}
           rounds={moment.rounds}
+          mentionables={mentionables}
           loading={loading}
-          model={model}
           {...feedback}
         />
       </div>

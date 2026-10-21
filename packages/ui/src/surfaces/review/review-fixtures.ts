@@ -12,7 +12,7 @@ import type {
   Service,
   ShipPreview,
   TeamComment,
-} from './types.ts'
+} from './review-types.ts'
 
 /**
  * ACME-12 in Review at a real size, for #254: five repositories, fourteen scenarios of which two are
@@ -660,6 +660,7 @@ function entering(): ReviewMoment {
     ball: { ball: 'you' },
     needs: [],
     remarks: [],
+    fixable: false,
     rounds: [],
     team: [],
     pulls: [],
@@ -699,6 +700,7 @@ function feedback(): ReviewMoment {
     progress: { step: 'Review · round 1', detail: '4 remarks wait to be sent' },
     round: 1,
     remarks: [...ROUND_ONE, ...WAITING],
+    fixable: true,
     rounds: [ROUND_ONE_BACK],
     proofs: verified(PROOFS),
     pulls: PULLS_OPEN,
@@ -720,6 +722,7 @@ function grilling(): ReviewMoment {
       (one) => one.state === 'waiting',
       () => ({ state: 'inRound', round: 2 }),
     ),
+    fixable: false,
     rounds: [ROUND_TWO_GRILLING, ROUND_ONE_BACK],
     refusals: ['round 2 is open', 'Q2 and Q3 wait for your answer'],
   }
@@ -820,6 +823,7 @@ export const MOMENTS = {
   writing: (): ReviewMoment => ({
     ...feedback(),
     remarks: ROUND_ONE,
+    fixable: false,
     progress: { step: 'Review · round 1', detail: '3 addressed wait for you' },
     refusals: ['3 addressed remarks wait for you'],
   }),
@@ -840,6 +844,22 @@ export const MOMENTS = {
     }
   },
   back,
+  /** Round 2 back, one remark answered with a mission of its own: it is started from there. */
+  toAMission: (): ReviewMoment => {
+    const moment = back()
+    return {
+      ...moment,
+      remarks: edit(
+        moment.remarks,
+        (one) => one.id === 'F9',
+        () => ({
+          answer:
+            'This asks for something the Spec never wanted: a mission of its own, started from this remark.',
+          toMission: true,
+        }),
+      ),
+    }
+  },
   team: (): ReviewMoment => ({
     ...feedback(),
     now: '2 comments of the team wait for your take.',
@@ -967,6 +987,7 @@ export const FULL_PREVIEW: ShipPreview = {
       before: 'squash',
       now: 'rebase',
     },
+    { what: 'api’s reviewers' },
   ],
   ci: edit(
     PREVIEW.ci,

@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 import { Button } from '../../components/button/button.tsx'
 import { Dialog } from '../../components/dialog/dialog.tsx'
 import { StatusMark } from '../../components/status-mark/status-mark.tsx'
-import { MONO, QUIET } from './parts.tsx'
-import type { ShipPreview } from './types.ts'
+import { MONO, QUIET } from './review-parts.tsx'
+import type { ShipPreview } from './review-types.ts'
 
 /**
  * Ship's confirmation: one question, and under it only what there is to say before the mission
@@ -17,7 +17,7 @@ import type { ShipPreview } from './types.ts'
  * With the Local preset there is no forge: the action is Mark as delivered, a dated stamp. Open
  * question 80, recommended: it merges each repository's branch into its local base, fast forward
  * when it can — the only merge without a pull request the rules allow — so the cleanup's guard
- * sees the work merged. The alternative stamps and merges nothing.
+ * sees the work merged.
  */
 
 const PART = 'flex flex-col gap-1.5'
@@ -41,8 +41,6 @@ export interface ShipDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
-  /** The Local preset's alternative: a stamp that merges nothing. */
-  stampOnly?: boolean | undefined
 }
 
 export function ShipDialog({
@@ -51,7 +49,6 @@ export function ShipDialog({
   open,
   onOpenChange,
   onConfirm,
-  stampOnly = false,
 }: ShipDialogProps): ReactNode {
   const local = preview.local !== undefined
   const confirm = local ? 'Mark as delivered' : 'Ship now'
@@ -85,27 +82,18 @@ export function ShipDialog({
     >
       <div className="flex flex-col gap-5">
         {local && preview.local !== undefined ? (
-          stampOnly ? (
-            <Part name="What happens">
-              <p className={NOTE}>
-                Nothing is merged: the branches stay as they are, and the cleanup keeps them since
-                they are not merged.
-              </p>
-            </Part>
-          ) : (
-            <Part name="What happens">
-              <ul className="flex flex-col gap-0.5">
-                {preview.local.merges.map((merge) => (
-                  <li key={merge.repository} className="flex min-w-0 items-center gap-2 text-sm">
-                    <span className="w-24 shrink-0 font-mono text-xs">{merge.repository}</span>
-                    <span className="min-w-0 truncate text-muted-foreground">
-                      {`Merges the mission’s branch into ${merge.into}, here, fast forward when it can`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Part>
-          )
+          <Part name="What happens">
+            <ul className="flex flex-col gap-0.5">
+              {preview.local.merges.map((merge) => (
+                <li key={merge.repository} className="flex min-w-0 items-center gap-2 text-sm">
+                  <span className="w-24 shrink-0 font-mono text-xs">{merge.repository}</span>
+                  <span className="min-w-0 truncate text-muted-foreground">
+                    {`Merges the mission’s branch into ${merge.into}, here, fast forward when it can`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Part>
         ) : (
           <Part name="What leaves">
             <ul className="flex flex-col gap-0.5">
@@ -156,7 +144,9 @@ export function ShipDialog({
             <ul className="flex flex-col gap-0.5">
               {preview.rules.map((rule) => (
                 <li key={rule.what} className="text-sm">
-                  {`${rule.what}: ${rule.before} when the mission started, ${rule.now} now. This delivery keeps ${rule.before}.`}
+                  {rule.before === undefined || rule.now === undefined
+                    ? `${rule.what} changed in the Project since this mission copied them. This delivery keeps the mission’s copy.`
+                    : `${rule.what}: ${rule.before} when the mission started, ${rule.now} now. This delivery keeps ${rule.before}.`}
                 </li>
               ))}
             </ul>

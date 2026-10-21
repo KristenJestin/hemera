@@ -274,6 +274,7 @@ const reviewOf = (...all: FeedbackView[]): ReviewStateView => ({
   rounds: [],
   feedback: all,
   waits: false,
+  fixable: false,
 })
 
 const NOW = new Date('2026-10-20T10:00:00Z')

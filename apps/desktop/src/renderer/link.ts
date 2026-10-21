@@ -27,7 +27,18 @@ import {
   type MissionDiff,
   type MissionGrant,
   type MissionService,
+  type ImageAdded,
+  type MissionFromSource,
+  type MissionPushes,
   type PrelaunchView,
+  type TeamCommentView,
+  type TeamCommentsChange,
+  type RoundDetailView,
+  type ProofsView,
+  type ScenarioProofView,
+  type ShipPreview,
+  type ShipProgress,
+  type Shipped,
   type AutomaticBackups,
   type BootstrapRun,
   type BaseBranchEdit,
@@ -760,6 +771,8 @@ export interface Link {
     kind: FeedbackKind,
     body: string,
     anchor: AnchorAsked | null,
+    /** The images Hemera kept for it, by their evidence ids. */
+    images?: ReadonlyArray<string>,
   ) => Promise<FeedbackView>
   /** Its words written again, on the version the user read. */
   readonly editFeedback: (
@@ -769,9 +782,65 @@ export interface Link {
   ) => Promise<FeedbackView>
   readonly withdrawFeedback: (feedbackId: string) => Promise<FeedbackView>
   readonly resolveFeedback: (feedbackId: string) => Promise<FeedbackView>
-  readonly followUpFeedback: (feedbackId: string, body: string) => Promise<FeedbackView>
+  readonly followUpFeedback: (
+    feedbackId: string,
+    body: string,
+    images?: ReadonlyArray<string>,
+  ) => Promise<FeedbackView>
+  /** An image for a feedback, handed to Hemera, which keeps it in the evidence or refuses it. */
+  readonly addImage: (missionId: string, name: string, bytes: Uint8Array) => Promise<ImageAdded>
+  /** One round as a small Spec: its points, tasks, decisions and the questions it asked. */
+  readonly reviewRound: (missionId: string, number: number) => Promise<RoundDetailView>
+  /** Sends the feedback waiting to its round: the agent grills it, then Building · round N. */
+  readonly fix: (missionId: string) => Promise<void>
+  /** What a mission started from a feedback begins with: its words and its origin. */
+  readonly startMissionFrom: (feedbackId: string) => Promise<MissionFromSource>
   /** The version of a file a code comment was written on. */
   readonly commentedVersion: (feedbackId: string) => Promise<CommentedVersion>
+  /** The mission's proofs, red then green, and its final checks; null before a Building. */
+  readonly proofs: (missionId: string) => Promise<ProofsView | null>
+  /** A scenario verified by hand, validated by the user on the trees of now. */
+  readonly validateManualProof: (
+    missionId: string,
+    scenarioId: string,
+    note: string | null,
+  ) => Promise<ScenarioProofView>
+  /** A scenario verified by hand, refused by the user, who says why. */
+  readonly refuseManualProof: (
+    missionId: string,
+    scenarioId: string,
+    note: string,
+  ) => Promise<ScenarioProofView>
+  /** Ship, on the preview the user saw: refused with every reason when it moved since. */
+  readonly confirmShip: (missionId: string, previewId: string) => Promise<Shipped>
+  /** Where a Ship stands now, then after each change. */
+  readonly onShipProgress: (
+    missionId: string,
+    listener: (progress: ShipProgress) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The mission's pushes and pull requests now, then after each change. */
+  readonly onPushes: (
+    missionId: string,
+    listener: (pushes: MissionPushes) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** Runs a failed or indeterminate repository's push again, doing only what is not yet true. */
+  readonly retryPush: (missionId: string, repository: string) => Promise<MissionPushes>
+  /** The team's comments on the mission's pull requests. */
+  readonly teamComments: (missionId: string) => Promise<ReadonlyArray<TeamCommentView>>
+  /** Each change of the team's comments, to read them again. */
+  readonly onTeamComments: (
+    missionId: string,
+    listener: (change: TeamCommentsChange) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
+  /** The user's own take on a comment, which weighs more than the agent's reading. */
+  readonly takeTeamComment: (commentId: string, myTake: string) => Promise<TeamCommentView>
+  readonly addTeamCommentToRound: (commentId: string) => Promise<TeamCommentView>
+  readonly dismissTeamComment: (commentId: string) => Promise<TeamCommentView>
+  /** What Ship would do now, and whether it may: the engine's reasons when it may not. */
+  readonly shipPreview: (missionId: string) => Promise<ShipPreview>
   /** What was allowed for the mission, the revoked and fallen grants included. */
   readonly missionGrants: (missionId: string) => Promise<ReadonlyArray<MissionGrant>>
   /** Revokes a grant, from the next call on. */
@@ -1250,18 +1319,48 @@ export function linkOver(port: Port): Link {
     reviewState: (missionId) => call((ready) => ready['review.state']({ missionId })),
     onReviewChanges: (missionId, listener, onEnd) =>
       follow((ready) => ready['review.changes']({ missionId }), listener, anError, onEnd),
-    addFeedback: (missionId, kind, body, anchor) =>
-      call((ready) => ready['review.feedbackAdd']({ missionId, kind, body, anchor, images: [] })),
+    addFeedback: (missionId, kind, body, anchor, images = []) =>
+      call((ready) => ready['review.feedbackAdd']({ missionId, kind, body, anchor, images })),
     editFeedback: (feedbackId, body, version) =>
       call((ready) => ready['review.feedbackEdit']({ feedbackId, body, version })),
     withdrawFeedback: (feedbackId) =>
       call((ready) => ready['review.feedbackWithdraw']({ feedbackId })),
     resolveFeedback: (feedbackId) =>
       call((ready) => ready['review.feedbackResolve']({ feedbackId })),
-    followUpFeedback: (feedbackId, body) =>
-      call((ready) => ready['review.feedbackFollowUp']({ feedbackId, body, images: [] })),
+    followUpFeedback: (feedbackId, body, images = []) =>
+      call((ready) => ready['review.feedbackFollowUp']({ feedbackId, body, images })),
+    addImage: (missionId, name, bytes) =>
+      call((ready) => ready['review.imageAdd']({ missionId, name, bytes })),
+    fix: (missionId) => call((ready) => ready['review.fix']({ missionId })),
+    reviewRound: (missionId, number) =>
+      call((ready) => ready['review.round']({ missionId, number })),
+    startMissionFrom: (feedbackId) =>
+      call((ready) => ready['review.startMissionFrom']({ feedbackId })),
     commentedVersion: (feedbackId) =>
       call((ready) => ready['review.commentedVersion']({ feedbackId })),
+    proofs: (missionId) => call((ready) => ready['proofs.read']({ missionId })),
+    validateManualProof: (missionId, scenarioId, note) =>
+      call((ready) => ready['proofs.validateManual']({ missionId, scenarioId, note })),
+    refuseManualProof: (missionId, scenarioId, note) =>
+      call((ready) => ready['proofs.refuseManual']({ missionId, scenarioId, note })),
+    shipPreview: (missionId) => call((ready) => ready['ship.preview']({ missionId })),
+    confirmShip: (missionId, previewId) =>
+      call((ready) => ready['ship.confirm']({ missionId, previewId })),
+    onShipProgress: (missionId, listener, onEnd) =>
+      follow((ready) => ready['ship.progress']({ missionId }), listener, anError, onEnd),
+    onPushes: (missionId, listener, onEnd) =>
+      follow((ready) => ready['delivery.changes']({ missionId }), listener, anError, onEnd),
+    retryPush: (missionId, repository) =>
+      call((ready) => ready['delivery.retry']({ missionId, repository })),
+    teamComments: (missionId) => call((ready) => ready['teamComments.list']({ missionId })),
+    onTeamComments: (missionId, listener, onEnd) =>
+      follow((ready) => ready['teamComments.changes']({ missionId }), listener, anError, onEnd),
+    takeTeamComment: (commentId, myTake) =>
+      call((ready) => ready['teamComments.take']({ commentId, myTake })),
+    addTeamCommentToRound: (commentId) =>
+      call((ready) => ready['teamComments.addToRound']({ commentId })),
+    dismissTeamComment: (commentId) =>
+      call((ready) => ready['teamComments.dismiss']({ commentId })),
     close: () => {
       Effect.runFork(Scope.close(scope, Exit.void))
     },

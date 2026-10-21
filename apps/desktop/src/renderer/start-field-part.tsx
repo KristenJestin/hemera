@@ -8,7 +8,9 @@ import {
   createOf,
   foldStart,
   searchPending,
+  seededCreate,
   type Search,
+  type StartSeed,
   startAndOpen,
   viewsOf,
 } from './start-results.ts'
@@ -18,6 +20,8 @@ export interface StartFieldPartProps {
   engineReady: boolean
   projectId: string
   projectName: string
+  /** A mission started from a remark: the field opens on its words, and creates with its origin. */
+  seed?: StartSeed | undefined
   onOpenMission: (key: string) => void
 }
 
@@ -33,9 +37,10 @@ export function StartFieldPart({
   engineReady,
   projectId,
   projectName,
+  seed,
   onOpenMission,
 }: StartFieldPartProps): ReactNode {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(seed?.text ?? '')
   const [search, setSearch] = useState<Search | null>(null)
   const [refused, setRefused] = useState<string | null>(null)
   const choice = useRef<string | null>(null)
@@ -90,11 +95,12 @@ export function StartFieldPart({
     search?.for === typed && (views.length > 0 || search.ended !== null || search.done)
       ? views
       : 'searching'
-  const notice = refused ?? (search?.for === typed ? (search.ended ?? fold.notice) : null)
+  const notice =
+    refused ?? (search?.for === typed ? (search.ended ?? fold.notice) : null) ?? seed?.said ?? null
 
   const create = (made: Parameters<Link['createStart']>[0]) => {
     setRefused(null)
-    void startAndOpen(link, made, {
+    void startAndOpen(link, seededCreate(made, seed), {
       opened: (key) => {
         setText('')
         choice.current = null

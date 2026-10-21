@@ -2,6 +2,7 @@ import { ApplicationRpcs } from './application.ts'
 import {
   EngineApartRpcs,
   EngineCoreRpcs,
+  EngineDeliveryRpcs,
   EngineDeliveryRulesRpcs,
   EngineFeedbackRpcs,
   EngineForgeRpcs,
@@ -27,7 +28,8 @@ export const WindowCoreRpcs = EngineCoreRpcs.merge(
 /**
  * The window's calls whole: main serves the groups of `EngineApartRpcs`, `EngineSettingsRpcs`,
  * `EngineForgeRpcs`, `EngineDeliveryRulesRpcs`, `EngineReviewRpcs` (the live diff, the automatic
- * review) and `EngineFeedbackRpcs` (Review's feedback) as layers of their own.
+ * review), `EngineFeedbackRpcs` (Review's feedback) and `EngineDeliveryRpcs` (the proofs, the
+ * pushes, Ship, the team comments) as layers of their own.
  */
 export const WindowRpcs = WindowCoreRpcs.merge(
   EngineApartRpcs,
@@ -36,4 +38,5 @@ export const WindowRpcs = WindowCoreRpcs.merge(
   EngineDeliveryRulesRpcs,
   EngineReviewRpcs,
   EngineFeedbackRpcs,
+  EngineDeliveryRpcs,
 )
