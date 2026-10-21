@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import { MASK, maskText } from '@hemera/core/domain'
 import { NewBranch, type CommandDraft, type Project, type Run, ShellSyntax } from '@hemera/ipc'
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Layer, Stream } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { saveCommand } from '../src/engine/catalogue.ts'
@@ -28,6 +28,7 @@ import {
 } from '../src/engine/runs.ts'
 import { commandRuns, supervisedProcesses } from '../src/engine/storage/schema.ts'
 import { Database } from '../src/engine/storage/database.ts'
+import { HostProcesses, hostProcessesLayer } from '../src/engine/supervisor.ts'
 import { setVariable } from '../src/engine/variables.ts'
 import { createWorkspace } from '../src/engine/workspaces.ts'
 import {
@@ -469,7 +470,12 @@ describe('What a stopped engine left running', () => {
       stdio: 'ignore',
       detached: process.platform !== 'win32',
     })
-    const theirs = spawn(process.execPath, [script(STAYS_UP)], { stdio: 'ignore' })
+    const theirsScript = script(STAYS_UP)
+    // A group of its own as well: a kill wrongly aimed at its pid would reach it on Linux.
+    const theirs = spawn(process.execPath, [theirsScript], {
+      stdio: 'ignore',
+      detached: process.platform !== 'win32',
+    })
     const oursEnd = endOf(ours)
     const theirsEnd = endOf(theirs)
     strays.push(ours, theirs)
@@ -513,7 +519,32 @@ describe('What a stopped engine left running', () => {
       }).pipe(Effect.orDie),
     )
 
-    const runs = await commandsEngine(data)(({ profile }) =>
+    // What the system says each of the two runs, as it would say it: the sweep is not left to a
+    // PowerShell, which a loaded Windows runner answered past the engine's bound. The real query
+    // is `supervisor.test.ts`'s, asked alone.
+    const said = new Map([
+      [ours.pid ?? 0, `${process.execPath} ${stays}`],
+      [theirs.pid ?? 0, `${process.execPath} ${theirsScript}`],
+    ])
+    const machine = Layer.effect(
+      HostProcesses,
+      Effect.gen(function* () {
+        const real = yield* HostProcesses
+        return {
+          ...real,
+          commandLinesOf: (asked: ReadonlyArray<number>) =>
+            Effect.succeed(
+              new Map(
+                asked.flatMap((pid) => {
+                  const line = said.get(pid)
+                  return line === undefined ? [] : [[pid, line] as const]
+                }),
+              ),
+            ),
+        }
+      }),
+    ).pipe(Layer.provide(hostProcessesLayer))
+    const runs = await commandsEngine(data, { hostProcesses: machine })(({ profile }) =>
       profile.use(listRuns(project.id, null)),
     )
     expect(runs.map((run) => run.state)).toEqual(['interrupted', 'interrupted'])
