@@ -18,11 +18,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import type { FakeScript } from '../src/engine/agents/fake.ts'
 import { DISCARD, KEEP } from '../src/engine/delivery/agent-step.ts'
+import { STEP_ACTION } from '../src/engine/delivery/run.ts'
 import { Diffs } from '../src/engine/review/diffs.ts'
 import { Sessions } from '../src/engine/sessions/service.ts'
 import { sessionsIn } from '../src/engine/sessions/store.ts'
 import { Database } from '../src/engine/storage/database.ts'
-import { deliverySteps } from '../src/engine/storage/schema.ts'
+import { deliverySteps, effectfulActions } from '../src/engine/storage/schema.ts'
 import { builderOf, launched } from './builder-world.ts'
 import { QUIET, READING, says, uses } from './building-world.ts'
 import {
@@ -151,6 +152,16 @@ const stepRow = (missionId: string) =>
       .pipe(Effect.orDie)
     return rows.find((row) => row.stepId === 'notes')
   })
+
+/** The delivery steps' intents, whatever their state. */
+const stepActions = Effect.gen(function* () {
+  const database = yield* Database
+  return yield* database
+    .select()
+    .from(effectfulActions)
+    .where(eq(effectfulActions.kind, STEP_ACTION))
+    .pipe(Effect.orDie)
+})
 
 describe('an Agent step', () => {
   test(
@@ -298,9 +309,10 @@ describe('an Agent step', () => {
             writeFileSync(join(api, 'RELEASE.md'), 'Release notes\n')
             release()
             const need = yield* needUntil(missionId, isDecision(KEEP))
+            const asking = yield* stepActions
             yield* answer(need, KEEP)
             yield* deliveryUntil(missionId, delivered)
-            return { row: yield* stepRow(missionId), api }
+            return { row: yield* stepRow(missionId), api, asking }
           }),
         ),
       )
@@ -308,6 +320,8 @@ describe('an Agent step', () => {
       expect(seen.row?.acceptedTree).not.toBeNull()
       expect(seen.row?.acceptedTree).not.toBe(seen.row?.startTree)
       expect(seen.row?.outcome).toBe('changes kept: Release notes written.')
+      // The run ended once it asked: its intent is settled, and a restart never judges it again.
+      expect(seen.asking.map((one) => one.state)).toEqual(['done'])
     },
     SLOW,
   )
