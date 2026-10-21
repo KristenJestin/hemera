@@ -188,6 +188,86 @@ export const Grown: Story = {
   },
 }
 
+/**
+ * Grown as it opens: a choice made before the body has taken its first height. The body reads
+ * what it holds when the browser reports its size and takes that a frame later, so the choice
+ * lands between the two. The height it takes must be what it holds then, not what it held when it
+ * looked: it was seen at the old height for as long as the frame took, with the field already in.
+ * The frame is held here, as a loaded runner holds it, until the choice has been made.
+ */
+export const GrownAsItOpens: Story = {
+  args: { title: 'Add a repository', description: 'It joins Acme.', actions: undefined },
+  render: (args) => <Growing {...args} />,
+  play: async ({ canvasElement }) => {
+    const nextFrame = window.requestAnimationFrame
+    const dropFrame = window.cancelAnimationFrame
+    const Observer = window.ResizeObserver
+    const held = new Map<number, FrameRequestCallback>()
+    let delivering = false
+    let next = 1_000_000
+    // A frame asked for while a size is being reported (the body's own, to take that size) waits.
+    window.requestAnimationFrame = (callback) => {
+      if (!delivering) return nextFrame(callback)
+      next += 1
+      held.set(next, callback)
+      return next
+    }
+    window.cancelAnimationFrame = (id) => {
+      if (!held.delete(id)) dropFrame(id)
+    }
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          delivering = true
+          try {
+            callback(entries, observer)
+          } finally {
+            delivering = false
+          }
+        })
+      }
+    }
+    try {
+      await userEvent.click(within(canvasElement).getByRole('button', { name: 'Add' }))
+      const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+      const box = within(dialog).getByRole('checkbox', { name: 'Track a branch' })
+      const body = [...dialog.children].find((part) => part.contains(box))!
+      const content = body.firstElementChild!
+      await waitFor(() => {
+        expect(held.size).toBeGreaterThan(0)
+      })
+      const from = content.getBoundingClientRect().height
+      // The choice and the frame, in the same breath: no size is reported between them.
+      box.click()
+      for (const [id, callback] of [...held]) {
+        held.delete(id)
+        callback(performance.now())
+      }
+      await expect(within(dialog).getByRole('textbox', { name: 'Branch' })).toBeInTheDocument()
+      window.requestAnimationFrame = nextFrame
+      // Frame by frame from here: the body is never seen below what it holds.
+      const seen: string[] = []
+      for (let frame = 0; frame < 12; frame += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one frame at a time, as it is drawn
+        await new Promise((resolve) => nextFrame(resolve))
+        seen.push(
+          `${String(body.getBoundingClientRect().height)}/${String(content.getBoundingClientRect().height)}`,
+        )
+      }
+      expect(content.getBoundingClientRect().height).toBeGreaterThan(from)
+      expect(
+        seen.every((one) => one.split('/')[0] === one.split('/')[1]),
+        seen.join(' '),
+      ).toBe(true)
+    } finally {
+      window.requestAnimationFrame = nextFrame
+      window.cancelAnimationFrame = dropFrame
+      window.ResizeObserver = Observer
+    }
+    await closed()
+  },
+}
+
 /** A dialog already at its height whose body a choice makes taller still. */
 function GrowingAtHeight(args: DialogProps): ReactNode {
   const [more, setMore] = useState(false)
