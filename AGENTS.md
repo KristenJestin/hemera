@@ -137,6 +137,9 @@ anywhere: Effect `Schema` replaces it (see `packages/core/AGENTS.md`).
   theme (`vp test run --project storybook-light`). The Chromium is Playwright's:
   `pnpm --filter @hemera/ui exec playwright install chromium` once per machine.
 - Always `vp test run`: plain `vp test` starts watch mode and never ends.
+- Every test file runs on a home of its own (`tools/test-home.setup.ts`): `HOME`, `USERPROFILE`,
+  `XDG_CONFIG_HOME` and `GIT_CONFIG_GLOBAL` name a temporary folder, and the spawn guard refuses a Git
+  that would read another. No test writes the global Git configuration (`--global`).
 - Never run a real LLM provider from a test. Tests write to a temporary folder, never to a real
   profile.
 - A test that fails only under load is rerun alone before the failure is called real; if it

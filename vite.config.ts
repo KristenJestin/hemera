@@ -104,8 +104,9 @@ export default defineConfig({
           // Some of these start a process — git and its hooks, tsc — and on a runner that has
           // just been created that takes seconds, not the five a test is given by default.
           testTimeout: 30_000,
-          // No test starts a program of the machine's own: a real agent CLI, a real `gh`.
-          setupFiles: ['./tools/spawn-guard.setup.ts'],
+          // No test starts a program of the machine's own: a real agent CLI, a real `gh`. Every file
+          // runs on a home of its own, and no Git of a test reads another (#488).
+          setupFiles: ['./tools/spawn-guard.setup.ts', './tools/test-home.setup.ts'],
           // A stylesheet imported as its text (`theme.css?raw`, the window's opening colours) is
           // that text, as in the build; without this every stylesheet is empty under test.
           css: true,
