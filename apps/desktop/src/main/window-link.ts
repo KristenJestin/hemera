@@ -1135,11 +1135,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['delivery.pushes'](request).pipe(closedAs(gone), observed('delivery.pushes', log)),
       'delivery.retry': (request) =>
         engine['delivery.retry'](request).pipe(closedAs(gone), observed('delivery.retry', log)),
-      'evidence.setPublishable': (request) =>
-        engine['evidence.setPublishable'](request).pipe(
-          closedAs(gone),
-          observed('evidence.setPublishable', log),
-        ),
       'delivery.changes': (request) =>
         engine['delivery.changes'](request).pipe(
           streamClosedAs(gone),
@@ -1179,11 +1174,6 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
         engine['teamComments.dismiss'](request).pipe(
           closedAs(gone),
           observed('teamComments.dismiss', log),
-        ),
-      'teamComments.startMissionFrom': (request) =>
-        engine['teamComments.startMissionFrom'](request).pipe(
-          closedAs(gone),
-          observed('teamComments.startMissionFrom', log),
         ),
       'teamComments.changes': (request) =>
         engine['teamComments.changes'](request).pipe(

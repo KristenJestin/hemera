@@ -167,6 +167,10 @@ describe('A mission in Review', () => {
     await ship().click()
     const dialog = $('[role="dialog"]')
     await expect(dialog).toHaveText(expect.stringContaining(key), { wait: 30_000 })
+    // Confirm is drawn once the fresh preview has been read: what the user confirms is what they read.
+    await expect(
+      dialog.$('//button[normalize-space()="Ship now" or normalize-space()="Mark as delivered"]'),
+    ).toBeDisplayed({ wait: 30_000 })
     await dialog.$('button=Not now').click()
     await expect(dialog).not.toBeExisting({ wait: 30_000 })
   })

@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { ROUND_TWO_BUILDING, ROUND_TWO_GRILLING } from './review-fixtures.ts'
 import { ReviewScreen } from './review-screen-fixture.tsx'
+import { RoundView } from './round-view.tsx'
 
 /**
  * A round, as a view over the Review page (open question 76, settled by the mission frame: a
@@ -104,6 +106,48 @@ export const BackWithAnswers: Story = {
     const view = viewOf(canvasElement, 2)
     await expect(view.getAllByRole('img', { name: 'Done' }).length).toBeGreaterThanOrEqual(4)
     await expect(view.getByText(/Clarified: D5 replaces the row threshold of R4/)).toBeVisible()
+  },
+}
+
+const NO_ANSWER = async (): Promise<void> => {}
+
+/** What the application hands a round's view: the questions' answers, nothing else. */
+const QUESTION = {
+  onAnswer: NO_ANSWER,
+  onWaitOnSomeone: NO_ANSWER,
+  onCopyDraft: fn(),
+  onAcceptProposed: NO_ANSWER,
+  onDismissProposed: NO_ANSWER,
+}
+
+/**
+ * A round's question is answered in Review and never discussed: the user talks to the agents here
+ * through feedback and what waits for them, so the card offers no Discuss.
+ */
+export const QuestionsWithoutDiscuss: Story = {
+  render: () => <RoundView round={ROUND_TWO_GRILLING} question={QUESTION} />,
+  play: async ({ canvasElement }) => {
+    const view = within(canvasElement)
+    await expect(view.getByText(/Should the progress stay hidden/)).toBeVisible()
+    await expect(view.getAllByRole('list', { name: /^Options of/ }).length).toBeGreaterThan(0)
+    await expect(view.queryByRole('button', { name: /Discuss/ })).toBeNull()
+  },
+}
+
+/**
+ * Without a handler for them, a point's ways out and the way to Building are not drawn: the
+ * conflict still says why, and the Building line is a line, not a button.
+ */
+export const PointsWithoutWaysOut: Story = {
+  render: () => <RoundView round={ROUND_TWO_BUILDING} question={QUESTION} />,
+  play: async ({ canvasElement }) => {
+    const view = within(canvasElement)
+    await expect(view.getByText(/R4 says “past 10 000 rows/)).toBeVisible()
+    await expect(view.queryByRole('button', { name: 'Clarify with a note' })).toBeNull()
+    await expect(view.queryByRole('button', { name: 'Withdraw the remark' })).toBeNull()
+    await expect(view.queryByRole('button', { name: 'Start a mission from this' })).toBeNull()
+    await expect(view.queryByRole('button', { name: /^Building · round 2/ })).toBeNull()
+    await expect(view.getByText(/^Building · round 2/)).toBeVisible()
   },
 }
 

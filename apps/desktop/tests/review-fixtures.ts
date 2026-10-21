@@ -40,6 +40,8 @@ export const feedback = (more: Partial<FeedbackView> = {}): FeedbackView => ({
   followsUp: null,
   followedBy: [],
   answer: null,
+  withdrawable: true,
+  resolvable: false,
   createdAt: at(10, 0),
   updatedAt: at(10, 0),
   ...more,

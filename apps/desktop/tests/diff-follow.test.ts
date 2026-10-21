@@ -102,6 +102,8 @@ const feedback = (id: string): FeedbackView => ({
   followsUp: null,
   followedBy: [],
   answer: null,
+  withdrawable: true,
+  resolvable: false,
   createdAt: '2026-10-20T09:00:00Z',
   updatedAt: '2026-10-20T09:00:00Z',
 })

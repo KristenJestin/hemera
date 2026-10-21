@@ -162,16 +162,22 @@ export const TeamCommentsRpcs = RpcGroup.make(
     success: TeamCommentView,
     error: failing(...onComment),
   }),
-  /** "Start a mission from this": what the Project's start field opens with. */
-  Rpc.make('teamComments.startMissionFrom', {
-    payload: { commentId: Schema.String },
-    success: TeamCommentSource,
-    error: failing(...onComment),
-  }),
   Rpc.make('teamComments.changes', {
     payload: { missionId: Schema.String },
     success: TeamCommentsChange,
     error: failing(...always, UnknownMission),
     stream: true,
+  }),
+)
+
+/**
+ * "Start a mission from this": what the Project's start field opens with. Served by the engine,
+ * and not forwarded to the window until a screen asks for it (`EngineUnaskedRpcs`).
+ */
+export const TeamCommentMissionRpcs = RpcGroup.make(
+  Rpc.make('teamComments.startMissionFrom', {
+    payload: { commentId: Schema.String },
+    success: TeamCommentSource,
+    error: failing(...onComment),
   }),
 )

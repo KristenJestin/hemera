@@ -39,6 +39,10 @@ export interface Remark {
   answer?: string | undefined
   /** Whether the agent answered that it asks for a mission of its own, to start from it. */
   toMission?: boolean | undefined
+  /** Whether the engine lets the user withdraw it now: the page offers Withdraw on its word. */
+  withdrawable: boolean
+  /** Whether the engine lets the user resolve it now: the page offers Resolve on its word. */
+  resolvable: boolean
   /** The remark it follows up, when it is a follow-up. */
   follows?: string | undefined
   /** Who wrote it when it came from the team, through the user. */

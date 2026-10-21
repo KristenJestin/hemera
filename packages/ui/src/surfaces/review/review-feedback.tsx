@@ -463,7 +463,7 @@ export function RemarkLine({
   )
 }
 
-/** What its author can do with a remark where it stands; nothing once it is settled. */
+/** What the engine lets the user do with a remark where it stands, on its word. */
 function RemarkActions({
   remark,
   handlers,
@@ -477,29 +477,21 @@ function RemarkActions({
   onEdit: () => void
   onFollow: () => void
 }): ReactNode {
-  if (remark.state === 'resolved' || remark.state === 'withdrawn' || editing) return null
-  const withdraw = (
-    <Button
-      variant="ghost"
-      size="sm"
-      aria-label={`Withdraw ${remark.id}`}
-      onClick={() => handlers.onWithdraw(remark.id)}
-    >
-      Withdraw
-    </Button>
-  )
+  if (editing) return null
   return (
     <div className="flex flex-wrap gap-2">
       {remark.state === 'addressed' && (
         <>
-          <Button
-            variant="primary"
-            size="sm"
-            aria-label={`Resolve ${remark.id}`}
-            onClick={() => handlers.onResolve(remark.id)}
-          >
-            Resolve
-          </Button>
+          {remark.resolvable && (
+            <Button
+              variant="primary"
+              size="sm"
+              aria-label={`Resolve ${remark.id}`}
+              onClick={() => handlers.onResolve(remark.id)}
+            >
+              Resolve
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -515,7 +507,16 @@ function RemarkActions({
           Edit
         </Button>
       )}
-      {withdraw}
+      {remark.withdrawable && (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`Withdraw ${remark.id}`}
+          onClick={() => handlers.onWithdraw(remark.id)}
+        >
+          Withdraw
+        </Button>
+      )}
     </div>
   )
 }

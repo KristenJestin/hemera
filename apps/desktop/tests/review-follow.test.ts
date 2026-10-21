@@ -488,6 +488,123 @@ describe('Ship', () => {
     expect(confirmed).toEqual([`m12 preview-${String(previews)}`])
   })
 
+  test('Confirm waits for the fresh preview: until its read lands nothing is offered and Ship sends nothing', async () => {
+    const confirmed: string[] = []
+    let previews = 0
+    let land: (read: ReturnType<typeof shipPreview>) => void = () => undefined
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        if (previews === 1) {
+          return Promise.resolve(shipPreview({ previewId: 'stale', possible: true, reasons: [] }))
+        }
+        return new Promise((resolve) => {
+          land = resolve
+        })
+      },
+      confirmShip: (missionId, previewId) => {
+        confirmed.push(previewId)
+        return Promise.resolve({ missionId, shippedAt: at(11, 0), trees: [], deliveredAt: null })
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    expect(last()?.shippable).toBe(true)
+    expect(last()?.confirmable).toBe(false)
+    const reading = following.previewShip()
+    // The dialog is open on the preview read before: it cannot be confirmed.
+    await expect(following.ship()).resolves.toBe(false)
+    expect(last()?.confirmable).toBe(false)
+    expect(confirmed).toEqual([])
+    land(shipPreview({ previewId: 'fresh', possible: true, reasons: [] }))
+    await reading
+    expect(last()?.confirmable).toBe(true)
+    await expect(following.ship()).resolves.toBe(true)
+    expect(confirmed).toEqual(['fresh'])
+    // Once shipped, the next confirmation starts again from a read to wait for.
+    expect(last()?.confirmable).toBe(false)
+  })
+
+  test('a confirmation’s read landing after a later one is ignored: Ship sends the latest preview', async () => {
+    const confirmed: string[] = []
+    let previews = 0
+    const lands: Array<(read: ReturnType<typeof shipPreview>) => void> = []
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        if (previews === 1) {
+          return Promise.resolve(shipPreview({ previewId: 'stale', possible: true, reasons: [] }))
+        }
+        return new Promise((resolve) => {
+          lands.push(resolve)
+        })
+      },
+      confirmShip: (missionId, previewId) => {
+        confirmed.push(previewId)
+        return Promise.resolve({ missionId, shippedAt: at(11, 0), trees: [], deliveredAt: null })
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    // Opened, closed, opened again: two reads on their way, the later one landing first.
+    const first = following.previewShip()
+    const second = following.previewShip()
+    lands[1]?.(shipPreview({ previewId: 'latest', possible: true, reasons: [] }))
+    await second
+    expect(last()?.confirmable).toBe(true)
+    // The older one landing late is not what the dialog shows: it changes nothing.
+    lands[0]?.(shipPreview({ previewId: 'older', possible: true, reasons: [] }))
+    await first
+    expect(last()?.confirmable).toBe(true)
+    await expect(following.ship()).resolves.toBe(true)
+    expect(confirmed).toEqual(['latest'])
+  })
+
+  test('a confirmation opened again is not offered until its own read lands', async () => {
+    let previews = 0
+    let land: (read: ReturnType<typeof shipPreview>) => void = () => undefined
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        if (previews === 2) {
+          return Promise.resolve(shipPreview({ previewId: 'first', possible: true, reasons: [] }))
+        }
+        if (previews === 1) return Promise.resolve(shipPreview({ possible: true, reasons: [] }))
+        return new Promise((resolve) => {
+          land = resolve
+        })
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    await following.previewShip()
+    expect(last()?.confirmable).toBe(true)
+    // Closed with Not now, then opened again: the previous read no longer counts.
+    const again = following.previewShip()
+    expect(last()?.confirmable).toBe(false)
+    await expect(following.ship()).resolves.toBe(false)
+    land(shipPreview({ previewId: 'second', possible: true, reasons: [] }))
+    await again
+    expect(last()?.confirmable).toBe(true)
+  })
+
+  test('a fresh read that fails leaves the confirmation unoffered, and says why', async () => {
+    let previews = 0
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        return previews === 1
+          ? Promise.resolve(shipPreview({ previewId: 'stale', possible: true, reasons: [] }))
+          : Promise.reject(new ShipRefused({ reasons: ['the Workspace could not be read.'] }))
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    await following.previewShip()
+    expect(last()?.confirmable).toBe(false)
+    expect(last()?.refused).toBe('the Workspace could not be read.')
+  })
+
   test('Ship refused: nothing goes, and the engine’s reasons are said', async () => {
     const played = linkOf({
       confirmShip: () =>
@@ -496,6 +613,7 @@ describe('Ship', () => {
     const { following, last } = review(played.link)
     await settled()
     expect(last()?.shippable).toBe(false)
+    await following.previewShip()
     await expect(following.ship()).resolves.toBe(false)
     expect(last()?.refused).toBe('web · unit tests is red after the re-run.')
   })

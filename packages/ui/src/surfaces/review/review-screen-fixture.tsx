@@ -24,6 +24,7 @@ import {
   LONG_REVIEWERS,
   MOMENTS,
   type MomentName,
+  standing,
   TITLE,
 } from './review-fixtures.ts'
 import { MENTIONABLES } from '../../components/mention-field/mention-field-fixtures.ts'
@@ -52,6 +53,8 @@ export interface ReviewScreenProps {
   forge?: 'GitHub' | 'Bitbucket' | undefined
   /** What Ship's confirmation lists: the moment's own, everything, or the Local preset's. */
   preview?: 'plain' | 'full' | 'local' | undefined
+  /** The confirmation's fresh preview is still being read: Confirm waits for it. */
+  reading?: boolean | undefined
   /** The views open as the story starts. */
   initial?: MissionFrameState | undefined
   onShip: () => void
@@ -96,6 +99,7 @@ function momentOf(props: ReviewScreenProps): ReviewMoment {
     kind: 'remark',
     text: LONG_REMARK,
     state: 'waiting',
+    ...standing('waiting'),
     at: '09:58',
     anchor: LONG_PATH,
     images: [
@@ -172,7 +176,6 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
     onCopyDraft: props.onCopy,
     onAcceptProposed: noAnswer,
     onDismissProposed: noAnswer,
-    onDiscuss: () => {},
   }
   const rail: RailHandlers = {
     onService: props.onService,
@@ -314,6 +317,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                     kind: added.kind,
                     text: added.text,
                     state: 'waiting',
+                    ...standing('waiting'),
                     at: 'now',
                     images: added.images.map((name) => ({ name, size: '2 KB' })),
                     follows: added.follows,
@@ -326,11 +330,11 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
               },
               onWithdraw: (id) => {
                 props.onRemark('withdraw', { id })
-                change(id, (one) => ({ ...one, state: 'withdrawn' }))
+                change(id, (one) => ({ ...one, state: 'withdrawn', ...standing('withdrawn') }))
               },
               onResolve: (id) => {
                 props.onRemark('resolve', { id })
-                change(id, (one) => ({ ...one, state: 'resolved' }))
+                change(id, (one) => ({ ...one, state: 'resolved', ...standing('resolved') }))
               },
               onAttach: (file) => {
                 props.onAttach(file)
@@ -352,6 +356,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
       <ShipDialog
         missionKey={KEY}
         preview={previewOf(moment, props.preview)}
+        confirmable={props.reading !== true}
         open={shipping}
         onOpenChange={setShipping}
         onConfirm={props.onShip}

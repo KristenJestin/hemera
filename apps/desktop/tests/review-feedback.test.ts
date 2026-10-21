@@ -665,6 +665,81 @@ describe('Resolving and following up', () => {
   )
 })
 
+describe('The engine says what the user may settle', () => {
+  test(
+    'a feedback tells whether the user may withdraw it and resolve it, by its author and where it stands',
+    async () => {
+      const { run } = engine()
+      const seen = await run(({ profile }) =>
+        within(
+          profile,
+          Effect.gen(function* () {
+            const { missionId } = yield* launchedOverBoth()
+            yield* inReview(missionId)
+            const mine = yield* add(missionId, remark('The export button is grey.'))
+            const theirs = yield* add(
+              missionId,
+              remark('Rename the column.'),
+              FeedbackForge.make({ login: 'octo' }),
+            )
+            const taken = yield* Review.use((review) =>
+              review.forgeFeedback(missionId, {
+                author: FeedbackForge.make({ login: 'octo' }),
+                kind: 'remark',
+                body: 'Add a limit.',
+                source: 'forge:tc-1',
+                anchor: null,
+              }),
+            )
+            const flags = (id: string) =>
+              Effect.map(stateOf(missionId), (state) => {
+                const one = feedbackOf(state, id)
+                return [one.state, one.withdrawable, one.resolvable]
+              })
+            const waiting = yield* flags(mine.id)
+            const foreign = yield* flags(theirs.id)
+            const takenIn = yield* flags(taken.id)
+            yield* moveRound(missionId, 1, 'grilling')
+            yield* moveRound(missionId, 1, 'building')
+            yield* Review.use((review) => review.answer(mine.id, 'The button is blue now.'))
+            yield* Review.use((review) => review.answer(taken.id, 'Limited.'))
+            yield* Review.use((review) => review.answer(theirs.id, 'Renamed.'))
+            yield* moveRound(missionId, 1, 'answered')
+            const addressed = yield* flags(mine.id)
+            const foreignAddressed = yield* flags(theirs.id)
+            const takenAddressed = yield* flags(taken.id)
+            yield* Review.use((review) => review.feedbackResolve(mine.id, FeedbackUser.make({})))
+            const resolved = yield* flags(mine.id)
+            yield* Review.use((review) => review.feedbackWithdraw(taken.id, FeedbackUser.make({})))
+            const withdrawn = yield* flags(taken.id)
+            return {
+              waiting,
+              foreign,
+              takenIn,
+              addressed,
+              foreignAddressed,
+              takenAddressed,
+              resolved,
+              withdrawn,
+            }
+          }),
+        ),
+      )
+      expect(seen).toEqual({
+        waiting: ['waiting', true, false],
+        foreign: ['waiting', false, false],
+        takenIn: ['waiting', true, false],
+        addressed: ['addressed', true, true],
+        foreignAddressed: ['addressed', false, false],
+        takenAddressed: ['addressed', true, true],
+        resolved: ['resolved', false, false],
+        withdrawn: ['withdrawn', false, false],
+      })
+    },
+    SLOW,
+  )
+})
+
 describe('Rounds as data', () => {
   test(
     'a round whose feedback were all withdrawn while it built closes as it is answered',

@@ -14,6 +14,9 @@ import type { ShipPreview } from './review-types.ts'
  * call); the rules of the Project changed since the mission copied them; the CI of each pull
  * request. A part with nothing to say is not drawn.
  *
+ * It opens on the preview read before and Confirm is not drawn until the fresh one has landed
+ * (`confirmable`): what the user confirms is what they read.
+ *
  * With the Local preset there is no forge: the action is Mark as delivered, a dated stamp. Open
  * question 80, recommended: it merges each repository's branch into its local base, fast forward
  * when it can — the only merge without a pull request the rules allow — so the cleanup's guard
@@ -38,6 +41,8 @@ function Part({ name, children }: { name: string; children: ReactNode }): ReactN
 export interface ShipDialogProps {
   missionKey: string
   preview: ShipPreview
+  /** Whether `preview` was read as the confirmation opened: Confirm is drawn only then. */
+  confirmable: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
@@ -46,6 +51,7 @@ export interface ShipDialogProps {
 export function ShipDialog({
   missionKey,
   preview,
+  confirmable,
   open,
   onOpenChange,
   onConfirm,
@@ -68,15 +74,17 @@ export function ShipDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Not now
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              onConfirm()
-              onOpenChange(false)
-            }}
-          >
-            {confirm}
-          </Button>
+          {confirmable && (
+            <Button
+              variant="primary"
+              onClick={() => {
+                onConfirm()
+                onOpenChange(false)
+              }}
+            >
+              {confirm}
+            </Button>
+          )}
         </>
       }
     >

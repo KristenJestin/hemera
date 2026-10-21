@@ -308,10 +308,14 @@ export const DeliveryRpcs = RpcGroup.make(
     error: failing(...always, UnknownMission, DeliveryRulesUnreadable),
     stream: true,
   }),
-  /**
-   * The user's mark on an image of a mission's evidence (R7): published in its pull requests, or
-   * not. A feedback image is publishable unless unmarked; any other only once marked.
-   */
+)
+
+/**
+ * The user's mark on an image of a mission's evidence (R7): published in its pull requests, or
+ * not. A feedback image is publishable unless unmarked; any other only once marked. Served by the
+ * engine, and not forwarded to the window until a screen asks for it (`EngineUnaskedRpcs`).
+ */
+export const EvidenceRpcs = RpcGroup.make(
   Rpc.make('evidence.setPublishable', {
     payload: { evidenceId: Schema.String, publishable: Schema.Boolean },
     success: Schema.Void,

@@ -75,12 +75,7 @@ export interface RailHandlers {
   onCopy: (text: string) => void
   question: Pick<
     PlanningHandlers,
-    | 'onAnswer'
-    | 'onWaitOnSomeone'
-    | 'onCopyDraft'
-    | 'onAcceptProposed'
-    | 'onDismissProposed'
-    | 'onDiscuss'
+    'onAnswer' | 'onWaitOnSomeone' | 'onCopyDraft' | 'onAcceptProposed' | 'onDismissProposed'
   >
 }
 
