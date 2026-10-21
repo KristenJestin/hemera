@@ -198,7 +198,6 @@ function Body({ children }: { children: ReactNode }): ReactNode {
     // a loop the browser refuses to finish.
     let writing = 0
     const observer = new ResizeObserver(() => {
-      const value = node.offsetHeight
       const following = recent
       recent = true
       cancelAnimationFrame(clearing)
@@ -209,6 +208,9 @@ function Body({ children }: { children: ReactNode }): ReactNode {
       })
       cancelAnimationFrame(writing)
       writing = requestAnimationFrame(() => {
+        // Read when it is taken, not when the size was reported: what the body holds may have
+        // grown in between, and the height read before would put the body back under it.
+        const value = node.offsetHeight
         setHeight((before) => ({ value, atOnce: before === null || following }))
       })
     })
