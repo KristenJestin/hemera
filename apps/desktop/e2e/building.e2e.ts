@@ -86,6 +86,56 @@ const readyLine = () => launchRail().$('section[aria-label="Ready"] p[role="stat
 const buildingRail = () => $('aside[aria-label="What happens"]')
 const buildingLine = () => buildingRail().$('section[aria-label="Building"] p[role="status"]')
 
+/**
+ * Waits until the page shows `selector` with `text` in it, asked of the page again on every
+ * attempt. The assertions of `expect` resolve the element they are given once and ask that same
+ * handle on every retry: the Ready page's rail is replaced as the launch begins, so a handle taken
+ * a moment before stays stale until the wait ends, whatever the page shows by then.
+ */
+async function becomes(selector: string, text: string, within: number, said: string) {
+  await browser.waitUntil(
+    () =>
+      browser.execute(
+        (css, containing) => {
+          const found = document.querySelector(css)
+          if (found === null) return false
+          const box = found.getBoundingClientRect()
+          return box.width > 0 && box.height > 0 && (found.textContent ?? '').includes(containing)
+        },
+        selector,
+        text,
+      ),
+    { timeout: within, timeoutMsg: said },
+  )
+}
+
+/** What the Ready page's rail draws while the launch prepares the Workspace. */
+const PREPARATION = 'aside[aria-label="Launch"] ul[aria-label="Preparation"] li'
+
+/**
+ * Has the page note, as it draws them, the steps of `selector`: a mark on the document the moment
+ * one is on screen with room. The steps stand for a few dozen milliseconds before the mission
+ * moves to Building, less than a round trip to the driver, so asking the page now and then can
+ * miss them whatever the speed of the run; the page itself misses nothing.
+ */
+async function noteWhenDrawn(selector: string) {
+  await browser.execute((css) => {
+    const note = () => {
+      const found = document.querySelector(css)
+      if (found === null || found.getBoundingClientRect().height === 0) return
+      document.documentElement.dataset.drawn = css
+      observer.disconnect()
+    }
+    const observer = new MutationObserver(note)
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true })
+    note()
+  }, selector)
+}
+
+/** Whether the page noted the steps of `selector` (see `noteWhenDrawn`). */
+const wasDrawn = (selector: string) =>
+  browser.execute((css) => document.documentElement.dataset.drawn === css, selector)
+
 describe('A mission launched from its Ready page', () => {
   let key = ''
 
@@ -160,12 +210,15 @@ describe('A mission launched from its Ready page', () => {
       async (_, steps) => await globalThis.hemeraProbe?.scriptAgent(steps),
       BUILDER,
     )
+    await noteWhenDrawn(PREPARATION)
     await $('button=Launch anyway').click()
-    await expect(launchRail().$('ul[aria-label="Preparation"]')).toBeDisplayed({ wait: 30_000 })
-    await expect(track().$('li[aria-current="step"]')).toHaveText('Building', {
-      containing: true,
-      wait: 90_000,
-    })
+    await becomes(
+      'ol[aria-label="Stage"] li[aria-current="step"]',
+      'Building',
+      90_000,
+      'the mission never moved to Building',
+    )
+    expect(await wasDrawn(PREPARATION)).toBe(true)
   })
 
   it('shows the Building page: its stage card and its requirements', async () => {
