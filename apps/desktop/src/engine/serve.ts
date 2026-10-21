@@ -50,6 +50,7 @@ import { TeamComments } from './review/team-comments.ts'
 import { Rounds } from './review/rounds.ts'
 import { judgeManual, proofsRead } from './building/proofs.ts'
 import { ForgePort } from './forges/port.ts'
+import { listReviewers } from './forges/reviewers.ts'
 import {
   acceptDependencies,
   missionCopies,
@@ -1161,6 +1162,8 @@ const deliveryRulesHandlers = (profile: StartedProfile, log: Log) => {
       use(acceptDependencies(projectId, edges)).pipe(
         observed('deliveryRules.acceptDependencies', log),
       ),
+    'deliveryRules.reviewers': ({ projectId }) =>
+      use(listReviewers(projectId)).pipe(observed('deliveryRules.reviewers', log)),
     'deliveryRules.missionCopies': ({ missionId }) =>
       use(missionCopies(missionId)).pipe(observed('deliveryRules.missionCopies', log)),
     'deliveryRules.preparationChangedSinceCopy': ({ missionId }) =>

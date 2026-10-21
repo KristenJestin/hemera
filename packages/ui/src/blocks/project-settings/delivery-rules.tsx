@@ -25,6 +25,7 @@ import {
   IconRefresh,
   IconTrash,
   IconWorld,
+  IconX,
 } from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
@@ -177,6 +178,7 @@ export function OpenLine({
   value,
   mono = false,
   words,
+  refused,
   onOpen,
 }: {
   label: string
@@ -184,10 +186,12 @@ export function OpenLine({
   mono?: boolean | undefined
   /** What the line says to a screen reader, when its value is not enough. */
   words?: string | undefined
+  /** Why the rules refuse what the line holds, said under it. */
+  refused?: string | undefined
   onOpen: () => void
 }): ReactNode {
   return (
-    <li className={ITEM}>
+    <li className={cn(ITEM, 'flex flex-col')}>
       <button
         type="button"
         className={OPEN}
@@ -200,6 +204,7 @@ export function OpenLine({
           <IconChevronRight size="sm" />
         </span>
       </button>
+      <Refused words={refused} />
     </li>
   )
 }
@@ -271,12 +276,14 @@ export function PullRequests({
           label="Commit message"
           value={rules.commit}
           mono
+          refused={refusals.templates?.commit}
           onOpen={() => onOpen({ kind: 'commit' })}
         />
         <OpenLine
           label="Pull request title"
           value={rules.title}
           mono
+          refused={refusals.templates?.title}
           onOpen={() => onOpen({ kind: 'title' })}
         />
         <OpenLine
@@ -284,6 +291,7 @@ export function PullRequests({
           value={firstLine(rules.body)}
           mono
           words={`Pull request body, ${String(rules.body.split('\n').length)} lines`}
+          refused={refusals.templates?.body}
           onOpen={() => onOpen({ kind: 'body' })}
         />
         <OpenLine
@@ -747,6 +755,50 @@ export function ProposedDependency({
   )
 }
 
+const SUB_BAND =
+  'flex h-control-sm items-center border-b border-border px-4 text-xs text-muted-foreground'
+
+/** An accepted dependency, under the waves: the order it gives, and Remove. */
+export function AcceptedDependency({
+  dependency,
+  onRemove,
+}: {
+  dependency: Dependency
+  onRemove: () => void
+}): ReactNode {
+  const folding = useTransition(fold)
+  const words = `${dependency.repository} delivers after ${dependency.on}`
+  return (
+    <motion.li
+      className={ITEM}
+      initial={collapse}
+      animate={expand}
+      exit={collapse}
+      transition={folding}
+    >
+      <div className={cn(CELLS, 'pr-2')}>
+        <span className={GLYPH} aria-hidden="true">
+          <IconPackage size="sm" />
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-mono">{dependency.repository}</span>{' '}
+          <span className="text-muted-foreground">delivers after</span>{' '}
+          <span className="font-mono">{dependency.on}</span>
+        </span>
+        <Tooltip label="Remove">
+          <IconButton
+            size="sm"
+            variant="ghost"
+            icon={<IconX size="sm" />}
+            aria-label={`Remove: ${words}`}
+            onClick={onRemove}
+          />
+        </Tooltip>
+      </div>
+    </motion.li>
+  )
+}
+
 export function Waves({
   rules,
   refusals,
@@ -759,6 +811,7 @@ export function Waves({
   onCheckAgain,
   onCopy,
   onAcceptDependency,
+  onRemoveDependency,
 }: {
   rules: DeliveryRules
   refusals: DeliveryRefusals
@@ -771,6 +824,7 @@ export function Waves({
   onCheckAgain: (repository: string) => void
   onCopy: (line: string) => void
   onAcceptDependency: (dependency: Dependency) => void
+  onRemoveDependency: (dependency: Dependency) => void
 }): ReactNode {
   const folding = useTransition(fold)
   const byPath = new Map(rules.repositories.map((one) => [one.path, one]))
@@ -783,6 +837,7 @@ export function Waves({
       ? [{ label: 'No order', paths: rules.repositories.map((one) => one.path) }]
       : waves.map((paths, index) => ({ label: `Wave ${String(index + 1)}`, paths }))
   const proposed = rules.dependencies.filter((one) => one.proposed)
+  const accepted = rules.dependencies.filter((one) => !one.proposed)
   return (
     <Frame>
       <h3 className={FRAME_BAND}>
@@ -794,7 +849,7 @@ export function Waves({
         </div>
       )}
       {groups.map((group) => (
-        <div key={group.label} className="flex flex-col border-b border-border last:border-b-0">
+        <div key={group.label} className="flex flex-col border-b border-border">
           <h4 className="flex h-control-sm items-center border-b border-border px-4 text-xs text-muted-foreground">
             {group.label}
           </h4>
@@ -821,6 +876,23 @@ export function Waves({
           </ul>
         </div>
       ))}
+      <h4 className={SUB_BAND}>Delivers after</h4>
+      <ul aria-label="Dependencies" className="flex flex-col">
+        <AnimatePresence initial={false}>
+          {accepted.map((one) => (
+            <AcceptedDependency
+              key={`${one.repository}>${one.on}`}
+              dependency={one}
+              onRemove={() => onRemoveDependency(one)}
+            />
+          ))}
+        </AnimatePresence>
+        {accepted.length === 0 && (
+          <li className="px-4 py-2 text-sm text-muted-foreground">
+            None: every repository delivers in the first wave.
+          </li>
+        )}
+      </ul>
       <AnimatePresence initial={false}>
         {proposed.length > 0 && (
           <motion.div
@@ -914,6 +986,7 @@ export function CleanupRow({
           />
         </Tooltip>
       </div>
+      <Refused words={step.refused} />
     </motion.li>
   )
 }
@@ -999,6 +1072,7 @@ export interface DeliveryRulesSectionProps {
   onPutBack: (repository: string, id: string) => void
   onReset: (repository: string, id: string) => void
   onAcceptDependency: (dependency: Dependency) => void
+  onRemoveDependency: (dependency: Dependency) => void
   onRemoveCleanup: (id: string) => void
   onCheckAgain: (repository: string) => void
   onCopy: (line: string) => void
@@ -1016,6 +1090,7 @@ export function DeliveryRulesSection({
   onPutBack,
   onReset,
   onAcceptDependency,
+  onRemoveDependency,
   onRemoveCleanup,
   onCheckAgain,
   onCopy,
@@ -1064,6 +1139,7 @@ export function DeliveryRulesSection({
             onCheckAgain={onCheckAgain}
             onCopy={onCopy}
             onAcceptDependency={onAcceptDependency}
+            onRemoveDependency={onRemoveDependency}
           />
           <End cleanup={rules.cleanup} onOpen={onOpen} onRemoveCleanup={onRemoveCleanup} />
           <p className={NOTE}>

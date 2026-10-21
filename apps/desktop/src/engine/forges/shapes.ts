@@ -100,6 +100,10 @@ const JSON_FIELDS = /^[A-Za-z]+(,[A-Za-z]+)*$/
 const NAME = String.raw`(?!-)(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+`
 /** An owner or repository name, as the shapes accept it: a gh owner, a gh or bkt repository. */
 export const REPO_NAME = new RegExp(`^${NAME}$`)
+/** A repository's teams or the people with access to it, the first hundred (#502). */
+const REVIEWERS = new RegExp(
+  String.raw`^repos/${NAME}/${NAME}/(teams|collaborators)\?per_page=100$`,
+)
 /** A repository read through gh's API: its visibility and the account's permissions (R7). */
 const REPO_PATH = new RegExp(String.raw`^repos/${NAME}/${NAME}$`)
 /** The lists of a pull request's comments and reviews, read through gh's REST API (R8). */
@@ -146,6 +150,15 @@ export const COMMAND_SHAPES: ReadonlyArray<CommandShape> = [
   read('gh', 'version', ['--version']),
   read('gh', 'auth.status', ['auth', 'status', '--hostname', '<host>']),
   read('gh', 'user', ['api', '--hostname', '<host>', 'user', '--jq', '.login']),
+  // Who can review the pull requests, for the Reviewers dialog of the delivery rules (#502).
+  shape(
+    'gh',
+    'read',
+    'reviewers.list',
+    ['api', '--hostname', '<host>', '<path>'],
+    [],
+    [['<path>', REVIEWERS]],
+  ),
   read('bkt', 'version', ['--version']),
   read('bkt', 'auth.status', ['auth', 'status', '--json']),
   // Bitbucket Cloud's signed-in account (R8): its id, what a comment of mine is known by.

@@ -12,6 +12,7 @@ import {
   type Reviewer,
   type StepConfig,
 } from './delivery-model.ts'
+import { templateRefusal } from './delivery-words.ts'
 
 /**
  * Acme's delivery rules, as the settings show them, and the engine's refusals in its words.
@@ -364,7 +365,18 @@ export const EVERY_STEP_RULES: DeliveryRules = rules(
         at(BUMP),
         at(MERGE),
         at(CI),
-        at(step('release', { kind: 'remote-action', action: 'release.yml' }, 'click'), 'added'),
+        at(
+          step(
+            'release',
+            { kind: 'remote-action', action: 'release.yml', inputs: 'channel=stable' },
+            'click',
+          ),
+          'added',
+        ),
+        at(
+          step('approve', { kind: 'approve-deployment', environment: 'production' }, 'click'),
+          'added',
+        ),
         at(step('published', { kind: 'published', by: 'tag', pattern: 'v*' }), 'changed'),
         at(step('notify', { kind: 'command', command: 'notify-release' }), 'added'),
         at(
@@ -386,6 +398,38 @@ export const EVERY_STEP_RULES: DeliveryRules = rules(
 )
 
 // ——— The refused rules, one per reason ———
+
+const MISTYPED = '{key}: {titel}'
+
+/** The commit template with a name Hemera does not fill: refused under its line. */
+export const REFUSED_TEMPLATE = {
+  rules: { ...RULES, pullRequests: { ...RULES.pullRequests, commit: MISTYPED } },
+  refusals: { templates: { commit: templateRefusal(MISTYPED) } },
+} satisfies { rules: DeliveryRules; refusals: DeliveryRefusals }
+
+/** A cleanup step after the Workspace is gone: refused under its line. */
+export const REFUSED_CLEANUP = {
+  rules: {
+    ...RULES,
+    cleanup: [
+      ...CLEANUP,
+      {
+        id: 'notify',
+        label: 'Notify the release',
+        config: { kind: 'command', command: 'notify-release' },
+        refused:
+          'Cleanup runs “Notify the release” after removing the Workspace, but nothing runs once it is gone.',
+      },
+    ],
+  },
+} satisfies { rules: DeliveryRules }
+
+/** What Hemera reads in Acme's manifests: api and web use shared, web uses api. */
+export const MANIFESTS: readonly Dependency[] = [
+  { repository: 'api', on: 'shared', proposed: true },
+  { repository: 'web', on: 'shared', proposed: true },
+  { repository: 'web', on: 'api', proposed: true },
+]
 
 /** A step of a recipe, refused with these words. */
 function refusedAs(recipe: RecipeStep, words: string): RecipeStep {

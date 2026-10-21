@@ -343,15 +343,21 @@ export {
   TemplateForm,
   type PushDraft,
   type RepositoryDraft as DeliveryRepositoryDraft,
+  type ReviewersListing,
   type StepAnchor,
   type StepDraft as DeliveryStepDraft,
 } from './blocks/project-settings/delivery-forms.tsx'
-export { newStep } from './blocks/project-settings/delivery-form-options.ts'
+export {
+  CLEANUP_KINDS as DELIVERY_CLEANUP_KINDS,
+  newStep,
+} from './blocks/project-settings/delivery-form-options.ts'
 export { filled, templateRefusal } from './blocks/project-settings/delivery-words.ts'
+export { placeOf as deliveryPlaceOf } from './blocks/project-settings/delivery-drafts.ts'
 export {
   CATALOGUE,
   MOMENT_WORDS,
   STEP_WORDS,
+  kindsOn,
   type CleanupStep,
   type CliState as DeliveryCliState,
   type DeliveryRefusals,

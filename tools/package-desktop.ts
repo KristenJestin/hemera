@@ -38,6 +38,26 @@ export const ADAPTER_PACKAGES = [
 /** Where the adapters are gathered before electron-builder carries them, under the application. */
 export const ADAPTERS_FOLDER = 'adapters'
 
+/**
+ * Copies the LICENSE of the repository beside the application: electron-builder reads a resource
+ * from inside the application's folder, and a `from` above it matches nothing, silently.
+ */
+export function carryLicence(repository: string, application: string): void {
+  cpSync(join(repository, 'LICENSE'), join(application, 'LICENSE'))
+}
+
+/** Whether the package carries the licence of Hemera at its root, beside Electron's own. */
+export function licenceProblems(unpacked: string, licence: string): PackageProblem[] {
+  const carried = join(unpacked, 'LICENSE')
+  if (!existsSync(carried)) {
+    return [{ entry: 'LICENSE', problem: 'is missing from the package' }]
+  }
+  if (readFileSync(carried, 'utf8') !== licence) {
+    return [{ entry: 'LICENSE', problem: 'is not the LICENSE of the repository' }]
+  }
+  return []
+}
+
 /** Where a package carries them, from its unpacked folder. */
 const CARRIED_ADAPTERS = 'resources/adapters/node_modules'
 
@@ -322,6 +342,7 @@ export function inspectPackage(
     ...localesProblems(existsSync(locales) ? readdirSync(locales) : []),
     ...channelProblems(channelOfPackage(unpacked), asked),
     ...adapterProblems(unpacked),
+    ...licenceProblems(unpacked, readFileSync(join(import.meta.dirname, '..', 'LICENSE'), 'utf8')),
   ]
 }
 
@@ -359,6 +380,7 @@ if (import.meta.main) {
 
   run('node build.ts', application)
   carryAdapters(application, ADAPTER_PACKAGES, join(application, ADAPTERS_FOLDER))
+  carryLicence(repository, application)
 
   run(
     `pnpm exec electron-builder --config electron-builder.yml ${packagingOptions(channel, version)

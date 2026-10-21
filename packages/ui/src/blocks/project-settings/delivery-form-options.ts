@@ -15,7 +15,9 @@ export function newStep(kind: StepKind): StepConfig {
     case 'merge':
       return { kind, method: 'squash' }
     case 'remote-action':
-      return { kind, action: '' }
+      return { kind, action: '', inputs: '' }
+    case 'approve-deployment':
+      return { kind, environment: '' }
     case 'published':
       return { kind, by: 'tag', pattern: '' }
     case 'command':
@@ -42,4 +44,5 @@ export function newStep(kind: StepKind): StepConfig {
 /** The kinds a step added to a recipe or to the cleanup may be: the whole catalogue, in each. */
 export const RECIPE_KINDS = CATALOGUE
 
-export const CLEANUP_KINDS = CATALOGUE
+/** The cleanup is the Project's, on no forge: it approves no deployment. */
+export const CLEANUP_KINDS = CATALOGUE.filter((kind) => kind !== 'approve-deployment')

@@ -1011,6 +1011,11 @@ export const windowHandlers = (engine: EngineClient, application: Application, l
           closedAs(gone),
           observed('deliveryRules.acceptDependencies', log),
         ),
+      'deliveryRules.reviewers': (request) =>
+        engine['deliveryRules.reviewers'](request).pipe(
+          closedAs(gone),
+          observed('deliveryRules.reviewers', log),
+        ),
       'deliveryRules.missionCopies': (request) =>
         engine['deliveryRules.missionCopies'](request).pipe(
           closedAs(gone),

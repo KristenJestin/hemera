@@ -56,6 +56,28 @@ export const PreparationChange = Schema.Struct({
 })
 export type PreparationChange = typeof PreparationChange.Type
 
+/** Someone the forge lets review: a person by their handle, or a team (`acme/platform`). */
+export const ForgeReviewer = Schema.Struct({
+  handle: Schema.String,
+  /** A team's name; null for a person, whose name the forge does not list. */
+  name: Schema.NullOr(Schema.String),
+})
+export type ForgeReviewer = typeof ForgeReviewer.Type
+
+/**
+ * Who can review the Project's pull requests, as the forge answered (#502): listed, or why it
+ * cannot be asked, in words, with the command that fixes the forge's command line when one does.
+ */
+export const ReviewersListed = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('listed'), reviewers: Schema.Array(ForgeReviewer) }),
+  Schema.Struct({
+    kind: Schema.Literal('cannot'),
+    sentence: Schema.String,
+    fix: Schema.NullOr(Schema.String),
+  }),
+])
+export type ReviewersListed = typeof ReviewersListed.Type
+
 /** Rules refused at saving, with every reason. */
 export class DeliveryRulesRefused extends Schema.TaggedError<DeliveryRulesRefused>()(
   'DeliveryRulesRefused',
@@ -118,6 +140,16 @@ export const DeliveryRulesRpcs = RpcGroup.make(
     payload: { projectId: Schema.String, edges: Schema.Array(DeliveryDependency) },
     success: DeliveryRulesView,
     error: failing(...always, UnknownProject, DeliveryRulesRefused, DeliveryRulesUnreadable),
+  }),
+  /**
+   * Who can review the Project's pull requests, read from the forge of its first repository on
+   * one at each asking (the Reviewers dialog asks once as it opens): its teams, then the people
+   * with access.
+   */
+  Rpc.make('deliveryRules.reviewers', {
+    payload: { projectId: Schema.String },
+    success: ReviewersListed,
+    error: failing(...always, UnknownProject),
   }),
   /** The sections a mission copied, each with the version of the rules it was copied at. */
   Rpc.make('deliveryRules.missionCopies', {

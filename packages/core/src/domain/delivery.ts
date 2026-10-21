@@ -319,6 +319,14 @@ export const ActionOverrides = Schema.Struct({
   changed: Schema.Array(DeliveryAction),
   /** Its own actions, each after the one it follows (of the base or its own), null for first. */
   added: Schema.Array(Schema.Struct({ after: Schema.NullOr(Schema.String), step: DeliveryAction })),
+  /**
+   * The actions of its preset it moved here, from this moment or another (#502), each as it is
+   * here and after the one it follows, null for first: they leave their place in the preset.
+   * Added after #340's documents, so absent from those.
+   */
+  moved: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ after: Schema.NullOr(Schema.String), step: DeliveryAction })),
+  ),
 })
 
 /** What a repository changes, whatever the steps. */
@@ -326,6 +334,7 @@ export interface Overrides<S extends { readonly id: string }> {
   readonly off: ReadonlyArray<string>
   readonly changed: ReadonlyArray<S>
   readonly added: ReadonlyArray<{ readonly after: string | null; readonly step: S }>
+  readonly moved?: ReadonlyArray<{ readonly after: string | null; readonly step: S }>
 }
 
 const NO_OVERRIDES = { off: [], changed: [], added: [] }
@@ -477,21 +486,36 @@ export interface DeliveryProject {
   readonly commandIds: ReadonlyArray<string>
 }
 
-/** A base list with a repository's changes applied, in order. */
+/** The steps a repository placed in a moment: its own, and those of its preset it moved there. */
+const placedSteps = <S extends { readonly id: string }>(overrides: Overrides<S>) => [
+  ...overrides.added,
+  ...(overrides.moved ?? []),
+]
+
+/** The ids of the preset's steps a repository moved, whichever moment it moved them to. */
+export const movedIds = <S extends { readonly id: string }>(
+  overrides: ReadonlyArray<Overrides<S>>,
+): Set<string> =>
+  new Set(overrides.flatMap((one) => (one.moved ?? []).map((moved) => moved.step.id)))
+
+/**
+ * A base list with a repository's changes applied, in order. A step of the base moved, here or to
+ * another moment, leaves its place; one moved here stands where an added step would.
+ */
 export function applyOverrides<S extends { readonly id: string }>(
   base: ReadonlyArray<S>,
   overrides: Overrides<S>,
+  away: ReadonlySet<string> = movedIds([overrides]),
 ): S[] {
-  const known = new Set([
-    ...base.map((step) => step.id),
-    ...overrides.added.map((one) => one.step.id),
-  ])
+  const added = placedSteps(overrides)
+  const kept = base.filter((step) => !away.has(step.id))
+  const known = new Set([...kept.map((step) => step.id), ...added.map((one) => one.step.id)])
   // Each added step is placed once: one anchored on itself, or on a step of its own id, cannot
   // loop (the validation refuses both).
   const placed = new Set<number>()
   const after = (anchor: string | null): S[] => {
     const steps: S[] = []
-    for (const [index, one] of overrides.added.entries()) {
+    for (const [index, one] of added.entries()) {
       if (one.after !== anchor || placed.has(index)) continue
       placed.add(index)
       steps.push(one.step)
@@ -500,7 +524,7 @@ export function applyOverrides<S extends { readonly id: string }>(
     return steps
   }
   const steps = after(null)
-  for (const step of base) {
+  for (const step of kept) {
     if (!overrides.off.includes(step.id)) {
       steps.push(overrides.changed.find((one) => one.id === step.id) ?? step)
     }
@@ -509,9 +533,7 @@ export function applyOverrides<S extends { readonly id: string }>(
   }
   // A step whose anchor is gone, with a new preset, goes last rather than nowhere.
   const lost = new Set(
-    overrides.added.flatMap((one) =>
-      one.after !== null && !known.has(one.after) ? [one.after] : [],
-    ),
+    added.flatMap((one) => (one.after !== null && !known.has(one.after) ? [one.after] : [])),
   )
   for (const anchor of lost) steps.push(...after(anchor))
   return steps
@@ -519,7 +541,10 @@ export function applyOverrides<S extends { readonly id: string }>(
 
 /** How many things a repository changes of its base. */
 export const changesOf = <S extends { readonly id: string }>(overrides: Overrides<S>): number =>
-  overrides.off.length + overrides.changed.length + overrides.added.length
+  overrides.off.length +
+  overrides.changed.length +
+  overrides.added.length +
+  (overrides.moved?.length ?? 0)
 
 /** A repository's stack in each of its moments. */
 export const MomentStacks = Schema.Struct({
@@ -586,10 +611,12 @@ const overridesOf = (
 const stacksOf = (rules: DeliveryRulesDraft, repository: DeliveryRepository): MomentStacks => {
   const { preset } = wavesOf(rules, repository)
   const overrides = overridesOf(rules, repository)
+  // A step moved to another moment leaves the moment its preset holds it in.
+  const away = movedIds(DELIVERY_MOMENTS.map((moment) => overrides[moment]))
   return {
-    tasks: applyOverrides(rules.tasks.presets[preset], overrides.tasks),
-    preparation: applyOverrides(rules.preparation.presets[preset], overrides.preparation),
-    waves: applyOverrides(rules.waves.presets[preset], overrides.waves),
+    tasks: applyOverrides(rules.tasks.presets[preset], overrides.tasks, away),
+    preparation: applyOverrides(rules.preparation.presets[preset], overrides.preparation, away),
+    waves: applyOverrides(rules.waves.presets[preset], overrides.waves, away),
   }
 }
 
@@ -626,7 +653,7 @@ export function effectiveRepositories(
     const own = new Set(
       DELIVERY_MOMENTS.flatMap((moment) => [
         ...overrides[moment].changed.map((step) => step.id),
-        ...overrides[moment].added.map((one) => one.step.id),
+        ...placedSteps(overrides[moment]).map((one) => one.step.id),
       ]),
     )
     const kept = (steps: ReadonlyArray<DeliveryAction>) =>
@@ -1084,10 +1111,12 @@ function anchorLoops<S extends { readonly id: string }>(
   base: ReadonlyArray<S>,
   overrides: Overrides<S>,
 ): string[][] {
-  const baseIds = new Set(base.map((step) => step.id))
+  const added = placedSteps(overrides)
+  const away = movedIds([overrides])
+  const baseIds = new Set(base.filter((step) => !away.has(step.id)).map((step) => step.id))
   const loops: string[][] = []
   const seen = new Set<string>()
-  for (const one of overrides.added) {
+  for (const one of added) {
     const chain = [one.step.id]
     let anchor = one.after
     while (anchor !== null && !baseIds.has(anchor)) {
@@ -1099,7 +1128,7 @@ function anchorLoops<S extends { readonly id: string }>(
         }
         break
       }
-      const next = overrides.added.find((other) => other.step.id === anchor)
+      const next = added.find((other) => other.step.id === anchor)
       if (next === undefined || chain.includes(anchor)) break
       chain.push(anchor)
       anchor = next.after
@@ -1425,14 +1454,18 @@ export function validateRules(
   }
   for (const { repository, resolved } of facts) {
     const overrides = overridesOf(rules, repository)
-    // A preset's own duplicates are said once, above; here what the repository adds meets.
+    // A preset's own duplicates are said once, above; here what the repository adds meets. A
+    // step it moved stands once, where it moved it.
+    const away = movedIds(DELIVERY_MOMENTS.map((moment) => overrides[moment]))
     const ids = [
       ...new Set(
         DELIVERY_MOMENTS.flatMap((moment) =>
           rules[moment].presets[resolved.preset].map((step) => step.id),
         ),
+      ).difference(away),
+      ...DELIVERY_MOMENTS.flatMap((moment) =>
+        placedSteps(overrides[moment]).map((one) => one.step.id),
       ),
-      ...DELIVERY_MOMENTS.flatMap((moment) => overrides[moment].added.map((one) => one.step.id)),
     ]
     for (const id of duplicated(ids)) {
       problems.push(

@@ -64,6 +64,7 @@ export const SILENT_LINK: Link = {
   validateDeliveryRules: never,
   saveDeliveryRules: never,
   acceptDependencies: never,
+  reviewers: never,
   forgeStatus: never,
   checkForgeAgain: never,
   setForcedForge: never,

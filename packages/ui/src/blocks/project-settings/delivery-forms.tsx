@@ -3,11 +3,20 @@ import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
-import { IconButton } from '../../components/button/button.tsx'
+import { Button, IconButton } from '../../components/button/button.tsx'
 import { Input, Textarea } from '../../components/field/field.tsx'
+import { Skeleton } from '../../components/loading/loading.tsx'
 import { Menu } from '../../components/menu/menu.tsx'
 import { Select } from '../../components/select/select.tsx'
-import { IconBraces, IconPlus, IconSearch, IconWorld, IconX } from '../../icons.ts'
+import {
+  IconAlertTriangle,
+  IconBraces,
+  IconPlus,
+  IconRefresh,
+  IconSearch,
+  IconWorld,
+  IconX,
+} from '../../icons.ts'
 import { collapse, expand, fold, useTransition } from '../../motion.ts'
 import {
   type ForgeKind,
@@ -28,6 +37,7 @@ import {
   writesToNetwork,
 } from './delivery-model.ts'
 import { START_ITEMS, newStep } from './delivery-form-options.ts'
+import { FixCommand } from './provider-forms.tsx'
 
 /**
  * The dialogs of the delivery rules: where the push and the pull requests stand, a template, the
@@ -174,27 +184,76 @@ function who(reviewer: Reviewer): ReactNode {
 }
 
 /**
+ * Where the forge's list of who reviews stands while the dialog is open: read, being read, or
+ * not to be read, with the trouble in words, the command that fixes it and Check again.
+ */
+export type ReviewersListing =
+  | { readonly state: 'ready' }
+  | { readonly state: 'reading' }
+  | {
+      readonly state: 'cannot'
+      readonly sentence: string
+      readonly fix?: string | undefined
+      readonly onCheckAgain: () => void
+      readonly onCopy: (line: string) => void
+    }
+
+/** The forge's list cannot be read: its trouble, its command, Check again. */
+function CannotList({
+  listing,
+}: {
+  listing: Extract<ReviewersListing, { state: 'cannot' }>
+}): ReactNode {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-surface-rim p-3">
+      <p className="flex items-start gap-2 text-sm">
+        <span className="flex shrink-0 pt-0.5 text-warning">
+          <IconAlertTriangle size="sm" aria-hidden="true" />
+        </span>
+        <span className="max-w-measure">{listing.sentence}</span>
+      </p>
+      {listing.fix !== undefined && <FixCommand line={listing.fix} onCopy={listing.onCopy} />}
+      <div>
+        <Button size="sm" onClick={listing.onCheckAgain}>
+          <IconRefresh size="sm" />
+          Check again
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
  * The reviewers asked on each pull request: those chosen, each with its ×, then a search over
- * everyone the forge offers — a long list is found by its name, never scrolled through.
+ * everyone the forge offers — a long list is found by its name, never scrolled through. The list
+ * is the forge's, read as the dialog opens: while it is read, what is typed waits under rows of
+ * the shape to come; when it cannot be read, a handle typed is added as it is.
  */
 export function ReviewersForm({
   chosen,
   candidates,
+  listing = { state: 'ready' },
   onChange,
 }: {
   chosen: readonly Reviewer[]
   candidates: readonly Reviewer[]
+  listing?: ReviewersListing | undefined
   onChange: (chosen: Reviewer[]) => void
 }): ReactNode {
   const [query, setQuery] = useState('')
   const taken = new Set(chosen.map((one) => one.handle))
-  const words = query.trim().toLowerCase()
+  const typed = query.trim()
+  const words = typed.toLowerCase()
   const found = candidates.filter(
     (one) =>
       !taken.has(one.handle) &&
       words !== '' &&
       `${one.handle} ${one.name ?? ''}`.toLowerCase().includes(words),
   )
+  const add = (one: Reviewer): void => {
+    onChange([...chosen, one])
+    setQuery('')
+  }
   return (
     <>
       <div className="flex flex-col gap-1">
@@ -222,21 +281,56 @@ export function ReviewersForm({
           ))}
         </ul>
       </div>
+      {listing.state === 'cannot' && <CannotList listing={listing} />}
       <Input
         label="Add a reviewer"
         icon={<IconSearch size="sm" />}
-        placeholder="A name, a handle or a team"
+        placeholder={
+          listing.state === 'cannot' ? 'A handle or a team' : 'A name, a handle or a team'
+        }
         value={query}
         onValueChange={setQuery}
       />
-      {words !== '' && (
+      {words !== '' && listing.state === 'reading' && (
+        <ul
+          aria-label="Reviewers found"
+          aria-busy="true"
+          className="flex flex-col overflow-hidden rounded-md border border-border"
+        >
+          {['Mira Okafor', 'Tomas Lindqvist', '@acme/platform'].map((one) => (
+            <li key={one} aria-hidden="true" className={PERSON}>
+              <Skeleton>{one}</Skeleton>
+            </li>
+          ))}
+        </ul>
+      )}
+      {words !== '' && listing.state === 'cannot' && (
+        <ul
+          aria-label="Reviewers found"
+          className="flex flex-col overflow-hidden rounded-md border border-border"
+        >
+          <li className={PERSON}>
+            <span className="min-w-0 flex-1 truncate font-mono text-xs">{typed}</span>
+            <span className="text-xs text-muted-foreground">as typed</span>
+            <IconButton
+              size="sm"
+              variant="ghost"
+              icon={<IconPlus size="sm" />}
+              aria-label={`Add ${typed} as typed`}
+              disabled={taken.has(typed)}
+              onClick={() => add({ handle: typed })}
+            />
+          </li>
+        </ul>
+      )}
+      {words !== '' && listing.state === 'ready' && (
         <ul
           aria-label="Reviewers found"
           className="flex flex-col overflow-hidden rounded-md border border-border"
         >
           {found.length === 0 && (
             <li className={cn(PERSON, 'text-muted-foreground')}>
-              Nobody on the forge matches “{query.trim()}”.
+              Nobody on the forge matches “{typed}”.
             </li>
           )}
           {found.slice(0, 6).map((one) => (
@@ -247,10 +341,7 @@ export function ReviewersForm({
                 variant="ghost"
                 icon={<IconPlus size="sm" />}
                 aria-label={`Add ${one.name ?? one.handle}`}
-                onClick={() => {
-                  onChange([...chosen, one])
-                  setQuery('')
-                }}
+                onClick={() => add(one)}
               />
             </li>
           ))}
@@ -362,6 +453,11 @@ export interface StepFormProps {
   adding?:
     | { kinds: readonly StepKind[]; after: readonly StepAnchor[]; moments?: boolean | undefined }
     | undefined
+  /**
+   * For a step already placed: the steps it may come after, each in its moment. Its dialog then
+   * says where it stands, When and After, as a new step's does, and Save moves it there.
+   */
+  placing?: readonly StepAnchor[] | undefined
   /** The catalogue commands a Bump or a Command may run. */
   commands: readonly string[]
   /** What the engine refuses of the step, at the field it concerns. */
@@ -473,12 +569,32 @@ function KindFields({
       )
     case 'remote-action':
       return (
+        <>
+          <Input
+            label="Workflow or pipeline"
+            placeholder="release.yml"
+            value={config.action}
+            error={refused}
+            onValueChange={(action) => set({ ...config, action })}
+          />
+          <Textarea
+            label="Inputs"
+            rows={2}
+            description="A workflow's inputs, one name=value a line."
+            value={config.inputs ?? ''}
+            onValueChange={(inputs) => set({ ...config, inputs })}
+          />
+        </>
+      )
+    case 'approve-deployment':
+      return (
         <Input
-          label="Workflow or pipeline"
-          placeholder="release.yml"
-          value={config.action}
+          label="Environment"
+          placeholder="production"
+          description="Hemera approves the deployment waiting on it, as you: your account must be one of its reviewers on the forge."
+          value={config.environment}
           error={refused}
-          onValueChange={(action) => set({ ...config, action })}
+          onValueChange={(environment) => set({ ...config, environment })}
         />
       )
     case 'published':
@@ -571,7 +687,14 @@ export function PlaceFields({
 }
 
 /** A step: its kind when it is new, where it goes, how it starts, and the fields of its kind. */
-export function StepForm({ draft, onChange, adding, commands, refused }: StepFormProps): ReactNode {
+export function StepForm({
+  draft,
+  onChange,
+  adding,
+  placing,
+  commands,
+  refused,
+}: StepFormProps): ReactNode {
   const { config } = draft
   const set = (next: StepConfig): void => onChange({ ...draft, config: next })
   const commandItems = commands.map((one) => ({ value: one, label: one }))
@@ -587,6 +710,13 @@ export function StepForm({ draft, onChange, adding, commands, refused }: StepFor
           />
           <PlaceFields draft={draft} adding={adding} onChange={onChange} />
         </>
+      )}
+      {adding === undefined && placing !== undefined && (
+        <PlaceFields
+          draft={draft}
+          adding={{ kinds: [], moments: true, after: placing }}
+          onChange={onChange}
+        />
       )}
       <KindFields config={config} set={set} commandItems={commandItems} refused={refused} />
       {writesToNetwork(config) && (
