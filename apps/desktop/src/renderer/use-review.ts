@@ -4,7 +4,12 @@ import type { Link } from './link.ts'
 import { followReview, type ReviewFollowView, type ReviewFollowing } from './review-follow.ts'
 import { followedOf, useFollower } from './use-building.ts'
 
-const LOADING_REVIEW: ReviewFollowView = { moment: null, mentionables: [], shippable: false }
+const LOADING_REVIEW: ReviewFollowView = {
+  moment: null,
+  mentionables: [],
+  shippable: false,
+  confirmable: false,
+}
 
 /** A mission's Review page, and what the window does with it. */
 export function useReview(

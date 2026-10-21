@@ -53,6 +53,8 @@ export interface ReviewScreenProps {
   forge?: 'GitHub' | 'Bitbucket' | undefined
   /** What Ship's confirmation lists: the moment's own, everything, or the Local preset's. */
   preview?: 'plain' | 'full' | 'local' | undefined
+  /** The confirmation's fresh preview is still being read: Confirm waits for it. */
+  reading?: boolean | undefined
   /** The views open as the story starts. */
   initial?: MissionFrameState | undefined
   onShip: () => void
@@ -97,9 +99,9 @@ function momentOf(props: ReviewScreenProps): ReviewMoment {
     kind: 'remark',
     text: LONG_REMARK,
     state: 'waiting',
+    ...standing('waiting'),
     at: '09:58',
     anchor: LONG_PATH,
-    ...standing('waiting'),
     images: [
       {
         name: 'export-button-wrapped-at-1024-pixels-wide-in-the-billing-toolbar.png',
@@ -315,8 +317,8 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
                     kind: added.kind,
                     text: added.text,
                     state: 'waiting',
-                    at: 'now',
                     ...standing('waiting'),
+                    at: 'now',
                     images: added.images.map((name) => ({ name, size: '2 KB' })),
                     follows: added.follows,
                   },
@@ -354,6 +356,7 @@ export function ReviewScreen(props: ReviewScreenProps): ReactNode {
       <ShipDialog
         missionKey={KEY}
         preview={previewOf(moment, props.preview)}
+        confirmable={props.reading !== true}
         open={shipping}
         onOpenChange={setShipping}
         onConfirm={props.onShip}

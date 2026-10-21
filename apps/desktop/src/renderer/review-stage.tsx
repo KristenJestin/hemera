@@ -140,6 +140,7 @@ export function ReviewStage({
         <ShipDialog
           missionKey={mission.key}
           preview={shown.preview}
+          confirmable={view.confirmable}
           open={shipping}
           onOpenChange={setShipping}
           onConfirm={() => {

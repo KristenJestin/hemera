@@ -40,6 +40,8 @@ export interface ReviewFollowView {
   readonly mentionables: ReadonlyArray<Mentionable>
   /** Whether Ship is the head's action now: the engine says it may, and no Ship runs. */
   readonly shippable: boolean
+  /** Whether the confirmation holds the preview read as it opened: Confirm waits for it. */
+  readonly confirmable: boolean
   /** Why the page could not be read, in words. */
   readonly error?: string | undefined
   /** Why the last gesture did not go through, in words. */
@@ -76,9 +78,9 @@ export interface ReviewFollowing {
   readonly pull: (repository: string, action: 'retry' | 'check') => Promise<void>
   /** A comment of the team added to the round or dismissed, with the user's take when given. */
   readonly team: (label: string, action: 'round' | 'dismiss', take: string) => Promise<void>
-  /** Reads Ship's preview fresh, as its confirmation opens. */
+  /** Reads Ship's preview fresh, as its confirmation opens; Confirm waits for it. */
   readonly previewShip: () => Promise<void>
-  /** Ship, on the preview the user saw; false when the engine refused it, its reasons said. */
+  /** Ship, on the preview the user saw; false when it was not read fresh or the engine refused it. */
   readonly ship: () => Promise<boolean>
   /** Reads again, after a failure. */
   readonly retry: () => void
@@ -110,6 +112,9 @@ export function followReview(
   let team: ReadonlyArray<TeamCommentView> = []
   let forges: ReadonlyArray<ForgeRepositoryStatus> = []
   let preview: ShipPreview | null = null
+  // The confirmation's own read, as it opened: the latest one asked, and whether it landed.
+  let confirmation = 0
+  let confirmable = false
   let progress: ShipProgress | null = null
   let error: string | undefined
   let refused: string | undefined
@@ -147,6 +152,7 @@ export function followReview(
       shippable:
         preview?.possible === true &&
         (progress === null || progress.step === 'idle' || progress.step === 'stopped'),
+      confirmable,
       error,
       refused,
     })
@@ -390,10 +396,30 @@ export function followReview(
         },
       )
     },
-    previewShip: readPreview,
-    ship: () => {
-      if (preview === null) return Promise.resolve(false)
+    previewShip: () => {
+      confirmation += 1
+      const asked = confirmation
+      confirmable = false
       refused = undefined
+      emit()
+      return link.shipPreview(missionId).then(
+        (read) => {
+          preview = read
+          // An older confirmation's read landing late is not the one the dialog waits for.
+          confirmable = asked === confirmation
+          emit()
+        },
+        (failure: Error) => {
+          refused = failure.message
+          emit()
+        },
+      )
+    },
+    ship: () => {
+      if (preview === null || !confirmable) return Promise.resolve(false)
+      refused = undefined
+      confirmable = false
+      emit()
       return link.confirmShip(missionId, preview.previewId).then(
         () => true,
         (failure: Error) => {

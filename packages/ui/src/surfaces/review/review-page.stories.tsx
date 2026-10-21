@@ -478,6 +478,25 @@ export const ShipConfirmation: Story = {
 }
 
 /**
+ * The confirmation opens on the preview read before, while the fresh one is read: nothing can be
+ * confirmed yet. It cannot be confirmed on a stale preview; Not now stays.
+ */
+export const ShipConfirmationReading: Story = {
+  args: { moment: 'ready', reading: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Ship' }))
+    const dialog = within(await waitFor(() => within(document.body).getByRole('dialog')))
+    await waitFor(() =>
+      expect(dialog.getByRole('heading', { name: 'Ship ACME-12?' })).toBeVisible(),
+    )
+    await expect(dialog.getByRole('button', { name: 'Not now' })).toBeVisible()
+    await expect(dialog.queryByRole('button', { name: 'Ship now' })).toBeNull()
+    await expect(args.onShip).not.toHaveBeenCalled()
+  },
+}
+
+/**
  * The confirmation with everything to say: the changes made outside Hemera that leave and what
  * they make to redo, a proof verified by hand not validated (open question 78: listed, Ship stays
  * possible), a rule of the Project changed since the mission copied it, a CI still running.
