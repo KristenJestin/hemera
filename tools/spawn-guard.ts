@@ -8,6 +8,10 @@
  * answers differently on every machine, and one that prompts would hang the suite. A line Windows
  * hands to `cmd.exe` is judged by the program it runs, not by `cmd.exe`.
  *
+ * A Git is refused too when its environment puts the global configuration outside the temporary
+ * folder (`HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`): the suites run on a home of
+ * their own (`test-home.ts`), and the machine's must never be read or written (#488).
+ *
  * A refused spawn throws where it is asked, and is kept: the code under test may swallow the
  * throw, so the setup fails the test that asked for it (see `spawn-guard.setup.ts`).
  */
@@ -23,6 +27,12 @@ export interface SpawnRule {
   readonly folders: ReadonlyArray<string>
   /** The programs, besides, a test may start wherever they are found. */
   readonly names: ReadonlyArray<string>
+  /**
+   * The folders a Git's home may be in: `HOME`, `USERPROFILE`, `XDG_CONFIG_HOME` and
+   * `GIT_CONFIG_GLOBAL` of a Git spawn that name a place must name one inside them (#488). None:
+   * the home of a Git is not looked at.
+   */
+  readonly homes?: ReadonlyArray<string>
   readonly platform: NodeJS.Platform
 }
 
@@ -129,6 +139,35 @@ export function refusedBy(rule: SpawnRule, asked: Asked): string | null {
   return rule.folders.some((folder) => within(path, real(folder))) ? null : found
 }
 
+/** What a Git's environment names as the place of the user's configuration. */
+const GIT_HOME_VARIABLES = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'GIT_CONFIG_GLOBAL']
+
+/** `GIT_CONFIG_GLOBAL` set to these reads no global configuration at all. */
+const NO_CONFIGURATION = ['/dev/null', 'NUL']
+
+/**
+ * The variable of a Git spawn that puts its global configuration on the machine's own home (or
+ * anywhere outside the rule's `homes`), as `NAME=value`, or null when the spawn may run. A Git that
+ * is handed none of the variables reads no home, and one told to read no configuration is fine.
+ */
+export function homeRefusedBy(rule: SpawnRule, asked: Asked): string | null {
+  if (rule.homes === undefined) return null
+  const name = nameOf(asked.file)
+  if (rule.platform === 'win32' && name === 'cmd' && asked.args.includes('/c')) {
+    const line = asked.args.at(-1) ?? ''
+    return homeRefusedBy(rule, { ...asked, file: programOfLine(line), args: [] })
+  }
+  if (name !== 'git') return null
+  const homes = rule.homes
+  for (const variable of GIT_HOME_VARIABLES) {
+    const value = asked.env[variable]
+    if (value === undefined || value === '' || NO_CONFIGURATION.includes(value)) continue
+    const path = real(resolve(asked.cwd, value))
+    if (!homes.some((folder) => within(path, real(folder)))) return `${variable}=${value}`
+  }
+  return null
+}
+
 /** The internal options `ChildProcess.prototype.spawn` receives from every asynchronous spawn. */
 interface InternalOptions {
   readonly file: string
@@ -179,9 +218,16 @@ export function installSpawnGuard(rule: SpawnRule): void {
 
   const check = (asked: Asked) => {
     const program = refusedBy(rule, asked)
-    if (program === null) return
-    state.refused.push(program)
-    throw new Error(`spawn-guard: a test may not start ${program} (see tools/spawn-guard.ts)`)
+    if (program !== null) {
+      state.refused.push(program)
+      throw new Error(`spawn-guard: a test may not start ${program} (see tools/spawn-guard.ts)`)
+    }
+    const home = homeRefusedBy(rule, asked)
+    if (home === null) return
+    state.refused.push(`git on ${home}`)
+    throw new Error(
+      `spawn-guard: a test may not start git on the machine's home, ${home} (see tools/spawn-guard.ts)`,
+    )
   }
 
   // SAFETY: Node's ChildProcess has an undocumented `spawn(options)` every asynchronous spawn,
