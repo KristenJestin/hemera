@@ -159,8 +159,12 @@ export function MentionEditor({
   })
   /** What a search found and was mentioned, so a value set again draws it as its badge. */
   const found = useRef<readonly MentionRef[]>([])
-  /** The text this field last handed back, so a value it wrote is not written back into it. */
-  const handed = useRef(value)
+  /**
+   * The texts this field handed back that the page has not drawn yet, oldest first, so a value it
+   * wrote is never written back into it — not even one a keystroke old, which a busy page draws
+   * after the field has read the next key.
+   */
+  const handed = useRef<readonly string[]>([value])
 
   const current = Math.min(active, Math.max(0, (menu?.items.length ?? 1) - 1))
   const optionId = (at: number) => optionIdOf(id, at)
@@ -284,15 +288,19 @@ export function MentionEditor({
     onUpdate: ({ editor: on }) => {
       const document = on.getJSON()
       const text = textOf(document)
-      handed.current = text
+      handed.current = [...handed.current, text]
       latest.current.onValueChange(text, mentionsOf(document))
     },
   })
 
   // A value set from outside — the composer emptied once a message is sent — is drawn anew.
   useEffect(() => {
-    if (value === handed.current) return
-    handed.current = value
+    const drawn = handed.current.indexOf(value)
+    if (drawn !== -1) {
+      handed.current = handed.current.slice(drawn)
+      return
+    }
+    handed.current = [value]
     editor.commands.setContent(
       documentOf(value, [...mentionables, ...mentions, ...found.current]),
       { emitUpdate: false },
