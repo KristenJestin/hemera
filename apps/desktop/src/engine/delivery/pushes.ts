@@ -8,6 +8,11 @@
  *   action on a click waits, whole, for one decision need on the mission (Push / Not now); "not now"
  *   leaves it unrun until the next return to Review. The first time it acts, the mission copies the
  *   preparation (CT-47), and every later push reads that copy.
+ * - **At Ship** (R9): every repository whose stack pushes or opens a pull request and that changed
+ *   since its last push, whatever the round, runs it once Ship froze the mission, in Shipping. Ship
+ *   hands them over in the freeze's own transaction, so a stop between the two is pushed at the
+ *   next start; Ship is the click, so none asks. A failure holds its need in Shipping. Nothing
+ *   leaves but the tree Ship froze: a Workspace changed since stops the push with an error need.
  * - **Hemera commits** (`commit-by-hemera`): a checkpoint of the repository first (#140), what this
  *   push pushes; then the whole working tree is committed (untracked non-ignored files included)
  *   with the commit template, as the user's Git identity, which Hemera reads and never sets. The
@@ -79,7 +84,9 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import {
   Context,
+  Deferred,
   Effect,
+  Fiber,
   Layer,
   Option,
   Predicate,
@@ -91,6 +98,7 @@ import {
 
 import type { Log } from '../../main/diagnostic.ts'
 import { Checkpoints } from '../building/checkpoints.ts'
+import { readTrees } from '../building/proof-store.ts'
 import { copySection, missionCopies } from '../delivery-rules.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { ForgePort } from '../forges/port.ts'
@@ -131,6 +139,7 @@ import {
   deliveryPushes,
   effectfulActions,
   memoryEvidence,
+  missionShips,
   missions,
   needs,
 } from '../storage/schema.ts'
@@ -150,8 +159,18 @@ import {
 /** The service the pushes' needs belong to. */
 export const DELIVERY_NEEDS = needService('delivery')
 
-/** Where a suite holds a repository's sequence: after an intent, after its outcome. */
-export type PushMoment = 'committing' | 'committed' | 'pushing' | 'pushed' | 'creating' | 'opened'
+/**
+ * Where a suite holds a repository's sequence: after an intent, after its outcome; and, with no
+ * repository, once what a stop left is caught up.
+ */
+export type PushMoment =
+  | 'committing'
+  | 'committed'
+  | 'pushing'
+  | 'pushed'
+  | 'creating'
+  | 'opened'
+  | 'caught-up'
 
 export type PushesHold = (at: PushMoment, repository: string) => Effect.Effect<void>
 
@@ -174,6 +193,25 @@ export interface PushesService {
   ) => Effect.Effect<void, UnknownEvidence | NotPublishable | DatabaseError>
   /** What a stop left, then each committed event of the stream, for as long as it lasts. */
   readonly follow: (events: Stream.Stream<DomainEvent>) => Effect.Effect<void>
+  /**
+   * Ship's push (R9): the repositories whose preparation pushes or opens a pull request and that
+   * changed since their last push (or their base), read now, before Ship freezes the mission.
+   */
+  readonly atShip: (missionId: string) => Effect.Effect<ShipPush, PushesFailure>
+}
+
+/** What Ship hands to the pushes, and how it pushes it. */
+export interface ShipPush {
+  /**
+   * Within the transaction that freezes the mission: each repository running, so a stop between
+   * the freeze and the push leaves it for the next start to push. Ship is the click: none asks.
+   */
+  readonly handIn: (transaction: EngineTransaction) => Effect.Effect<void, DatabaseError>
+  /**
+   * Once the freeze is committed: each repository's sequence, ended when every one has ended,
+   * stopped, or waits for a forge CLI that is not ready; those go on in the pushes' scope.
+   */
+  readonly push: Effect.Effect<void>
 }
 
 export class Pushes extends Context.Service<Pushes, PushesService>()('Pushes') {}
@@ -272,6 +310,9 @@ const IMAGE_STATES: ReadonlyArray<PushImage['state']> = [
 /** Whether a stack pushes or opens a pull request: what this ticket runs it for. */
 const delivers = (steps: ReadonlyArray<DeliveryAction>) =>
   steps.some((step) => step.kind === 'push' || step.kind === 'pull-request')
+
+/** Whether a mission's stage runs its pushes: Review's, and in Shipping, Ship's own push (R9). */
+const pushing = (stage: Mission['stage']) => stage === 'review' || stage === 'shipping'
 
 /** The repositories' names, as a sentence lists them. */
 const listed = (names: ReadonlyArray<string>) => names.join(', ')
@@ -739,6 +780,27 @@ export const pushesLayer = (settings: PushesSettings) => {
           return fresh
         })
 
+      /** The tree Ship froze for a repository of the mission; null before Ship (R9). */
+      const frozenOf = (one: Run) =>
+        database
+          .select({ trees: missionShips.trees })
+          .from(missionShips)
+          .where(eq(missionShips.missionId, one.mission.id))
+          .pipe(
+            Effect.mapError(refusedWhile('reading the frozen trees')),
+            Effect.map(
+              ([shipped]) =>
+                readTrees(shipped?.trees ?? null).find((tree) => tree.repository === one.name)
+                  ?.tree ?? null,
+            ),
+          )
+
+      /** Shipped, nothing leaves but the tree Ship froze: what moved since stops the push. */
+      const changedAfterShip = (one: Run, what: string) => {
+        const output = `The Workspace of ${one.name} changed after Ship froze it: nothing was pushed.`
+        return stopped('failed', output, errorNeed(output, [{ what, output }]))
+      }
+
       const commitStep = (one: Run) =>
         Effect.gen(function* () {
           const { folder } = one.place
@@ -804,6 +866,10 @@ export const pushesLayer = (settings: PushesSettings) => {
                   { what: 'git commit', output: changedOut },
                 ]),
               )
+            }
+            const frozen = yield* frozenOf(one)
+            if (frozen !== null && recorded !== frozen) {
+              return yield* changedAfterShip(one, 'git commit')
             }
             const expected = trees.kept
             yield* setRow(row, { checkpointId, tree: expected })
@@ -871,6 +937,17 @@ export const pushesLayer = (settings: PushesSettings) => {
           const head = (yield* git(folder, ['rev-parse', '--verify', '--quiet', ref]).pipe(
             Effect.mapError(failedWith(`git rev-parse ${ref}`)),
           )).trim()
+          // A Hemera commit was checked against the frozen tree; any other commit is checked here.
+          if (!one.entry.steps.some((step) => step.kind === 'commit-by-hemera')) {
+            const frozen = yield* frozenOf(one)
+            const tree = (yield* git(folder, [
+              'rev-parse',
+              '--verify',
+              '--quiet',
+              `${head}^{tree}`,
+            ]).pipe(Effect.mapError(failedWith(`git rev-parse ${head}^{tree}`)))).trim()
+            if (frozen !== null && tree !== frozen) return yield* changedAfterShip(one, 'git push')
+          }
           const there = yield* remoteHeadOf(folder, remote, one.branch).pipe(
             Effect.orElseSucceed(() => null),
           )
@@ -1635,13 +1712,18 @@ export const pushesLayer = (settings: PushesSettings) => {
         )
 
       /** One repository's sequence, in its turn: the steps of its preparation stack, in order. */
-      const drive = (missionId: string, repositoryId: string) =>
+      /**
+       * `atForge`, when given, is told as the sequence reaches a step that may wait for the forge's
+       * CLI: Ship waits no longer than that while the CLI is not ready.
+       */
+      const drive = (missionId: string, repositoryId: string, atForge?: Deferred.Deferred<void>) =>
         Effect.gen(function* () {
           const row = yield* rowOf(missionId, repositoryId)
           if (row === null || row.state !== 'running') return
           const mission = yield* getMission(missionId).pipe(Effect.provide(context))
-          // Nothing runs out of Review: the next return to Review considers it again.
-          if (mission.stage !== 'review') return
+          // Nothing runs out of Review, or Shipping for Ship's push: the next return to Review
+          // considers it again.
+          if (!pushing(mission.stage)) return
           const at = { mission, repositoryId, name: row.repository }
           let step: string | null = null
           yield* Effect.gen(function* () {
@@ -1693,9 +1775,12 @@ export const pushesLayer = (settings: PushesSettings) => {
             }
             for (const action of entry.steps) {
               const still = yield* getMission(missionId).pipe(Effect.provide(context))
-              if (still.stage !== 'review') return
+              if (!pushing(still.stage)) return
               step = action.id
               yield* setRow(row, { step })
+              if (action.kind === 'pull-request' && atForge !== undefined) {
+                yield* Deferred.succeed(atForge, undefined)
+              }
               yield* stepOf(one, action)
             }
             yield* setRow(row, { state: 'done', step: null, message: null, needId: null })
@@ -1736,6 +1821,75 @@ export const pushesLayer = (settings: PushesSettings) => {
         })
 
       /**
+       * The repositories with changes since their last push (or their base) whose copied stack
+       * pushes or opens a pull request, with that copy; `fresh`, only those this round has not
+       * considered yet.
+       */
+      const actingOf = (mission: Mission, fresh: boolean) =>
+        Effect.gen(function* () {
+          const places = yield* diffs.places(mission.id)
+          if (places === null) return null
+          const project = yield* getProject(mission.projectId).pipe(Effect.provide(context))
+          const known = yield* rowsOf(mission.id)
+          const changed: Array<{ place: Place; repositoryId: string }> = []
+          for (const place of places) {
+            const repository = project.repositories.find((one) => one.path === place.name)
+            if (repository === undefined) continue
+            const row = known.find((one) => one.repositoryId === repository.id)
+            if (fresh && row !== undefined && row.round === mission.round) continue
+            if (yield* changedSince(place, row?.commit ?? null)) {
+              changed.push({ place, repositoryId: repository.id })
+            }
+          }
+          if (changed.length === 0) return null
+          // The first time the step acts, the mission copies the preparation (CT-47).
+          const copy = yield* copySection(mission.id, 'preparation').pipe(Effect.provide(context))
+          if (copy.section !== 'preparation') return null
+          const acting = changed.flatMap((one) => {
+            const entry = copy.repositories.find(
+              (repository) => repository.repositoryId === one.repositoryId,
+            )
+            return entry === undefined || !delivers(entry.steps) ? [] : [{ ...one, entry }]
+          })
+          return { copy, acting }
+        })
+
+      /** A repository's row, written for this round: running, or waiting for the user's click. */
+      const startIn = (
+        transaction: EngineTransaction,
+        mission: Mission,
+        one: { readonly place: Place; readonly repositoryId: string },
+        needId: string | null,
+        waits: boolean,
+      ) => {
+        const set = {
+          round: mission.round,
+          state: waits ? 'waiting' : 'running',
+          step: null,
+          message: null,
+          needId: waits ? needId : null,
+          checkpointId: null,
+          tree: null,
+          sensitive: null,
+          sensitiveAnswer: null,
+          updatedAt: now(),
+        } satisfies Partial<Row>
+        return transaction
+          .insert(deliveryPushes)
+          .values({
+            missionId: mission.id,
+            repositoryId: one.repositoryId,
+            repository: one.place.name,
+            ...set,
+          })
+          .onConflictDoUpdate({
+            target: [deliveryPushes.missionId, deliveryPushes.repositoryId],
+            set,
+          })
+          .pipe(Effect.mapError(refusedWhile('writing a push')), Effect.asVoid)
+      }
+
+      /**
        * The mission entered Review (or came back to it): each repository with changes whose stack
        * pushes or opens a pull request runs it, at once or once the user clicks. Considered once
        * per round, read again in the transaction that writes it.
@@ -1744,31 +1898,9 @@ export const pushesLayer = (settings: PushesSettings) => {
         Effect.gen(function* () {
           const mission = yield* getMission(missionId).pipe(Effect.provide(context))
           if (mission.stage !== 'review') return
-          const places = yield* diffs.places(missionId)
-          if (places === null) return
-          const project = yield* getProject(mission.projectId).pipe(Effect.provide(context))
-          const known = yield* rowsOf(missionId)
-          const changed: Array<{ place: Place; repositoryId: string }> = []
-          for (const place of places) {
-            const repository = project.repositories.find((one) => one.path === place.name)
-            if (repository === undefined) continue
-            const row = known.find((one) => one.repositoryId === repository.id)
-            if (row !== undefined && row.round === mission.round) continue
-            if (yield* changedSince(place, row?.commit ?? null)) {
-              changed.push({ place, repositoryId: repository.id })
-            }
-          }
-          if (changed.length === 0) return
-          // The first time the step acts, the mission copies the preparation (CT-47).
-          const copy = yield* copySection(missionId, 'preparation').pipe(Effect.provide(context))
-          if (copy.section !== 'preparation') return
-          const acting = changed.flatMap((one) => {
-            const entry = copy.repositories.find(
-              (repository) => repository.repositoryId === one.repositoryId,
-            )
-            return entry === undefined || !delivers(entry.steps) ? [] : [{ ...one, entry }]
-          })
-          if (acting.length === 0) return
+          const found = yield* actingOf(mission, true)
+          if (found === null || found.acting.length === 0) return
+          const { copy, acting } = found
           const clicked = acting.filter((one) =>
             one.entry.steps.some((step) => step.mode === 'click'),
           )
@@ -1820,32 +1952,7 @@ export const pushesLayer = (settings: PushesSettings) => {
                 const made =
                   write === null || freshClicked.length === 0 ? null : yield* write(transaction)
                 for (const one of fresh) {
-                  const waits = clicked.includes(one)
-                  const set = {
-                    round: mission.round,
-                    state: waits ? 'waiting' : 'running',
-                    step: null,
-                    message: null,
-                    needId: waits ? (made?.id ?? null) : null,
-                    checkpointId: null,
-                    tree: null,
-                    sensitive: null,
-                    sensitiveAnswer: null,
-                    updatedAt: now(),
-                  } satisfies Partial<Row>
-                  yield* transaction
-                    .insert(deliveryPushes)
-                    .values({
-                      missionId,
-                      repositoryId: one.repositoryId,
-                      repository: one.place.name,
-                      ...set,
-                    })
-                    .onConflictDoUpdate({
-                      target: [deliveryPushes.missionId, deliveryPushes.repositoryId],
-                      set,
-                    })
-                    .pipe(Effect.mapError(refusedWhile('writing a push')))
+                  yield* startIn(transaction, mission, one, made?.id ?? null, clicked.includes(one))
                 }
                 return {
                   result: fresh
@@ -1863,6 +1970,64 @@ export const pushesLayer = (settings: PushesSettings) => {
             said(`the pushes of ${missionId} were not considered: ${String(cause)}`),
           ),
         )
+
+      /**
+       * Ship's push (R9): what changed since its last push, whatever the round, handed in Ship's
+       * freeze and pushed once it is committed. Ship is the user's click: nothing is asked again.
+       */
+      /** Ends once the repository's forge CLI is not ready, or cannot be read. */
+      const cliWaits = (projectId: string, repositoryId: string) =>
+        provided(
+          Effect.gen(function* () {
+            const port = yield* ForgePort
+            yield* port.changes(projectId).pipe(
+              Stream.filter((states) =>
+                states.some(
+                  (one) =>
+                    one.repositoryId === repositoryId &&
+                    one.state !== 'ready' &&
+                    one.state !== 'not-needed',
+                ),
+              ),
+              Stream.take(1),
+              Stream.runDrain,
+            )
+          }),
+        ).pipe(Effect.ignore)
+
+      const atShip = (missionId: string) =>
+        Effect.gen(function* () {
+          const mission = yield* getMission(missionId).pipe(Effect.provide(context))
+          const found = yield* actingOf(mission, false).pipe(
+            Effect.catchTag('UnknownProject', Effect.die),
+          )
+          const acting = found?.acting ?? []
+          return {
+            handIn: (transaction) =>
+              Effect.forEach(acting, (one) => startIn(transaction, mission, one, null, false), {
+                discard: true,
+              }),
+            push: Effect.forEach(
+              acting,
+              (one) =>
+                Effect.gen(function* () {
+                  const atForge = yield* Deferred.make<void>()
+                  // Forked in the pushes' own scope: a Ship that returns or is cut leaves it running.
+                  const fiber = yield* drive(missionId, one.repositoryId, atForge).pipe(
+                    Effect.forkIn(scope),
+                  )
+                  // Ended, stopped or waiting on a need; or at the forge, which waits for its CLI.
+                  yield* Effect.raceFirst(
+                    Fiber.join(fiber),
+                    Deferred.await(atForge).pipe(
+                      Effect.andThen(cliWaits(mission.projectId, one.repositoryId)),
+                    ),
+                  )
+                }),
+              { concurrency: 'unbounded', discard: true },
+            ),
+          } satisfies ShipPush
+        })
 
       /** The click's question: the repositories, and with the drafts reviewed, what each opens. */
       const questionOf = (
@@ -1983,6 +2148,11 @@ export const pushesLayer = (settings: PushesSettings) => {
        */
       const leaveReview = (missionId: string) =>
         Effect.gen(function* () {
+          // Shipped: Ship's guard left no need of the pushes pending, and those of its push are
+          // the user's in Shipping.
+          if ((yield* getMission(missionId).pipe(Effect.provide(context))).stage === 'shipping') {
+            return
+          }
           const held = (yield* rowsOf(missionId)).filter(
             (row) => row.needId !== null || row.imagesNeedId !== null,
           )
@@ -2072,6 +2242,7 @@ export const pushesLayer = (settings: PushesSettings) => {
           )
           .pipe(Effect.mapError(refusedWhile('reading the pushes')))
         for (const one of holding) yield* leaveReview(one.missionId)
+        yield* hold('caught-up', '')
       })
 
       // --- what the window reads -------------------------------------------------------------------
@@ -2211,6 +2382,7 @@ export const pushesLayer = (settings: PushesSettings) => {
               )
             }),
           ),
+        atShip,
         retry: (missionId, repository) =>
           Effect.gen(function* () {
             yield* getMission(missionId).pipe(Effect.provide(context))
