@@ -37,6 +37,8 @@ import {
   type ProofsView,
   type ScenarioProofView,
   type ShipPreview,
+  type ShipProgress,
+  type Shipped,
   type AutomaticBackups,
   type BootstrapRun,
   type BaseBranchEdit,
@@ -809,6 +811,14 @@ export interface Link {
     scenarioId: string,
     note: string,
   ) => Promise<ScenarioProofView>
+  /** Ship, on the preview the user saw: refused with every reason when it moved since. */
+  readonly confirmShip: (missionId: string, previewId: string) => Promise<Shipped>
+  /** Where a Ship stands now, then after each change. */
+  readonly onShipProgress: (
+    missionId: string,
+    listener: (progress: ShipProgress) => void,
+    onEnd: (error: Error) => void,
+  ) => () => void
   /** The mission's pushes and pull requests now, then after each change. */
   readonly onPushes: (
     missionId: string,
@@ -1334,6 +1344,10 @@ export function linkOver(port: Port): Link {
     refuseManualProof: (missionId, scenarioId, note) =>
       call((ready) => ready['proofs.refuseManual']({ missionId, scenarioId, note })),
     shipPreview: (missionId) => call((ready) => ready['ship.preview']({ missionId })),
+    confirmShip: (missionId, previewId) =>
+      call((ready) => ready['ship.confirm']({ missionId, previewId })),
+    onShipProgress: (missionId, listener, onEnd) =>
+      follow((ready) => ready['ship.progress']({ missionId }), listener, anError, onEnd),
     onPushes: (missionId, listener, onEnd) =>
       follow((ready) => ready['delivery.changes']({ missionId }), listener, anError, onEnd),
     retryPush: (missionId, repository) =>

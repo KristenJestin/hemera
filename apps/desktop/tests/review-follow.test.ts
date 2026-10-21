@@ -8,6 +8,8 @@ import {
   FeedbackRefused,
   ImageRefused,
   ProofRefused,
+  ShipRefused,
+  type ShipProgress,
   type BuildingView,
   type MissionPushes,
   type ProofsView,
@@ -28,6 +30,7 @@ import {
   reviewState,
   roundDetail,
   shipPreview,
+  shipProgress,
   teamComment,
 } from './review-fixtures.ts'
 
@@ -431,5 +434,69 @@ describe('The pull requests and the team’s comments', () => {
     await following.team('C1', 'round', 'One per user.')
     await following.team('C1', 'dismiss', '')
     expect(sent).toEqual(['take tc-1 One per user.', 'round tc-1', 'dismiss tc-1'])
+  })
+})
+
+describe('Ship', () => {
+  test('its progress keeps live on its stream: the re-runs, then the end', async () => {
+    const listeners: Array<(heard: ShipProgress) => void> = []
+    const played = linkOf({
+      onShipProgress: (_missionId, listener) => {
+        listeners.push(listener)
+        return () => undefined
+      },
+    })
+    const { last } = review(played.link)
+    await settled()
+    for (const listener of listeners) {
+      listener(
+        shipProgress({
+          step: 'rerunning',
+          reruns: [{ kind: 'proof', name: 'S8', state: 'running' }],
+        }),
+      )
+    }
+    expect(last()?.shippable).toBe(false)
+    expect(last()?.moment?.shipping?.reruns.map((one) => one.state)).toEqual(['running'])
+  })
+
+  test('the confirmation is read fresh as it opens, and Ship confirms the preview the user saw', async () => {
+    const confirmed: string[] = []
+    let previews = 0
+    const played = linkOf({
+      shipPreview: () => {
+        previews += 1
+        return Promise.resolve(
+          shipPreview({ previewId: `preview-${String(previews)}`, possible: true, reasons: [] }),
+        )
+      },
+      confirmShip: (missionId, previewId) => {
+        confirmed.push(`${missionId} ${previewId}`)
+        return Promise.resolve({
+          missionId,
+          shippedAt: at(11, 0),
+          trees: [],
+          deliveredAt: null,
+        })
+      },
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    expect(last()?.shippable).toBe(true)
+    await following.previewShip()
+    await expect(following.ship()).resolves.toBe(true)
+    expect(confirmed).toEqual([`m12 preview-${String(previews)}`])
+  })
+
+  test('Ship refused: nothing goes, and the engine’s reasons are said', async () => {
+    const played = linkOf({
+      confirmShip: () =>
+        Promise.reject(new ShipRefused({ reasons: ['web · unit tests is red after the re-run.'] })),
+    })
+    const { following, last } = review(played.link)
+    await settled()
+    expect(last()?.shippable).toBe(false)
+    await expect(following.ship()).resolves.toBe(false)
+    expect(last()?.refused).toBe('web · unit tests is red after the re-run.')
   })
 })

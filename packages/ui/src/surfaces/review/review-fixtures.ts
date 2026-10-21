@@ -987,6 +987,7 @@ export const FULL_PREVIEW: ShipPreview = {
       before: 'squash',
       now: 'rebase',
     },
+    { what: 'api’s reviewers' },
   ],
   ci: edit(
     PREVIEW.ci,

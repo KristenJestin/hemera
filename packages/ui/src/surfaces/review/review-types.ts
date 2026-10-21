@@ -221,8 +221,11 @@ export interface ShipPreview {
   redo: readonly string[]
   /** The proofs verified by hand that the user has not validated. */
   unvalidated: readonly { id: string; title: string }[]
-  /** The rules of the Project that changed since the mission copied them. */
-  rules: readonly { what: string; before: string; now: string }[]
+  /**
+   * The rules of the Project that changed since the mission copied them; with what each said then
+   * and says now, when that is known.
+   */
+  rules: readonly { what: string; before?: string | undefined; now?: string | undefined }[]
   /** The CI of each open pull request. */
   ci: readonly { repository: string; number: number; state: MarkState; words: string }[]
   /** The Local preset: no forge, Ship is a dated "delivered". */

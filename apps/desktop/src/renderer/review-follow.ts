@@ -38,6 +38,8 @@ export interface ReviewFollowView {
   readonly moment: Review.ReviewMoment | null
   /** What the fields offer after `@`: the Project's missions and commands. */
   readonly mentionables: ReadonlyArray<Mentionable>
+  /** Whether Ship is the head's action now: the engine says it may, and no Ship runs. */
+  readonly shippable: boolean
   /** Why the page could not be read, in words. */
   readonly error?: string | undefined
   /** Why the last gesture did not go through, in words. */
@@ -74,6 +76,10 @@ export interface ReviewFollowing {
   readonly pull: (repository: string, action: 'retry' | 'check') => Promise<void>
   /** A comment of the team added to the round or dismissed, with the user's take when given. */
   readonly team: (label: string, action: 'round' | 'dismiss', take: string) => Promise<void>
+  /** Reads Ship's preview fresh, as its confirmation opens. */
+  readonly previewShip: () => Promise<void>
+  /** Ship, on the preview the user saw; false when the engine refused it, its reasons said. */
+  readonly ship: () => Promise<boolean>
   /** Reads again, after a failure. */
   readonly retry: () => void
   readonly stop: () => void
@@ -104,7 +110,7 @@ export function followReview(
   let team: ReadonlyArray<TeamCommentView> = []
   let forges: ReadonlyArray<ForgeRepositoryStatus> = []
   let preview: ShipPreview | null = null
-  const progress: ShipProgress | null = null
+  let progress: ShipProgress | null = null
   let error: string | undefined
   let refused: string | undefined
   let unsubscribe: Array<() => void> = []
@@ -138,6 +144,9 @@ export function followReview(
               clock(),
             ),
       mentionables: mentionablesOf(missions, catalogue),
+      shippable:
+        preview?.possible === true &&
+        (progress === null || progress.step === 'idle' || progress.step === 'stopped'),
       error,
       refused,
     })
@@ -216,6 +225,15 @@ export function followReview(
   const start = (): void => {
     unsubscribe = [
       link.onReviewChanges(missionId, () => void readReview(), failed),
+      // A Ship's progress comes with where it stands, then each change.
+      link.onShipProgress(
+        missionId,
+        (heard) => {
+          progress = heard
+          emit()
+        },
+        () => undefined,
+      ),
       // The pushes come with their first state, then each change.
       link.onPushes(
         missionId,
@@ -369,6 +387,20 @@ export function followReview(
           refused = failure.message
           emit()
           return null
+        },
+      )
+    },
+    previewShip: readPreview,
+    ship: () => {
+      if (preview === null) return Promise.resolve(false)
+      refused = undefined
+      return link.confirmShip(missionId, preview.previewId).then(
+        () => true,
+        (failure: Error) => {
+          refused = failure.message
+          emit()
+          void readPreview()
+          return false
         },
       )
     },

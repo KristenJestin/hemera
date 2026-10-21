@@ -4,7 +4,7 @@ import type { Link } from './link.ts'
 import { followReview, type ReviewFollowView, type ReviewFollowing } from './review-follow.ts'
 import { followedOf, useFollower } from './use-building.ts'
 
-const LOADING_REVIEW: ReviewFollowView = { moment: null, mentionables: [] }
+const LOADING_REVIEW: ReviewFollowView = { moment: null, mentionables: [], shippable: false }
 
 /** A mission's Review page, and what the window does with it. */
 export function useReview(
@@ -40,6 +40,8 @@ export function useReview(
       dismissProposed: (proposalId) => sent((following) => following.dismissProposed(proposalId)),
       pull: (repository, action) => sent((following) => following.pull(repository, action)),
       team: (label, action, take) => sent((following) => following.team(label, action, take)),
+      previewShip: () => sent((following) => following.previewShip()),
+      ship: () => current()?.ship() ?? Promise.resolve(false),
       retry: () => current()?.retry(),
     },
   ]

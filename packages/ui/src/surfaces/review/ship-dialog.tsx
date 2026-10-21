@@ -144,7 +144,9 @@ export function ShipDialog({
             <ul className="flex flex-col gap-0.5">
               {preview.rules.map((rule) => (
                 <li key={rule.what} className="text-sm">
-                  {`${rule.what}: ${rule.before} when the mission started, ${rule.now} now. This delivery keeps ${rule.before}.`}
+                  {rule.before === undefined || rule.now === undefined
+                    ? `${rule.what} changed in the Project since this mission copied them. This delivery keeps the mission’s copy.`
+                    : `${rule.what}: ${rule.before} when the mission started, ${rule.now} now. This delivery keeps ${rule.before}.`}
                 </li>
               ))}
             </ul>

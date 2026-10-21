@@ -512,6 +512,106 @@ function teamOf(team: ReadonlyArray<TeamCommentView>): Review.TeamComment[] {
   }))
 }
 
+// --- Ship -------------------------------------------------------------------------------------
+
+type DifferenceRead = NonNullable<ShipPreview['preparationChange']>['differences'][number]
+
+const FIELD_WORDS = {
+  reviewDrafts: 'review drafts',
+  repository: 'pull request settings',
+  commitTemplate: 'commit template',
+  pullRequestTitle: 'pull request title',
+  pullRequestBody: 'pull request description',
+  reviewers: 'reviewers',
+  requireApproval: 'required approval',
+  steps: 'delivery steps',
+} as const satisfies Record<DifferenceRead['field'], string>
+
+const CI_WORDS = { passing: 'passing', failing: 'failing', pending: 'running', none: 'no CI' }
+
+/** A repository's name as the page says it, from the Project's forges or the pushes. */
+const repositoryNameOf = (read: ReviewRead, id: string): string =>
+  read.forges.find((one) => one.repositoryId === id)?.path ??
+  read.pushes?.repositories.find((one) => one.repositoryId === id)?.repository ??
+  id
+
+/** The base a Local delivery merges into: the diff's base branch, without its remote. */
+const baseOf = (read: ReviewRead, repository: string): string =>
+  (
+    read.diff?.repositories.find((one) => one.repository === repository)?.baseBranch ?? 'main'
+  ).replace(/^origin\//, '')
+
+/** What Ship's confirmation lists, as the engine's preview says it. */
+function previewOf(read: ReviewRead): Review.ShipPreview {
+  const preview = read.preview
+  if (preview === null) return NO_PREVIEW
+  const shown: Review.ShipPreview = {
+    leaving: preview.repositories.map((one) => ({
+      repository: one.repository,
+      branch: one.branch ?? 'detached',
+      summary: plural(one.files.length, 'file', 'files'),
+    })),
+    outside: preview.repositories.flatMap((one) =>
+      one.files
+        .filter((file) => file.changedOutside)
+        .map((file) => ({ repository: one.repository, path: `${one.repository}/${file.path}` })),
+    ),
+    redo: preview.repositories.flatMap((one) => [...one.toRedo.proofs, ...one.toRedo.checks]),
+    unvalidated: preview.manualProofs.map((one) => ({
+      id: one.scenario,
+      title: scenarioOf(read.spec, one.scenario)?.then ?? one.scenario,
+    })),
+    rules: (preview.preparationChange?.differences ?? []).map((one) => ({
+      what:
+        one.repositoryId === null
+          ? `The ${FIELD_WORDS[one.field]}`
+          : `${repositoryNameOf(read, one.repositoryId)}’s ${FIELD_WORDS[one.field]}`,
+    })),
+    ci: preview.repositories.flatMap((one) => {
+      const ci = one.pullRequest?.ci ?? null
+      if (one.pullRequest === null || ci === null) return []
+      return [
+        {
+          repository: one.repository,
+          number: one.pullRequest.number,
+          state: CI_MARKS[ci] ?? 'skipped',
+          words: CI_WORDS[ci],
+        },
+      ]
+    }),
+  }
+  if (preview.delivered === null) return shown
+  return {
+    ...shown,
+    local: {
+      merges: preview.repositories.map((one) => ({
+        repository: one.repository,
+        into: baseOf(read, one.repository),
+      })),
+    },
+  }
+}
+
+const RERUN_MARKS = {
+  waiting: 'todo',
+  running: 'running',
+  green: 'done',
+  red: 'failed',
+} as const satisfies Record<ShipProgress['reruns'][number]['state'], MarkState>
+
+/** A Ship under way: what it re-runs before the push, and the red that stopped it. */
+function shippingOf(progress: ShipProgress | null): Review.Shipping | undefined {
+  if (progress === null || progress.step === 'idle' || progress.step === 'shipped') return undefined
+  return {
+    reruns: progress.reruns.map((one) => ({
+      id: `${one.kind} ${one.name}`,
+      what: one.name,
+      state: RERUN_MARKS[one.state],
+    })),
+    stopped: progress.step === 'stopped' ? (progress.message ?? 'Ship stopped') : undefined,
+  }
+}
+
 // --- The page --------------------------------------------------------------------------------
 
 const causeOf = Match.type<BlockedCause>().pipe(
@@ -535,6 +635,9 @@ const ballOf = Match.type<Ball>().pipe(
 )
 
 function faceOf(read: ReviewRead, refusals: readonly string[]): Review.ReviewMoment['face'] {
+  const step = read.progress?.step ?? 'idle'
+  if (step === 'stopped') return 'error'
+  if (step !== 'idle' && step !== 'shipped') return 'checking'
   const waiting = read.now?.waiting ?? []
   if (waiting.some((one) => one.kind === 'permission')) return 'permission'
   if (waiting.length > 0) return 'question'
@@ -606,6 +709,7 @@ export function reviewMomentOf(read: ReviewRead, now: Date): Review.ReviewMoment
     noDocChange: noDocChangeOf(read.building),
     changes: changesOf(read.diff),
     refusals,
-    preview: NO_PREVIEW,
+    preview: previewOf(read),
+    shipping: shippingOf(read.progress),
   }
 }

@@ -259,5 +259,7 @@ export const SILENT_LINK: Link = {
   validateManualProof: never,
   refuseManualProof: never,
   shipPreview: never,
+  confirmShip: never,
+  onShipProgress: silent,
   close: () => undefined,
 }

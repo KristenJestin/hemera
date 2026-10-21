@@ -30,6 +30,7 @@ import {
   reviewState,
   roundDetail,
   shipPreview,
+  shipProgress,
   teamComment,
 } from './review-fixtures.ts'
 
@@ -749,6 +750,112 @@ describe('The team’s comments', () => {
         at: '10:50',
       },
     ])
+  })
+})
+
+describe('Ship', () => {
+  test('its confirmation lists what the engine’s preview says: what leaves, outside, to redo, by hand, rules, CI', () => {
+    const moment = reviewMomentOf(
+      read({
+        pushes: pushes({ repositories: [repositoryPush()] }),
+        preview: shipPreview({
+          possible: true,
+          reasons: [],
+          repositories: [
+            {
+              repository: 'api',
+              branch: 'feat/acme-12',
+              files: [
+                { path: 'src/export.ts', letter: 'M', changedOutside: false },
+                { path: 'src/format.ts', letter: 'M', changedOutside: true },
+              ],
+              toRedo: { proofs: ['S8'], checks: ['unit tests · api'] },
+              pullRequest: {
+                number: 412,
+                url: 'https://github.com/acme/api/pull/412',
+                ci: 'passing',
+              },
+            },
+          ],
+          manualProofs: [{ scenario: 'S2', state: 'to_verify' }],
+          preparationChange: {
+            copiedVersion: 1,
+            currentVersion: 2,
+            differences: [{ repositoryId: 'repo-api', field: 'reviewers' }],
+          },
+        }),
+      }),
+      NOW,
+    )
+    expect(moment.preview).toEqual({
+      leaving: [{ repository: 'api', branch: 'feat/acme-12', summary: '2 files' }],
+      outside: [{ repository: 'api', path: 'api/src/format.ts' }],
+      redo: ['S8', 'unit tests · api'],
+      unvalidated: [{ id: 'S2', title: 'The accents read as written' }],
+      rules: [{ what: 'api’s reviewers' }],
+      ci: [{ repository: 'api', number: 412, state: 'done', words: 'passing' }],
+    })
+  })
+
+  test('with the Local preset, the confirmation says the merge into each base, nothing pushed', () => {
+    const moment = reviewMomentOf(
+      read({
+        preview: shipPreview({
+          possible: true,
+          reasons: [],
+          delivered: { at: at(11, 0) },
+          repositories: [
+            {
+              repository: 'api',
+              branch: 'feat/acme-12',
+              files: [],
+              toRedo: { proofs: [], checks: [] },
+              pullRequest: null,
+            },
+          ],
+        }),
+        diff: diff({ repositories: [diffRepository('api', [])] }),
+      }),
+      NOW,
+    )
+    expect(moment.forge).toBeNull()
+    expect(moment.preview.local).toEqual({ merges: [{ repository: 'api', into: 'main' }] })
+  })
+
+  test('the Ship progress: what it re-runs, then the red that stopped it, said', () => {
+    const running = reviewMomentOf(
+      read({
+        progress: shipProgress({
+          step: 'rerunning',
+          reruns: [
+            { kind: 'proof', name: 'S8', state: 'green' },
+            { kind: 'check', name: 'unit tests · web', state: 'running' },
+            { kind: 'check', name: 'typecheck · web', state: 'waiting' },
+          ],
+        }),
+      }),
+      NOW,
+    )
+    expect(running.shipping).toEqual({
+      reruns: [
+        { id: 'proof S8', what: 'S8', state: 'done' },
+        { id: 'check unit tests · web', what: 'unit tests · web', state: 'running' },
+        { id: 'check typecheck · web', what: 'typecheck · web', state: 'todo' },
+      ],
+    })
+    expect(running.face).toBe('checking')
+    const stopped = reviewMomentOf(
+      read({
+        progress: shipProgress({
+          step: 'stopped',
+          reruns: [{ kind: 'check', name: 'unit tests · web', state: 'red' }],
+          message: 'unit tests · web is red after the re-run',
+        }),
+      }),
+      NOW,
+    )
+    expect(stopped.shipping?.stopped).toBe('unit tests · web is red after the re-run')
+    expect(reviewMomentOf(read({ progress: shipProgress() }), NOW).shipping).toBeUndefined()
   })
 })
 

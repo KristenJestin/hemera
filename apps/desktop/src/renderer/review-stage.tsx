@@ -1,14 +1,16 @@
 import {
+  Button,
   ErrorState,
   ReviewPage,
   RoundView,
+  ShipDialog,
   type FeedbackHandlers,
   type MissionView,
   type RailHandlers,
   type Review,
 } from '@hemera/ui'
 import { IconMessages } from '@hemera/ui/icons'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import type { StagePageProps } from './stage-pages.tsx'
 import { useReview } from './use-review.ts'
@@ -65,6 +67,7 @@ export function ReviewStage({
   frame,
 }: StagePageProps): ReactNode {
   const [view, act] = useReview(link, engineReady, mission)
+  const [shipping, setShipping] = useState(false)
   const { moment } = view
   const rail: RailHandlers = {
     onService: (name, action) => void act.service(name, action),
@@ -133,5 +136,45 @@ export function ReviewStage({
       />
     ),
   }))
-  return frame({ base, views, ballFace: false, notice: view.refused })
+  const local = moment?.forge === null
+  const refusals = moment?.refusals ?? []
+  const shown = moment ?? READING
+  return frame({
+    base: (
+      <>
+        {base}
+        <ShipDialog
+          missionKey={mission.key}
+          preview={shown.preview}
+          open={shipping}
+          onOpenChange={setShipping}
+          onConfirm={() => {
+            setShipping(false)
+            void act.ship()
+          }}
+        />
+      </>
+    ),
+    views,
+    ballFace: false,
+    // Ship is there when the engine says it may be pressed; otherwise the line says its reasons.
+    action: view.shippable ? (
+      <Button
+        variant="primary"
+        onClick={() => {
+          setShipping(true)
+          void act.previewShip()
+        }}
+      >
+        {local ? 'Mark as delivered' : 'Ship'}
+      </Button>
+    ) : undefined,
+    actionNote:
+      !view.shippable && refusals.length > 0 ? (
+        <p className="max-w-view-narrow text-right text-xs break-words text-muted-foreground">
+          {`${local ? 'Delivery' : 'Ship'} waits: ${refusals.join(' · ')}`}
+        </p>
+      ) : undefined,
+    notice: view.refused,
+  })
 }

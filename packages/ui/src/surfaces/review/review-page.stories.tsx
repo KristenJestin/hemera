@@ -472,6 +472,11 @@ export const ShipConfirmationInFull: Story = {
     await expect(hand.getByText(/S13/)).toBeVisible()
     const rules = within(dialog.getByRole('region', { name: 'Rules changed since this mission' }))
     await expect(rules.getByText(/squash/)).toBeVisible()
+    await expect(
+      rules.getByText(
+        'api’s reviewers changed in the Project since this mission copied them. This delivery keeps the mission’s copy.',
+      ),
+    ).toBeVisible()
     const ci = within(dialog.getByRole('region', { name: 'Pull requests’ CI' }))
     await expect(ci.getByRole('img', { name: 'Running' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Ship now' })).toBeEnabled()
